@@ -71,6 +71,7 @@ import com.nuvio.app.features.mdblist.MdbListSettings
 import com.nuvio.app.features.mdblist.MdbListSettingsRepository
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsRepository
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsUiState
+import com.nuvio.app.features.player.StreamCacheSize
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.player.AndroidLibmpvVideoOutput
 import com.nuvio.app.features.player.AndroidPlaybackEngine
@@ -292,6 +293,8 @@ fun SettingsScreen(
                 androidLibmpvHardwareDecodingEnabled = playerSettingsUiState.androidLibmpvHardwareDecodingEnabled,
                 androidLibmpvYuv420pEnabled = playerSettingsUiState.androidLibmpvYuv420pEnabled,
                 decoderPriority = playerSettingsUiState.decoderPriority,
+                streamCacheSize = playerSettingsUiState.streamCacheSize,
+                streamCacheOnDisk = playerSettingsUiState.streamCacheOnDisk,
                 mapDV7ToHevc = playerSettingsUiState.mapDV7ToHevc,
                 tunnelingEnabled = playerSettingsUiState.tunnelingEnabled,
                 useLibass = playerSettingsUiState.useLibass,
@@ -350,6 +353,8 @@ fun SettingsScreen(
                 androidLibmpvHardwareDecodingEnabled = playerSettingsUiState.androidLibmpvHardwareDecodingEnabled,
                 androidLibmpvYuv420pEnabled = playerSettingsUiState.androidLibmpvYuv420pEnabled,
                 decoderPriority = playerSettingsUiState.decoderPriority,
+                streamCacheSize = playerSettingsUiState.streamCacheSize,
+                streamCacheOnDisk = playerSettingsUiState.streamCacheOnDisk,
                 mapDV7ToHevc = playerSettingsUiState.mapDV7ToHevc,
                 tunnelingEnabled = playerSettingsUiState.tunnelingEnabled,
                 useLibass = playerSettingsUiState.useLibass,
@@ -418,6 +423,8 @@ private fun MobileSettingsScreen(
     androidLibmpvHardwareDecodingEnabled: Boolean,
     androidLibmpvYuv420pEnabled: Boolean,
     decoderPriority: Int,
+    streamCacheSize: StreamCacheSize,
+    streamCacheOnDisk: Boolean,
     mapDV7ToHevc: Boolean,
     tunnelingEnabled: Boolean,
     useLibass: Boolean,
@@ -615,6 +622,8 @@ private fun MobileSettingsScreen(
                     androidLibmpvHardwareDecodingEnabled = androidLibmpvHardwareDecodingEnabled,
                     androidLibmpvYuv420pEnabled = androidLibmpvYuv420pEnabled,
                     decoderPriority = decoderPriority,
+                    streamCacheSize = streamCacheSize,
+                    streamCacheOnDisk = streamCacheOnDisk,
                     mapDV7ToHevc = mapDV7ToHevc,
                     tunnelingEnabled = tunnelingEnabled,
                     useLibass = useLibass,
@@ -779,6 +788,8 @@ private fun TabletSettingsScreen(
     androidLibmpvHardwareDecodingEnabled: Boolean,
     androidLibmpvYuv420pEnabled: Boolean,
     decoderPriority: Int,
+    streamCacheSize: StreamCacheSize,
+    streamCacheOnDisk: Boolean,
     mapDV7ToHevc: Boolean,
     tunnelingEnabled: Boolean,
     useLibass: Boolean,
@@ -1035,6 +1046,8 @@ private fun TabletSettingsScreen(
                             androidLibmpvHardwareDecodingEnabled = androidLibmpvHardwareDecodingEnabled,
                             androidLibmpvYuv420pEnabled = androidLibmpvYuv420pEnabled,
                             decoderPriority = decoderPriority,
+                            streamCacheSize = streamCacheSize,
+                            streamCacheOnDisk = streamCacheOnDisk,
                             mapDV7ToHevc = mapDV7ToHevc,
                             tunnelingEnabled = tunnelingEnabled,
                             useLibass = useLibass,

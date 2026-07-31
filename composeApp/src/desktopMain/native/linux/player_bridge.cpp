@@ -34,6 +34,8 @@ static int g_debug = -1; /* -1 = uninitialized */
 #include <functional>
 #include <chrono>
 #include <sys/types.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* ------------------------------------------------------------------ */
 /*  mpv function pointer typedefs                                      */
@@ -172,6 +174,7 @@ enum {
     MPV_RENDER_PARAM_OPENGL_INIT_PARAMS = 2,
     MPV_RENDER_PARAM_OPENGL_FBO = 3,
     MPV_RENDER_PARAM_FLIP_Y     = 4,
+    MPV_RENDER_PARAM_DRM_DISPLAY_V2 = 16,
     MPV_RENDER_PARAM_SW_SIZE    = 17,
     MPV_RENDER_PARAM_SW_FORMAT  = 18,
     MPV_RENDER_PARAM_SW_STRIDE  = 19,
@@ -199,6 +202,16 @@ typedef struct mpv_opengl_fbo {
     int h;
     int internal_format;
 } mpv_opengl_fbo;
+
+/* MPV_RENDER_PARAM_DRM_DISPLAY_V2 (mirrors mpv/render_gl.h ABI). render_fd
+ * is the DRM render node used by mpv's vaapi interop (ra_hwdec_vaapi). */
+typedef struct mpv_opengl_drm_params_v2 {
+    int fd;
+    int crtc_id;
+    int connector_id;
+    void **atomic_request_ptr;
+    int render_fd;
+} mpv_opengl_drm_params_v2;
 
 #define MPV_RENDER_API_TYPE_OPENGL "opengl"
 
@@ -725,6 +738,26 @@ static std::string buildTrackListJsonFromNode(const mpv_node *root, const char *
 /*  Player instance                                                    */
 /* ------------------------------------------------------------------ */
 
+/* Opens the first available DRM render node (used for VAAPI zero-copy
+ * interop). Falls back to card nodes; returns -1 if none is accessible. */
+static int openDrmRenderNode() {
+    static const char *paths[] = {
+        "/dev/dri/renderD128",
+        "/dev/dri/renderD129",
+        "/dev/dri/renderD130",
+        "/dev/dri/renderD131",
+        "/dev/dri/card0",
+        "/dev/dri/card1",
+        "/dev/dri/card2",
+        nullptr
+    };
+    for (int i = 0; paths[i]; i++) {
+        int fd = open(paths[i], O_RDWR | O_CLOEXEC);
+        if (fd >= 0) return fd;
+    }
+    return -1;
+}
+
 struct MpvPlayer {
     mpv_handle   *mpv;
     JavaVM       *jvm;
@@ -736,6 +769,10 @@ struct MpvPlayer {
     std::atomic<bool>  framePending;
     GlRenderer    gl;
     bool          useGl = false;
+    /* DRM render node passed via MPV_RENDER_PARAM_DRM_DISPLAY_V2 so mpv's
+     * vaapi interop can build a VA display for zero-copy EGL/dmabuf decode.
+     * Owned here (mpv only copies the struct, not the fd). */
+    int           drmRenderFd = -1;
 
     /* Dedicated render thread: owns the GL context (never switched between
      * threads) and all mpv_render_* calls. Kotlin requests frames via the
@@ -847,9 +884,24 @@ struct MpvPlayer {
             mpv_opengl_init_params initParams;
             initParams.get_proc_address = gl_get_proc_address_cb;
             initParams.get_proc_address_ctx = &gl;
+            /* Expose a DRM render node to mpv so the vaapi hwdec interop can
+             * open a VA display and import decoded surfaces as EGL dma-buf
+             * images (zero-copy decode under vo=libmpv). Without it the
+             * vaapi interop can't init and hwdec falls back to copy modes. */
+            mpv_opengl_drm_params_v2 drmParams = {};
+            drmParams.fd = -1;
+            drmParams.render_fd = -1;
+            drmRenderFd = openDrmRenderNode();
+            if (drmRenderFd >= 0) {
+                drmParams.render_fd = drmRenderFd;
+                DBG("DRM render node fd=%d available for vaapi interop", drmRenderFd);
+            } else {
+                DBG("No DRM render node accessible; vaapi zero-copy interop disabled");
+            }
             mpv_render_param createParams[] = {
                 { MPV_RENDER_PARAM_API_TYPE, (void*)MPV_RENDER_API_TYPE_OPENGL },
                 { MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &initParams },
+                { MPV_RENDER_PARAM_DRM_DISPLAY_V2, &drmParams },
                 { MPV_RENDER_PARAM_INVALID, nullptr }
             };
             int ret = p_mpv_render_context_create(&renderCtx, mpv, createParams);
@@ -960,6 +1012,10 @@ struct MpvPlayer {
             p_mpv_render_context_free(renderCtx);
             renderCtx = nullptr;
         }
+        if (drmRenderFd >= 0) {
+            close(drmRenderFd);
+            drmRenderFd = -1;
+        }
         if (gl.ready) {
             gl_destroy_textures(&gl);
             gl_destroy(&gl);
@@ -977,7 +1033,8 @@ struct MpvPlayer {
     int initialize(JNIEnv *env, int64_t windowId, const char *sourceUrl,
                    const char * const *headers, int numHeaders,
                    int playWhenReady, int64_t initialPositionMs,
-                   int decoderPriority, jobject sink)
+                   int decoderPriority, int64_t streamCacheBytes,
+                   bool streamCacheOnDisk, jobject sink)
     {
         LOG("initialize: url=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
             sourceUrl, numHeaders, playWhenReady,
@@ -1027,14 +1084,29 @@ struct MpvPlayer {
         /* Embedding-critical options: applied AFTER any user config so they
          * always win. A user vo=gpu-next would otherwise make mpv open its
          * own window and render there instead of into our FBO. hwdec is app-
-         * controlled too: direct interop (e.g. vaapi) only works with a
-         * windowed gpu VO, and silently falls back to software decode under
-         * vo=libmpv — auto-copy keeps hardware decode (vulkan-copy on AMD). */
+         * controlled too: zero-copy vaapi (AMD/Intel) and nvdec (NVIDIA) work
+         * with the GL render API because we hand mpv a DRM render node and
+         * the vaapi/cuda interops import decoded surfaces directly into GL
+         * textures; auto-copy (vulkan-copy on AMD) is the safe fallback. */
         p_mpv_set_option_string(mpv, "vo", "libmpv");
         p_mpv_set_option_string(mpv, "force-window", "no");
-        const char *hwdecOpt = decoderPriority >= 2 ? "no" : "auto-copy";
+        const char *hwdecOpt = decoderPriority >= 2 ? "no" : "vaapi,nvdec,auto-copy";
         p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
         DBG("hwdec option = %s", hwdecOpt);
+
+        /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
+         * read-ahead and the network cache) and optional on-disk cache. */
+        if (streamCacheBytes > 0) {
+            char cacheSize[64];
+            snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
+            p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
+            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", cacheSize);
+            DBG("stream cache = %lld bytes, on-disk=%d",
+                (long long)streamCacheBytes, streamCacheOnDisk ? 1 : 0);
+        }
+        if (streamCacheOnDisk) {
+            p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
+        }
 
         /* Apply custom headers if any */
         if (numHeaders > 0) {
@@ -1242,6 +1314,8 @@ JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerB
     jlong initialPositionMs,
     jstring controlsPageUrl,
     jint decoderPriority,
+    jlong streamCacheBytes,
+    jboolean streamCacheOnDisk,
     jboolean nvidiaRtxSuperResolutionEnabled,
     jobject eventSink)
 {
@@ -1276,7 +1350,10 @@ JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerB
                                   urlChars,
                                   headers.data(), (int)headers.size(),
                                   playWhenReady, static_cast<int64_t>(initialPositionMs),
-                                  decoderPriority, eventSink);
+                                  decoderPriority,
+                                  static_cast<int64_t>(streamCacheBytes),
+                                  streamCacheOnDisk ? true : false,
+                                  eventSink);
     LOG("create: player->initialize returned %d", ret);
 
     env->ReleaseStringUTFChars(sourceUrl, urlChars);

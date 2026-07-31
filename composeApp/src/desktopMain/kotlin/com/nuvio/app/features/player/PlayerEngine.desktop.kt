@@ -136,6 +136,8 @@ private fun NativePlayerSurface(
     val latestOnError = rememberUpdatedState(onError)
     val playerSettings by PlayerSettingsRepository.uiState.collectAsState()
     val decoderPriority = playerSettings.decoderPriority
+    val streamCacheSize = playerSettings.streamCacheSize
+    val streamCacheOnDisk = playerSettings.streamCacheOnDisk
     val nvidiaRtxSuperResolutionEnabled = playerSettings.nvidiaRtxSuperResolutionEnabled
 
     LaunchedEffect(controller, sourceUrl, playbackHeaders) {
@@ -160,6 +162,8 @@ private fun NativePlayerSurface(
         sourceUrl,
         playbackHeaders,
         decoderPriority,
+        streamCacheSize,
+        streamCacheOnDisk,
         nvidiaRtxSuperResolutionEnabled,
         initialPositionMs,
         initialPositionRequestKey,
@@ -171,6 +175,8 @@ private fun NativePlayerSurface(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs,
             decoderPriority = decoderPriority,
+            streamCacheBytes = streamCacheSize.bytes,
+            streamCacheOnDisk = streamCacheOnDisk,
             nvidiaRtxSuperResolutionEnabled = nvidiaRtxSuperResolutionEnabled,
             onError = { message -> latestOnError.value(message) },
         )
@@ -251,6 +257,10 @@ private fun ComposeVideoSurface(
         val log = Logger.withTag("ComposeVideoSurface")
         val directBuffers = Array(2) { java.nio.ByteBuffer.allocateDirect(0) }
         val pixelRows = Array(3) { ByteArray(0) }
+        /* Fixed bitmap pool: allocating a fresh skia Bitmap per frame churns
+         * native objects through Cleaners and grows the allocator watermark.
+         * Reuse one bitmap per pixel buffer instead. */
+        val bitmaps = Array(3) { Bitmap() }
         var directIndex = 0
         var rowIndex = 0
         var lastWidth = 0
@@ -278,9 +288,9 @@ private fun ComposeVideoSurface(
             if (!controller.renderFrame(size.width, size.height, buffer)) continue
             buffer.rewind()
             val pixels = pixelRows[rowIndex]
+            val bitmap = bitmaps[rowIndex]
             rowIndex = (rowIndex + 1) % pixelRows.size
             buffer.get(pixels, 0, needed)
-            val bitmap = Bitmap()
             if (bitmap.installPixels(
                     ImageInfo(size.width, size.height, ColorType.RGB_888X, ColorAlphaType.OPAQUE),
                     pixels,

@@ -67,6 +67,10 @@ internal expect object PlayerSettingsStorage {
     fun saveAndroidLibmpvYuv420pEnabled(enabled: Boolean)
     fun loadDecoderPriority(): Int?
     fun saveDecoderPriority(priority: Int)
+    fun loadStreamCacheSize(): String?
+    fun saveStreamCacheSize(size: String)
+    fun loadStreamCacheOnDisk(): Boolean?
+    fun saveStreamCacheOnDisk(enabled: Boolean)
     fun loadMapDV7ToHevc(): Boolean?
     fun saveMapDV7ToHevc(enabled: Boolean)
     fun loadTunnelingEnabled(): Boolean?

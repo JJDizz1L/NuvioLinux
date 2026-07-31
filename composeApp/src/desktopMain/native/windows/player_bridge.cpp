@@ -842,6 +842,8 @@ public:
         const std::string &controlsUrl,
         JavaVM *vm,
         int decoderPriority,
+        long long streamCacheBytes,
+        bool streamCacheOnDisk,
         bool nvidiaRtxSuperResolutionEnabled,
         jobject sink,
         jmethodID method
@@ -858,8 +860,8 @@ public:
         auto initState = std::make_shared<InitializationState>();
         auto self = shared_from_this();
         uiThread = std::thread(
-            [self, sourceUrl, headerLines, playWhenReady, initialPositionMs, controlsUrl, decoderPriority, nvidiaRtxSuperResolutionEnabled, initState]() {
-                self->runNativeUiThread(sourceUrl, headerLines, playWhenReady, initialPositionMs, controlsUrl, decoderPriority, nvidiaRtxSuperResolutionEnabled, initState);
+            [self, sourceUrl, headerLines, playWhenReady, initialPositionMs, controlsUrl, decoderPriority, streamCacheBytes, streamCacheOnDisk, nvidiaRtxSuperResolutionEnabled, initState]() {
+                self->runNativeUiThread(sourceUrl, headerLines, playWhenReady, initialPositionMs, controlsUrl, decoderPriority, streamCacheBytes, streamCacheOnDisk, nvidiaRtxSuperResolutionEnabled, initState);
             }
         );
 
@@ -1217,12 +1219,14 @@ private:
         long long initialPositionMs,
         std::string controlsUrl,
         int decoderPriority,
+        long long streamCacheBytes,
+        bool streamCacheOnDisk,
         bool nvidiaRtxSuperResolutionEnabled,
         std::shared_ptr<InitializationState> initState
     ) {
         std::string failure;
         try {
-            initializeOnNativeUiThread(sourceUrl, headerLines, playWhenReady, initialPositionMs, controlsUrl, decoderPriority, nvidiaRtxSuperResolutionEnabled);
+            initializeOnNativeUiThread(sourceUrl, headerLines, playWhenReady, initialPositionMs, controlsUrl, decoderPriority, streamCacheBytes, streamCacheOnDisk, nvidiaRtxSuperResolutionEnabled);
         } catch (const std::exception &error) {
             failure = error.what();
             cleanupUiResources();
@@ -1253,6 +1257,8 @@ private:
         long long initialPositionMs,
         const std::string &controlsUrl,
         int decoderPriority,
+        long long streamCacheBytes,
+        bool streamCacheOnDisk,
         bool nvidiaRtxSuperResolutionEnabled
     ) {
         registerWindowClasses();
@@ -1305,7 +1311,7 @@ private:
         }
 
         startWebView(controlsUrl);
-        startMpv(sourceUrl, headerLines, playWhenReady, initialPositionMs, decoderPriority, nvidiaRtxSuperResolutionEnabled);
+        startMpv(sourceUrl, headerLines, playWhenReady, initialPositionMs, decoderPriority, streamCacheBytes, streamCacheOnDisk, nvidiaRtxSuperResolutionEnabled);
         layoutNativeSubviews();
         if (!SetTimer(messageHwnd, NUVIO_TIMER_ID, 500, nullptr)) {
             throw std::runtime_error("Unable to start native player timer.");
@@ -1500,6 +1506,8 @@ private:
         bool playWhenReady,
         long long initialPositionMs,
         int decoderPriority,
+        long long streamCacheBytes,
+        bool streamCacheOnDisk,
         bool nvidiaRtxSuperResolutionEnabled
     ) {
         MpvApi &api = mpvApi();
@@ -1545,8 +1553,16 @@ private:
             setMpvOptionStringLocked("deband", "yes");
             setMpvOptionStringLocked("scale", "spline36");
             setMpvOptionStringLocked("cscale", "spline36");
-            setMpvOptionStringLocked("demuxer-max-bytes", "512MiB");
-            setMpvOptionStringLocked("demuxer-max-back-bytes", "256MiB");
+            if (streamCacheBytes > 0) {
+                setMpvOptionStringLocked("demuxer-max-bytes", std::to_string(streamCacheBytes));
+                setMpvOptionStringLocked("demuxer-max-back-bytes", std::to_string(streamCacheBytes));
+            } else {
+                setMpvOptionStringLocked("demuxer-max-bytes", "512MiB");
+                setMpvOptionStringLocked("demuxer-max-back-bytes", "256MiB");
+            }
+            if (streamCacheOnDisk) {
+                setMpvOptionStringLocked("cache-on-disk", "yes");
+            }
             setMpvOptionStringLocked("demuxer-seekable-cache", "yes");
             setMpvOptionStringLocked("cache-secs", "36000");
             setMpvOptionStringLocked("hr-seek", "no");
@@ -2130,6 +2146,8 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_create(
     jlong initialPositionMs,
     jstring controlsPageUrl,
     jint decoderPriority,
+    jlong streamCacheBytes,
+    jboolean streamCacheOnDisk,
     jboolean nvidiaRtxSuperResolutionEnabled,
     jobject eventSink
 ) {
@@ -2165,6 +2183,8 @@ Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_create(
             controlsPageUrlText,
             javaVm,
             decoderPriority,
+            streamCacheBytes,
+            streamCacheOnDisk == JNI_TRUE,
             nvidiaRtxSuperResolutionEnabled == JNI_TRUE,
             eventSinkRef,
             eventMethod

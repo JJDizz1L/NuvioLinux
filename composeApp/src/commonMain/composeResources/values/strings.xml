@@ -921,6 +921,15 @@
     <string name="settings_playback_decoder_prefer_app">Prefer app decoders (FFmpeg)</string>
     <string name="settings_playback_decoder_prefer_device">Prefer device decoders</string>
     <string name="settings_playback_decoder_priority">Decoder Priority</string>
+    <string name="settings_playback_stream_cache_size">Streaming Cache Size</string>
+    <string name="settings_playback_stream_cache_size_description">How much of the stream is buffered in memory before playback.</string>
+    <string name="settings_stream_cache_64mb">64 MB</string>
+    <string name="settings_stream_cache_256mb">256 MB</string>
+    <string name="settings_stream_cache_512mb">512 MB</string>
+    <string name="settings_stream_cache_1gb">1 GB</string>
+    <string name="settings_stream_cache_2gb">2 GB</string>
+    <string name="settings_playback_stream_cache_on_disk">Cache to Disk</string>
+    <string name="settings_playback_stream_cache_on_disk_description">Write the stream cache to a temporary file instead of keeping it in memory.</string>
     <string name="settings_playback_dialog_close">Tap outside to close</string>
     <string name="settings_playback_dialog_save_close">Tap outside to save &amp; close</string>
     <string name="settings_playback_duration_day_one">%1$d day</string>

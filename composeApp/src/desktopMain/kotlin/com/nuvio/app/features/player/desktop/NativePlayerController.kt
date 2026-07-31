@@ -70,6 +70,8 @@ internal class NativePlayerController(
         playWhenReady: Boolean,
         initialPositionMs: Long,
         decoderPriority: Int,
+        streamCacheBytes: Long,
+        streamCacheOnDisk: Boolean,
         nvidiaRtxSuperResolutionEnabled: Boolean,
         onError: (String?) -> Unit,
     ) {
@@ -79,6 +81,8 @@ internal class NativePlayerController(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs.coerceAtLeast(0L),
             decoderPriority = decoderPriority,
+            streamCacheBytes = streamCacheBytes,
+            streamCacheOnDisk = streamCacheOnDisk,
             nvidiaRtxSuperResolutionEnabled = nvidiaRtxSuperResolutionEnabled,
             onError = onError,
         )
@@ -196,6 +200,8 @@ internal class NativePlayerController(
                     initialPositionMs = pending.initialPositionMs,
                     controlsPageUrl = NativePlayerBridge.controlsPageUrl,
                     decoderPriority = pending.decoderPriority,
+                    streamCacheBytes = pending.streamCacheBytes,
+                    streamCacheOnDisk = pending.streamCacheOnDisk,
                     nvidiaRtxSuperResolutionEnabled = pending.nvidiaRtxSuperResolutionEnabled,
                     eventSink = eventSink,
                 ).also { handle ->
@@ -507,6 +513,8 @@ internal class NativePlayerController(
             playWhenReady = pending.playWhenReady,
             initialPositionMs = pending.initialPositionMs,
             decoderPriority = pending.decoderPriority,
+            streamCacheBytes = pending.streamCacheBytes,
+            streamCacheOnDisk = pending.streamCacheOnDisk,
             nvidiaRtxSuperResolutionEnabled = pending.nvidiaRtxSuperResolutionEnabled,
             onError = pending.onError,
         )
@@ -715,6 +723,8 @@ private data class PendingSource(
     val playWhenReady: Boolean,
     val initialPositionMs: Long,
     val decoderPriority: Int,
+    val streamCacheBytes: Long,
+    val streamCacheOnDisk: Boolean,
     val nvidiaRtxSuperResolutionEnabled: Boolean,
     val onError: (String?) -> Unit,
 )

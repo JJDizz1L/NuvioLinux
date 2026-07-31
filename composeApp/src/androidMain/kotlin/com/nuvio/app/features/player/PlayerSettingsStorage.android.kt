@@ -51,6 +51,8 @@ actual object PlayerSettingsStorage {
     private const val androidLibmpvHardwareDecodingEnabledKey = "android_libmpv_hardware_decoding_enabled"
     private const val androidLibmpvYuv420pEnabledKey = "android_libmpv_yuv420p_enabled"
     private const val decoderPriorityKey = "decoder_priority"
+    private const val streamCacheSizeKey = "stream_cache_size"
+    private const val streamCacheOnDiskKey = "stream_cache_on_disk"
     private const val mapDV7ToHevcKey = "map_dv7_to_hevc"
     private const val tunnelingEnabledKey = "tunneling_enabled"
     private const val streamAutoPlayModeKey = "stream_auto_play_mode"
@@ -123,6 +125,8 @@ actual object PlayerSettingsStorage {
         androidLibmpvHardwareDecodingEnabledKey,
         androidLibmpvYuv420pEnabledKey,
         decoderPriorityKey,
+        streamCacheSizeKey,
+        streamCacheOnDiskKey,
         mapDV7ToHevcKey,
         tunnelingEnabledKey,
         streamAutoPlayModeKey,
@@ -646,6 +650,40 @@ actual object PlayerSettingsStorage {
             ?.apply()
     }
 
+    actual fun loadStreamCacheSize(): String? =
+        preferences?.let { sharedPreferences ->
+            val key = ProfileScopedKey.of(streamCacheSizeKey)
+            if (sharedPreferences.contains(key)) {
+                sharedPreferences.getString(key, null)
+            } else {
+                null
+            }
+        }
+
+    actual fun saveStreamCacheSize(size: String) {
+        preferences
+            ?.edit()
+            ?.putString(ProfileScopedKey.of(streamCacheSizeKey), size)
+            ?.apply()
+    }
+
+    actual fun loadStreamCacheOnDisk(): Boolean? =
+        preferences?.let { sharedPreferences ->
+            val key = ProfileScopedKey.of(streamCacheOnDiskKey)
+            if (sharedPreferences.contains(key)) {
+                sharedPreferences.getBoolean(key, false)
+            } else {
+                null
+            }
+        }
+
+    actual fun saveStreamCacheOnDisk(enabled: Boolean) {
+        preferences
+            ?.edit()
+            ?.putBoolean(ProfileScopedKey.of(streamCacheOnDiskKey), enabled)
+            ?.apply()
+    }
+
     actual fun loadMapDV7ToHevc(): Boolean? =
         preferences?.let { sharedPreferences ->
             val key = ProfileScopedKey.of(mapDV7ToHevcKey)
@@ -1128,6 +1166,8 @@ actual object PlayerSettingsStorage {
         }
         loadAndroidLibmpvYuv420pEnabled()?.let { put(androidLibmpvYuv420pEnabledKey, encodeSyncBoolean(it)) }
         loadDecoderPriority()?.let { put(decoderPriorityKey, encodeSyncInt(it)) }
+        loadStreamCacheSize()?.let { put(streamCacheSizeKey, encodeSyncString(it)) }
+        loadStreamCacheOnDisk()?.let { put(streamCacheOnDiskKey, encodeSyncBoolean(it)) }
         loadMapDV7ToHevc()?.let { put(mapDV7ToHevcKey, encodeSyncBoolean(it)) }
         loadTunnelingEnabled()?.let { put(tunnelingEnabledKey, encodeSyncBoolean(it)) }
         loadStreamAutoPlayMode()?.let { put(streamAutoPlayModeKey, encodeSyncString(it)) }
@@ -1203,6 +1243,8 @@ actual object PlayerSettingsStorage {
             ?.let(::saveAndroidLibmpvHardwareDecodingEnabled)
         payload.decodeSyncBoolean(androidLibmpvYuv420pEnabledKey)?.let(::saveAndroidLibmpvYuv420pEnabled)
         payload.decodeSyncInt(decoderPriorityKey)?.let(::saveDecoderPriority)
+        payload.decodeSyncString(streamCacheSizeKey)?.let(::saveStreamCacheSize)
+        payload.decodeSyncBoolean(streamCacheOnDiskKey)?.let(::saveStreamCacheOnDisk)
         payload.decodeSyncBoolean(mapDV7ToHevcKey)?.let(::saveMapDV7ToHevc)
         payload.decodeSyncBoolean(tunnelingEnabledKey)?.let(::saveTunnelingEnabled)
         payload.decodeSyncString(streamAutoPlayModeKey)?.let(::saveStreamAutoPlayMode)

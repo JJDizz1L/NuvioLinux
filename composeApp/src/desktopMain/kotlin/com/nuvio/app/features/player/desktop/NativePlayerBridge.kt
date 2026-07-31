@@ -36,6 +36,8 @@ internal object NativePlayerBridge {
         initialPositionMs: Long,
         controlsPageUrl: String,
         decoderPriority: Int,
+        streamCacheBytes: Long,
+        streamCacheOnDisk: Boolean,
         nvidiaRtxSuperResolutionEnabled: Boolean,
         eventSink: NativePlayerEventSink,
     ): Long

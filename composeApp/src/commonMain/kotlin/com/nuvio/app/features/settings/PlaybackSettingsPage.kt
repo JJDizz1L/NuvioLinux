@@ -66,6 +66,7 @@ import com.nuvio.app.features.player.IosHardwareDecoderMode
 import com.nuvio.app.features.player.localizedLabel
 import com.nuvio.app.features.player.IosTargetPrimaries
 import com.nuvio.app.features.player.IosTargetTransfer
+import com.nuvio.app.features.player.StreamCacheSize
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.player.STREAM_AUTO_PLAY_TIMEOUT_VALUES
 import com.nuvio.app.features.player.SubtitleBackgroundColorSwatches
@@ -113,6 +114,8 @@ internal fun LazyListScope.playbackSettingsContent(
     androidLibmpvHardwareDecodingEnabled: Boolean,
     androidLibmpvYuv420pEnabled: Boolean,
     decoderPriority: Int,
+    streamCacheSize: StreamCacheSize,
+    streamCacheOnDisk: Boolean,
     mapDV7ToHevc: Boolean,
     tunnelingEnabled: Boolean,
     useLibass: Boolean,
@@ -136,6 +139,8 @@ internal fun LazyListScope.playbackSettingsContent(
             androidLibmpvHardwareDecodingEnabled = androidLibmpvHardwareDecodingEnabled,
             androidLibmpvYuv420pEnabled = androidLibmpvYuv420pEnabled,
             decoderPriority = decoderPriority,
+            streamCacheSize = streamCacheSize,
+            streamCacheOnDisk = streamCacheOnDisk,
             mapDV7ToHevc = mapDV7ToHevc,
             tunnelingEnabled = tunnelingEnabled,
             useLibass = useLibass,
@@ -300,6 +305,8 @@ private fun PlaybackSettingsSection(
     androidLibmpvHardwareDecodingEnabled: Boolean,
     androidLibmpvYuv420pEnabled: Boolean,
     decoderPriority: Int,
+    streamCacheSize: StreamCacheSize,
+    streamCacheOnDisk: Boolean,
     mapDV7ToHevc: Boolean,
     tunnelingEnabled: Boolean,
     useLibass: Boolean,
@@ -319,6 +326,7 @@ private fun PlaybackSettingsSection(
     var showPlaybackEngineDialog by remember { mutableStateOf(false) }
     var showLibmpvVideoOutputDialog by remember { mutableStateOf(false) }
     var showDecoderPriorityDialog by remember { mutableStateOf(false) }
+    var showStreamCacheSizeDialog by remember { mutableStateOf(false) }
     var showHoldToSpeedValueDialog by remember { mutableStateOf(false) }
     var showIosAudioOutputDialog by remember { mutableStateOf(false) }
     var showIosHardwareDecoderDialog by remember { mutableStateOf(false) }
@@ -949,6 +957,21 @@ private fun PlaybackSettingsSection(
                         onClick = { showDecoderPriorityDialog = true },
                     )
                     SettingsGroupDivider(isTablet = isTablet)
+                    SettingsNavigationRow(
+                        title = stringResource(Res.string.settings_playback_stream_cache_size),
+                        description = streamCacheSizeLabel(streamCacheSize),
+                        isTablet = isTablet,
+                        onClick = { showStreamCacheSizeDialog = true },
+                    )
+                    SettingsGroupDivider(isTablet = isTablet)
+                    SettingsSwitchRow(
+                        title = stringResource(Res.string.settings_playback_stream_cache_on_disk),
+                        description = stringResource(Res.string.settings_playback_stream_cache_on_disk_description),
+                        checked = streamCacheOnDisk,
+                        isTablet = isTablet,
+                        onCheckedChange = PlayerSettingsRepository::setStreamCacheOnDisk,
+                    )
+                    SettingsGroupDivider(isTablet = isTablet)
                     SettingsSwitchRow(
                         title = stringResource(Res.string.settings_playback_map_dv7_to_hevc),
                         description = stringResource(Res.string.settings_playback_map_dv7_to_hevc_description),
@@ -1498,6 +1521,17 @@ private fun PlaybackSettingsSection(
                 showDecoderPriorityDialog = false
             },
             onDismiss = { showDecoderPriorityDialog = false },
+        )
+    }
+
+    if (showStreamCacheSizeDialog) {
+        StreamCacheSizeDialog(
+            selectedSize = streamCacheSize,
+            onSizeSelected = { size ->
+                PlayerSettingsRepository.setStreamCacheSize(size)
+                showStreamCacheSizeDialog = false
+            },
+            onDismiss = { showStreamCacheSizeDialog = false },
         )
     }
 
@@ -2170,6 +2204,91 @@ private fun DecoderPriorityDialog(
                             ) {
                                 Text(
                                     text = stringResource(labelRes),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Box(
+                                    modifier = Modifier.size(24.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = stringResource(Res.string.settings_playback_dialog_close),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun StreamCacheSizeDialog(
+    selectedSize: StreamCacheSize,
+    onSizeSelected: (StreamCacheSize) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BasicAlertDialog(
+        onDismissRequest = onDismiss,
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(Res.string.settings_playback_stream_cache_size),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                )
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StreamCacheSize.entries.forEach { size ->
+                        val isSelected = size == selectedSize
+                        val containerColor = if (isSelected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSizeSelected(size) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = containerColor,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(size.labelRes()),
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.weight(1f),
@@ -3570,6 +3689,17 @@ private fun decoderPriorityRes(priority: Int): StringResource = when (priority) 
 
 @Composable
 private fun decoderPriorityLabel(priority: Int): String = stringResource(decoderPriorityRes(priority))
+
+private fun StreamCacheSize.labelRes(): StringResource = when (this) {
+    StreamCacheSize.MB_64 -> Res.string.settings_stream_cache_64mb
+    StreamCacheSize.MB_256 -> Res.string.settings_stream_cache_256mb
+    StreamCacheSize.MB_512 -> Res.string.settings_stream_cache_512mb
+    StreamCacheSize.GB_1 -> Res.string.settings_stream_cache_1gb
+    StreamCacheSize.GB_2 -> Res.string.settings_stream_cache_2gb
+}
+
+@Composable
+private fun streamCacheSizeLabel(size: StreamCacheSize): String = stringResource(size.labelRes())
 
 private fun StreamAutoPlaySource.labelRes(pluginsEnabled: Boolean): StringResource = when (this) {
     StreamAutoPlaySource.ALL_SOURCES ->

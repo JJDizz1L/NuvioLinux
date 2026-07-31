@@ -13,6 +13,15 @@ val STREAM_AUTO_PLAY_TIMEOUT_VALUES: List<Int> = listOf(
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, Int.MAX_VALUE
 )
 
+/** How much of a network stream mpv keeps in its demuxer cache. */
+enum class StreamCacheSize(val bytes: Long) {
+    MB_64(64L * 1024 * 1024),
+    MB_256(256L * 1024 * 1024),
+    MB_512(512L * 1024 * 1024),
+    GB_1(1024L * 1024 * 1024),
+    GB_2(2L * 1024 * 1024 * 1024),
+}
+
 /**
  * Snaps [value] to the nearest allowed timeout value in [STREAM_AUTO_PLAY_TIMEOUT_VALUES].
  * Ties break to the lower value. Negative values snap to 0.
@@ -55,6 +64,8 @@ data class PlayerSettingsUiState(
     val androidLibmpvHardwareDecodingEnabled: Boolean = true,
     val androidLibmpvYuv420pEnabled: Boolean = false,
     val decoderPriority: Int = 1,
+    val streamCacheSize: StreamCacheSize = StreamCacheSize.MB_256,
+    val streamCacheOnDisk: Boolean = false,
     val mapDV7ToHevc: Boolean = false,
     val tunnelingEnabled: Boolean = false,
     val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.MANUAL,
@@ -122,6 +133,8 @@ object PlayerSettingsRepository {
     private var androidLibmpvHardwareDecodingEnabled = true
     private var androidLibmpvYuv420pEnabled = false
     private var decoderPriority = 1
+    private var streamCacheSize = StreamCacheSize.MB_256
+    private var streamCacheOnDisk = false
     private var mapDV7ToHevc = false
     private var tunnelingEnabled = false
     private var streamAutoPlayMode = StreamAutoPlayMode.MANUAL
@@ -194,6 +207,8 @@ object PlayerSettingsRepository {
         androidLibmpvHardwareDecodingEnabled = true
         androidLibmpvYuv420pEnabled = false
         decoderPriority = 1
+        streamCacheSize = StreamCacheSize.MB_256
+        streamCacheOnDisk = false
         mapDV7ToHevc = false
         tunnelingEnabled = false
         streamAutoPlayMode = StreamAutoPlayMode.MANUAL
@@ -303,6 +318,10 @@ object PlayerSettingsRepository {
         androidLibmpvHardwareDecodingEnabled = PlayerSettingsStorage.loadAndroidLibmpvHardwareDecodingEnabled() ?: true
         androidLibmpvYuv420pEnabled = PlayerSettingsStorage.loadAndroidLibmpvYuv420pEnabled() ?: false
         decoderPriority = PlayerSettingsStorage.loadDecoderPriority() ?: 1
+        streamCacheSize = PlayerSettingsStorage.loadStreamCacheSize()
+            ?.let { runCatching { StreamCacheSize.valueOf(it) }.getOrNull() }
+            ?: StreamCacheSize.MB_256
+        streamCacheOnDisk = PlayerSettingsStorage.loadStreamCacheOnDisk() ?: false
         mapDV7ToHevc = PlayerSettingsStorage.loadMapDV7ToHevc() ?: false
         tunnelingEnabled = PlayerSettingsStorage.loadTunnelingEnabled() ?: false
         streamAutoPlayMode = PlayerSettingsStorage.loadStreamAutoPlayMode()
@@ -590,6 +609,22 @@ object PlayerSettingsRepository {
         decoderPriority = priority
         publish()
         PlayerSettingsStorage.saveDecoderPriority(priority)
+    }
+
+    fun setStreamCacheSize(size: StreamCacheSize) {
+        ensureLoaded()
+        if (streamCacheSize == size) return
+        streamCacheSize = size
+        publish()
+        PlayerSettingsStorage.saveStreamCacheSize(size.name)
+    }
+
+    fun setStreamCacheOnDisk(enabled: Boolean) {
+        ensureLoaded()
+        if (streamCacheOnDisk == enabled) return
+        streamCacheOnDisk = enabled
+        publish()
+        PlayerSettingsStorage.saveStreamCacheOnDisk(enabled)
     }
 
     fun setMapDV7ToHevc(enabled: Boolean) {
@@ -960,6 +995,8 @@ object PlayerSettingsRepository {
             androidLibmpvHardwareDecodingEnabled = androidLibmpvHardwareDecodingEnabled,
             androidLibmpvYuv420pEnabled = androidLibmpvYuv420pEnabled,
             decoderPriority = decoderPriority,
+            streamCacheSize = streamCacheSize,
+            streamCacheOnDisk = streamCacheOnDisk,
             mapDV7ToHevc = mapDV7ToHevc,
             tunnelingEnabled = tunnelingEnabled,
             streamAutoPlayMode = streamAutoPlayMode,

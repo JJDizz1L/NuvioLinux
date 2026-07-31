@@ -1150,8 +1150,12 @@ private class NuvioLibmpvView(
         mpv.setOptionString("msg-level", "all=warn")
         mpv.setOptionString("tls-verify", "yes")
         mpv.setOptionString("tls-ca-file", "${context.filesDir.path}/cacert.pem")
-        mpv.setOptionString("demuxer-max-bytes", "${libmpvCacheBytes()}").logIfMpvError("demuxer-max-bytes")
-        mpv.setOptionString("demuxer-max-back-bytes", "${libmpvCacheBytes()}").logIfMpvError("demuxer-max-back-bytes")
+        val streamCache = PlayerSettingsRepository.uiState.value.streamCacheSize
+        mpv.setOptionString("demuxer-max-bytes", "${streamCache.bytes}").logIfMpvError("demuxer-max-bytes")
+        mpv.setOptionString("demuxer-max-back-bytes", "${streamCache.bytes}").logIfMpvError("demuxer-max-back-bytes")
+        if (PlayerSettingsRepository.uiState.value.streamCacheOnDisk) {
+            mpv.setOptionString("cache-on-disk", "yes").logIfMpvError("cache-on-disk")
+        }
         mpv.setOptionString("vd-lavc-film-grain", "cpu")
         mpv.setPropertyBoolean("keep-open", true)
         mpv.setPropertyBoolean("input-default-bindings", true)
@@ -1442,9 +1446,6 @@ private data class LibmpvTrack(
     val isSelected: Boolean,
     val isForced: Boolean,
 )
-
-private fun libmpvCacheBytes(): Int =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) 64 * 1024 * 1024 else 32 * 1024 * 1024
 
 private fun Int.logIfMpvError(option: String) {
     if (this < 0) Log.w(TAG, "libmpv option failed: $option status=$this")
