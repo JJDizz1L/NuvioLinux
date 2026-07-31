@@ -3,14 +3,12 @@ package com.nuvio.app.features.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.collectAsState
@@ -20,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.dp
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.ui.LocalNuvioPlatformDensity
 import com.nuvio.app.features.player.desktop.DesktopHostOs
@@ -109,8 +106,6 @@ private fun NativePlayerSurface(
     val platformDensity = LocalNuvioPlatformDensity.current
     val host = remember { NativePlayerHost() }
     val controller = remember(host) { NativePlayerController(host) }
-    val hostFirstPaintComplete = remember { mutableStateOf(false) }
-    val hostFirstFullSizePaintComplete = remember { mutableStateOf(false) }
     val playbackHeaders = remember(sourceHeaders) { sanitizePlaybackHeaders(sourceHeaders) }
     log.d { "composed — sourceUrl=${sourceUrl.take(80)}" }
     val latestOnPlayerControlsAction = rememberUpdatedState(onPlayerControlsAction)
@@ -125,31 +120,6 @@ private fun NativePlayerSurface(
 
     LaunchedEffect(controller, sourceUrl, playbackHeaders) {
         onControllerReady(controller)
-    }
-
-    DisposableEffect(host) {
-        host.onDisplayableChanged = { displayable ->
-            if (!displayable) {
-                hostFirstPaintComplete.value = false
-                hostFirstFullSizePaintComplete.value = false
-                log.d { "onDisplayableChanged — false, reset paint flags" }
-            } else {
-                log.d { "onDisplayableChanged — true" }
-            }
-        }
-        host.onFirstPaint = {
-            hostFirstPaintComplete.value = true
-            log.d { "onFirstPaint — hostFirstPaintComplete=true" }
-        }
-        host.onFirstFullSizePaint = {
-            hostFirstFullSizePaintComplete.value = true
-            log.d { "onFirstFullSizePaint — hostFirstFullSizePaintComplete=true" }
-        }
-        onDispose {
-            host.onDisplayableChanged = null
-            host.onFirstPaint = null
-            host.onFirstFullSizePaint = null
-        }
     }
 
     LaunchedEffect(controller) {
@@ -171,16 +141,9 @@ private fun NativePlayerSurface(
         playbackHeaders,
         decoderPriority,
         nvidiaRtxSuperResolutionEnabled,
-        hostFirstFullSizePaintComplete.value,
         initialPositionMs,
         initialPositionRequestKey,
     ) {
-        if (!hostFirstFullSizePaintComplete.value) {
-            log.d { "LaunchedEffect guard — waiting for full-size paint" }
-            return@LaunchedEffect
-        }
-        log.d { "full-size paint ready, scheduling attach in 16ms" }
-        delay(16L)
         log.d { "calling controller.attach" }
         controller.attach(
             sourceUrl = sourceUrl,
@@ -233,16 +196,8 @@ private fun NativePlayerSurface(
     ) {
         CompositionLocalProvider(LocalDensity provides platformDensity) {
             SwingPanel(
-                factory = {
-                    host
-                },
-                modifier = if (hostFirstPaintComplete.value) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .requiredSize(1.dp)
-                },
+                factory = { host },
+                modifier = Modifier.fillMaxSize(),
                 background = Color.Black,
             )
         }

@@ -14,12 +14,7 @@ import java.awt.image.BufferedImage
 internal class NativePlayerHost : Canvas() {
     private val log = Logger.withTag("NativePlayerHost")
     var onPeerReady: (() -> Unit)? = null
-    var onDisplayableChanged: ((Boolean) -> Unit)? = null
-    var onFirstPaint: (() -> Unit)? = null
-    var onFirstFullSizePaint: (() -> Unit)? = null
     var onCursorActivity: (() -> Unit)? = null
-    private var firstPaintNotified = false
-    private var firstFullSizePaintNotified = false
     private var controlsVisible = true
     private var cursorVisible = true
 
@@ -71,34 +66,19 @@ internal class NativePlayerHost : Canvas() {
     override fun paint(graphics: Graphics) {
         graphics.color = Color.BLACK
         graphics.fillRect(0, 0, width, height)
-        if (!firstPaintNotified) {
-            firstPaintNotified = true
-            onFirstPaint?.invoke()
-            log.d { "paint — first paint, size=${width}x$height" }
-        }
-        if (!firstFullSizePaintNotified && width > 1 && height > 1) {
-            firstFullSizePaintNotified = true
-            onFirstFullSizePaint?.invoke()
-            log.d { "paint — first full-size paint, size=${width}x$height" }
-        }
+        log.d { "paint — size=${width}x$height" }
     }
 
     override fun addNotify() {
         super.addNotify()
         log.d { "addNotify — displayable=true, peer ready" }
-        onDisplayableChanged?.invoke(true)
         repaint()
         onPeerReady?.invoke()
     }
 
     override fun removeNotify() {
         log.d { "removeNotify — peer removed" }
-        onDisplayableChanged?.invoke(false)
-        firstPaintNotified = false
-        firstFullSizePaintNotified = false
         onPeerReady = null
-        onFirstPaint = null
-        onFirstFullSizePaint = null
         resetCursorVisibility()
         super.removeNotify()
     }
