@@ -27,6 +27,7 @@ import com.nuvio.app.features.player.skip.SkipIntroRepository
 import com.nuvio.app.features.streams.AddonStreamGroup
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.streams.isSelectableForPlayback
+import com.nuvio.app.features.discord.DiscordPlaybackPresenceEffect
 import com.nuvio.app.features.watchprogress.buildPlaybackVideoId
 import com.nuvio.app.features.watching.application.WatchingState
 import com.nuvio.app.isDesktop
@@ -386,6 +387,14 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 commitHorizontalSeekState = gestureCallbacks.commitHorizontalSeek,
             ),
     ) {
+        DiscordPlaybackPresenceEffect(
+            title = title.ifBlank { activeStreamTitle },
+            subtitle = episodeText.ifBlank { null },
+            posterUrl = poster ?: background,
+            isPlaying = playbackSnapshot.isPlaying,
+            positionMs = playbackSnapshot.positionMs,
+            durationMs = playbackSnapshot.durationMs,
+        )
         if (playerSurfaceSourceUrl != null) {
             PlatformPlayerSurface(
                 sourceUrl = playerSurfaceSourceUrl,

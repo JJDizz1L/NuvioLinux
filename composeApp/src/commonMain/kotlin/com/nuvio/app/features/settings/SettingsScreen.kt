@@ -65,6 +65,8 @@ import com.nuvio.app.features.collection.CollectionRepository
 import com.nuvio.app.features.addons.enabledAddons
 import com.nuvio.app.features.debrid.DebridSettings
 import com.nuvio.app.features.debrid.DebridSettingsRepository
+import com.nuvio.app.features.discord.DiscordSettings
+import com.nuvio.app.features.discord.DiscordSettingsRepository
 import com.nuvio.app.features.home.HomeCatalogSettingsItem
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
 import com.nuvio.app.features.mdblist.MdbListSettings
@@ -157,6 +159,10 @@ fun SettingsScreen(
         val debridSettings by remember {
             DebridSettingsRepository.ensureLoaded()
             DebridSettingsRepository.uiState
+        }.collectAsStateWithLifecycle()
+        val discordSettings by remember {
+            DiscordSettingsRepository.ensureLoaded()
+            DiscordSettingsRepository.uiState
         }.collectAsStateWithLifecycle()
         val traktAuthUiState by remember {
             TraktAuthRepository.ensureLoaded()
@@ -315,6 +321,7 @@ fun SettingsScreen(
                 tmdbSettings = tmdbSettings,
                 mdbListSettings = mdbListSettings,
                 debridSettings = debridSettings,
+                discordSettings = discordSettings,
                 traktAuthUiState = traktAuthUiState,
                 traktCommentsEnabled = traktCommentsEnabled,
                 traktSettingsUiState = traktSettingsUiState,
@@ -375,6 +382,7 @@ fun SettingsScreen(
                 tmdbSettings = tmdbSettings,
                 mdbListSettings = mdbListSettings,
                 debridSettings = debridSettings,
+                discordSettings = discordSettings,
                 traktAuthUiState = traktAuthUiState,
                 traktCommentsEnabled = traktCommentsEnabled,
                 traktSettingsUiState = traktSettingsUiState,
@@ -445,6 +453,7 @@ private fun MobileSettingsScreen(
     tmdbSettings: TmdbSettings,
     mdbListSettings: MdbListSettings,
     debridSettings: DebridSettings,
+    discordSettings: DiscordSettings,
     traktAuthUiState: TraktAuthUiState,
     traktCommentsEnabled: Boolean,
     traktSettingsUiState: TraktSettingsUiState,
@@ -701,6 +710,7 @@ private fun MobileSettingsScreen(
                     onTmdbClick = { onPageChange(SettingsPage.TmdbEnrichment) },
                     onMdbListClick = { onPageChange(SettingsPage.MdbListRatings) },
                     onDebridClick = { onPageChange(SettingsPage.Debrid) },
+                    onDiscordClick = { onPageChange(SettingsPage.DiscordRichPresence) },
                 )
                 SettingsPage.TmdbEnrichment -> tmdbSettingsContent(
                     isTablet = false,
@@ -713,6 +723,10 @@ private fun MobileSettingsScreen(
                 SettingsPage.Debrid -> debridSettingsContent(
                     isTablet = false,
                     settings = debridSettings,
+                )
+                SettingsPage.DiscordRichPresence -> discordSettingsContent(
+                    isTablet = false,
+                    settings = discordSettings,
                 )
                 SettingsPage.TraktAuthentication -> traktSettingsContent(
                     isTablet = false,
@@ -810,6 +824,7 @@ private fun TabletSettingsScreen(
     tmdbSettings: TmdbSettings,
     mdbListSettings: MdbListSettings,
     debridSettings: DebridSettings,
+    discordSettings: DiscordSettings,
     traktAuthUiState: TraktAuthUiState,
     traktCommentsEnabled: Boolean,
     traktSettingsUiState: TraktSettingsUiState,
@@ -1125,6 +1140,7 @@ private fun TabletSettingsScreen(
                             onTmdbClick = { onPageChange(SettingsPage.TmdbEnrichment) },
                             onMdbListClick = { onPageChange(SettingsPage.MdbListRatings) },
                             onDebridClick = { onPageChange(SettingsPage.Debrid) },
+                            onDiscordClick = { onPageChange(SettingsPage.DiscordRichPresence) },
                         )
                         SettingsPage.TmdbEnrichment -> tmdbSettingsContent(
                             isTablet = true,
@@ -1137,6 +1153,10 @@ private fun TabletSettingsScreen(
                         SettingsPage.Debrid -> debridSettingsContent(
                             isTablet = true,
                             settings = debridSettings,
+                        )
+                        SettingsPage.DiscordRichPresence -> discordSettingsContent(
+                            isTablet = true,
+                            settings = discordSettings,
                         )
                         SettingsPage.TraktAuthentication -> traktSettingsContent(
                             isTablet = true,

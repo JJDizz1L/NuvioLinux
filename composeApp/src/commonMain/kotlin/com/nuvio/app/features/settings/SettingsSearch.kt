@@ -116,6 +116,7 @@ internal fun settingsSearchEntries(
     val collectionsPage = stringResource(Res.string.collections_header)
     val tmdbPage = stringResource(Res.string.compose_settings_page_tmdb_enrichment)
     val mdbListPage = stringResource(Res.string.compose_settings_page_mdblist_ratings)
+    val discordPage = stringResource(Res.string.compose_settings_page_presence)
 
     val entries = mutableListOf<SettingsSearchEntry>()
 
@@ -871,6 +872,33 @@ internal fun settingsSearchEntries(
             description = row.description,
             pageLabel = mdbListPage,
             section = row.sectionOverride ?: stringResource(Res.string.settings_mdb_section_title),
+            icon = Icons.Rounded.Link,
+        )
+    }
+
+    addPage(
+        page = SettingsPage.DiscordRichPresence,
+        key = "discord",
+        title = discordPage,
+        description = stringResource(Res.string.settings_integrations_discord_description),
+        icon = Icons.Rounded.Link,
+    )
+    val discordSection = stringResource(Res.string.settings_discord_section_title)
+    listOf(
+        PlaybackSearchRow("discord-enable", stringResource(Res.string.settings_discord_enable_rpc), stringResource(Res.string.settings_discord_enable_rpc_description), discordSection),
+        PlaybackSearchRow("discord-hide-title", stringResource(Res.string.settings_discord_hide_title), stringResource(Res.string.settings_discord_hide_title_description), discordSection),
+        PlaybackSearchRow("discord-show-when-paused", stringResource(Res.string.settings_discord_show_when_paused), stringResource(Res.string.settings_discord_show_when_paused_description), discordSection),
+        PlaybackSearchRow("discord-show-when-browsing", stringResource(Res.string.settings_discord_show_when_browsing), stringResource(Res.string.settings_discord_show_when_browsing_description), discordSection),
+        PlaybackSearchRow("discord-show-poster", stringResource(Res.string.settings_discord_show_poster), stringResource(Res.string.settings_discord_show_poster_description), discordSection),
+        PlaybackSearchRow("discord-show-timestamp", stringResource(Res.string.settings_discord_show_timestamp), stringResource(Res.string.settings_discord_show_timestamp_description), discordSection),
+    ).forEach { row ->
+        addRow(
+            page = SettingsPage.DiscordRichPresence,
+            key = row.key,
+            title = row.title,
+            description = row.description,
+            pageLabel = discordPage,
+            section = row.sectionOverride ?: discordSection,
             icon = Icons.Rounded.Link,
         )
     }

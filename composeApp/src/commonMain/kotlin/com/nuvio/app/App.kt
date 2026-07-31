@@ -270,6 +270,15 @@ import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.modules.polymorphic
 import kotlinx.serialization.modules.subclass
 import com.nuvio.app.navigation.*
+import com.nuvio.app.features.discord.DiscordBrowsePresenceEffect
+import nuvio.composeapp.generated.resources.discord_browsing_collections
+import nuvio.composeapp.generated.resources.discord_browsing_generic
+import nuvio.composeapp.generated.resources.discord_browsing_home
+import nuvio.composeapp.generated.resources.discord_browsing_library
+import nuvio.composeapp.generated.resources.discord_browsing_person
+import nuvio.composeapp.generated.resources.discord_browsing_search
+import nuvio.composeapp.generated.resources.discord_browsing_settings
+import nuvio.composeapp.generated.resources.discord_browsing_title
 import nuvio.composeapp.generated.resources.*
 import nuvio.composeapp.generated.resources.app_logo_wordmark
 import nuvio.composeapp.generated.resources.compose_catalog_subtitle_library
@@ -883,6 +892,36 @@ private fun MainAppContent(
             warmProfileBoundRepositories()
         }
         val currentRoute = navBackStack.lastOrNull() as? AppRoute
+        val discordBrowseGeneric = stringResource(Res.string.discord_browsing_generic)
+        val discordBrowseHome = stringResource(Res.string.discord_browsing_home)
+        val discordBrowseSearch = stringResource(Res.string.discord_browsing_search)
+        val discordBrowseLibrary = stringResource(Res.string.discord_browsing_library)
+        val discordBrowseSettings = stringResource(Res.string.discord_browsing_settings)
+        val discordBrowseTitle = stringResource(Res.string.discord_browsing_title)
+        val discordBrowsePerson = stringResource(Res.string.discord_browsing_person)
+        val discordBrowseCollections = stringResource(Res.string.discord_browsing_collections)
+        val discordBrowseContext = remember(currentRoute, selectedTab) {
+            when (currentRoute) {
+                is PlayerRoute, is StreamRoute -> Triple<String?, String?, String?>(null, null, null)
+                is DetailRoute -> Triple(discordBrowseTitle, currentRoute.title, null)
+                is PersonDetailRoute -> Triple(discordBrowsePerson, currentRoute.personName, currentRoute.personPhoto)
+                is EntityBrowseRoute -> Triple(discordBrowseGeneric, currentRoute.entityName, null)
+                is CollectionsRoute -> Triple(discordBrowseCollections, null, null)
+                is SettingsDestinationRoute -> Triple(discordBrowseSettings, null, null)
+                is TabsRoute -> when (selectedTab) {
+                    AppScreenTab.Home -> Triple(discordBrowseHome, null, null)
+                    AppScreenTab.Search -> Triple(discordBrowseSearch, null, null)
+                    AppScreenTab.Library -> Triple(discordBrowseLibrary, null, null)
+                    AppScreenTab.Settings -> Triple(discordBrowseSettings, null, null)
+                }
+                else -> Triple(discordBrowseGeneric, null, null)
+            }
+        }
+        DiscordBrowsePresenceEffect(
+            details = discordBrowseContext.first,
+            state = discordBrowseContext.second,
+            largeImage = discordBrowseContext.third,
+        )
         val liquidGlassNativeTabBarEnabled by remember {
             ThemeSettingsRepository.liquidGlassNativeTabBarEnabled
         }.collectAsStateWithLifecycle()

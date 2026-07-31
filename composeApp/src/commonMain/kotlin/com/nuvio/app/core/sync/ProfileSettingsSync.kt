@@ -14,6 +14,8 @@ import com.nuvio.app.features.details.MetaScreenSettingsRepository
 import com.nuvio.app.features.mdblist.MdbListMetadataService
 import com.nuvio.app.features.mdblist.MdbListSettingsStorage
 import com.nuvio.app.features.mdblist.MdbListSettingsRepository
+import com.nuvio.app.features.discord.DiscordSettingsStorage
+import com.nuvio.app.features.discord.DiscordSettingsRepository
 import com.nuvio.app.features.notifications.EpisodeReleaseNotificationsRepository
 import com.nuvio.app.features.player.PlayerSettingsStorage
 import com.nuvio.app.features.player.PlayerSettingsRepository
@@ -234,6 +236,7 @@ object ProfileSettingsSync {
                 debridSettings = DebridSettingsStorage.exportToSyncPayload(),
                 tmdbSettings = TmdbSettingsStorage.exportToSyncPayload(),
                 mdbListSettings = MdbListSettingsStorage.exportToSyncPayload(),
+                discordSettings = DiscordSettingsStorage.exportToSyncPayload(),
                 metaScreenSettingsPayload = MetaScreenSettingsStorage.loadPayload().orEmpty().trim(),
                 collectionMobileSettingsPayload = CollectionMobileSettingsStorage.loadPayload().orEmpty().trim(),
                 continueWatchingSettingsPayload = ContinueWatchingPreferencesStorage.loadPayload().orEmpty().trim(),
@@ -271,6 +274,9 @@ object ProfileSettingsSync {
         MdbListSettingsStorage.replaceFromSyncPayload(blob.features.mdbListSettings)
         MdbListMetadataService.clearCache()
         MdbListSettingsRepository.onProfileChanged()
+
+        DiscordSettingsStorage.replaceFromSyncPayload(blob.features.discordSettings)
+        DiscordSettingsRepository.onProfileChanged()
 
         MetaScreenSettingsStorage.savePayload(blob.features.metaScreenSettingsPayload)
         MetaScreenSettingsRepository.onProfileChanged()
@@ -348,6 +354,7 @@ private data class MobileProfileSettingsFeatures(
     @SerialName("debrid_settings") val debridSettings: JsonObject = JsonObject(emptyMap()),
     @SerialName("tmdb_settings") val tmdbSettings: JsonObject = JsonObject(emptyMap()),
     @SerialName("mdblist_settings") val mdbListSettings: JsonObject = JsonObject(emptyMap()),
+    @SerialName("discord_settings") val discordSettings: JsonObject = JsonObject(emptyMap()),
     @SerialName("meta_screen_settings_payload") val metaScreenSettingsPayload: String = "",
     @SerialName("collection_mobile_settings_payload") val collectionMobileSettingsPayload: String = "",
     @SerialName("continue_watching_settings_payload") val continueWatchingSettingsPayload: String = "",
