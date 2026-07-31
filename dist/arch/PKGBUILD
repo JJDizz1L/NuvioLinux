@@ -17,7 +17,7 @@ provides=("${pkgname}")
 conflicts=("${pkgname}")
 source=()
 noextract=()
-sha256sums=('SKIP')
+sha256sums=()
 
 export GRADLE_OPTS="-Dorg.gradle.parallel=false"
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
