@@ -29,7 +29,8 @@ import javax.swing.SwingUtilities
 import kotlin.concurrent.Volatile
 
 internal class NativePlayerController(
-    private val host: NativePlayerHost,
+    private val host: NativePlayerSurfaceHost,
+    private val renderToMemory: Boolean = false,
 ) : PlayerEngineController {
     private companion object {
         val json = Json { ignoreUnknownKeys = true }
@@ -86,12 +87,12 @@ internal class NativePlayerController(
             "attach requested source=${sourceUrl.toPlaybackLogKey()} headers=${sourceHeaders.size} " +
                 "playWhenReady=$playWhenReady initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority"
         }
-        log.d { "attach — host.isDisplayable=${host.isDisplayable}" }
-        host.onPeerReady = { log.d { "onPeerReady — calling attachPending" }; attachPending() }
-        if (host.isDisplayable) {
-            log.d { "attach — host is displayable, calling attachPending immediately" }
+        log.d { "attach — host.isDisplayable()=${host.isDisplayable()} renderToMemory=$renderToMemory" }
+        if (renderToMemory || host.isDisplayable()) {
+            log.d { "attach — calling attachPending immediately" }
             attachPending()
         } else {
+            host.onPeerReady = { log.d { "onPeerReady — calling attachPending" }; attachPending() }
             log.d { "attach — host not displayable, will attach on onPeerReady" }
         }
     }
@@ -101,9 +102,29 @@ internal class NativePlayerController(
             log.d { "attachPending — pendingSource is null, skipping" }
             return
         }
+        if (renderToMemory) {
+            log.d { "attachPending — render-to-memory mode, attaching directly" }
+            disposePlayerHandle()
+            val teardown = disposeInFlight
+            if (teardown == null || !teardown.isAlive) {
+                log.d { "attachPending — no teardown in flight, calling createPlayer directly" }
+                createPlayer(pending)
+                return
+            }
+            Thread({
+                runCatching { teardown.join(TEARDOWN_WAIT_MS) }
+                if (pendingSource === pending) {
+                    createPlayer(pending)
+                }
+            }, "nuvio-player-attach").apply {
+                isDaemon = true
+                start()
+            }
+            return
+        }
         log.d { "attachPending — scheduling on EDT" }
         SwingUtilities.invokeLater {
-            if (!host.isDisplayable) {
+            if (!host.isDisplayable()) {
                 log.d { "attachPending — host not displayable anymore, aborting" }
                 return@invokeLater
             }
@@ -122,7 +143,7 @@ internal class NativePlayerController(
             Thread({
                 runCatching { teardown.join(TEARDOWN_WAIT_MS) }
                 SwingUtilities.invokeLater {
-                    if (host.isDisplayable && pendingSource === pending) {
+                    if (host.isDisplayable() && pendingSource === pending) {
                         createPlayer(pending)
                     }
                 }
@@ -134,16 +155,21 @@ internal class NativePlayerController(
     }
 
     private fun createPlayer(pending: PendingSource) {
-        log.d { "createPlayer — resolving AWT peer for source=${pending.sourceUrl.toPlaybackLogKey()}" }
-
         // Resolving the AWT peer must happen on the EDT; everything after it must not.
-        val hostViewPtr = runCatching { AwtNativeViewResolver.resolveNativeViewPointer(host) }
-            .getOrElse { error ->
-                log.w(error) { "createPlayer — AWT peer resolution failed source=${pending.sourceUrl.toPlaybackLogKey()}" }
-                pending.onError(error.message)
-                return
-            }
-        log.d { "createPlayer — AWT peer resolved: hostViewPtr=0x${hostViewPtr.toString(16)}" }
+        val hostViewPtr = if (renderToMemory) {
+            log.d { "createPlayer — render-to-memory mode, no AWT peer required" }
+            0L
+        } else {
+            log.d { "createPlayer — resolving AWT peer for source=${pending.sourceUrl.toPlaybackLogKey()}" }
+            val resolved = runCatching { AwtNativeViewResolver.resolveNativeViewPointer(host as NativePlayerHost) }
+                .getOrElse { error ->
+                    log.w(error) { "createPlayer — AWT peer resolution failed source=${pending.sourceUrl.toPlaybackLogKey()}" }
+                    pending.onError(error.message)
+                    return
+                }
+            log.d { "createPlayer — AWT peer resolved: hostViewPtr=0x${resolved.toString(16)}" }
+            resolved
+        }
         val resolvedSource = if (pending.sourceUrl.startsWith("file:", ignoreCase = true)) {
             runCatching { java.io.File(java.net.URI(pending.sourceUrl)).absolutePath }.getOrElse {
                 val stripped = pending.sourceUrl.replaceFirst(Regex("^file:/{1,3}", RegexOption.IGNORE_CASE), "")
@@ -178,7 +204,7 @@ internal class NativePlayerController(
                 }
             }.onSuccess { created ->
                 SwingUtilities.invokeLater {
-                    if (pendingSource !== pending || !host.isDisplayable) {
+                    if (pendingSource !== pending || !host.isDisplayable()) {
                         // Superseded while we were initialising; drop it rather than leak it.
                         Thread({ runCatching { NativePlayerBridge.dispose(created) } }, "nuvio-player-dispose")
                             .apply { isDaemon = true }.start()
@@ -232,7 +258,7 @@ internal class NativePlayerController(
             state
         }
         controlsState = stateWithVolume
-        val isFullscreen = isDesktopAppFullscreen(SwingUtilities.getWindowAncestor(host))
+        val isFullscreen = isDesktopAppFullscreen(host.windowAncestor())
         val structureKey = NativeControlsStructureKey(
             state = stateWithVolume.nativeControlsStructureKey(),
             isFullscreen = isFullscreen,
@@ -256,7 +282,7 @@ internal class NativePlayerController(
 
     private fun requestKeyboardFocus() {
         SwingUtilities.invokeLater {
-            if (!host.isDisplayable) return@invokeLater
+            if (!host.isDisplayable()) return@invokeLater
             host.requestFocusInWindow()
             val current = handle.takeIf { it != 0L } ?: return@invokeLater
             NativePlayerBridge.requestFocus(current)
@@ -298,7 +324,7 @@ internal class NativePlayerController(
                 }
             }
             "toggleFullscreen" -> {
-                toggleDesktopAppFullscreen(SwingUtilities.getWindowAncestor(host))
+                toggleDesktopAppFullscreen(host.windowAncestor())
                 onDesktopFullscreenChanged()
             }
             "volumeChange" -> setFallbackVolume(value.toFloat())
@@ -412,6 +438,24 @@ internal class NativePlayerController(
                 playbackSpeed = NativePlayerBridge.speed(current),
             )
         }.getOrDefault(PlayerPlaybackSnapshot(isLoading = true))
+    }
+
+    /** Renders the latest video frame into [buffer] (RGB0, stride = width * 4). */
+    fun renderFrame(width: Int, height: Int, buffer: java.nio.ByteBuffer): Boolean {
+        val current = handle
+        if (current == 0L) return false
+        return runCatching { NativePlayerBridge.renderFrame(current, width, height, buffer) }
+            .getOrElse { error ->
+                if (error !is NoClassDefFoundError) {
+                    log.w(error) { "renderFrame JNI failed handle=$current" }
+                }
+                false
+            }
+    }
+
+    /** Reports mouse activity over the Compose video surface (reveals controls). */
+    fun reportCursorActivity() {
+        onEvent("cursorActivity", 0.0)
     }
 
     fun dispose() {

@@ -33,3 +33,10 @@ PERFORMANCE_FINDINGS.md
 
 # Local MPVKit iOS build environment (sparse APFS image, see MPVKit docs)
 .mpvkit-build.sparseimage
+
+# Arch package build artifacts
+dist/arch/pkg/
+dist/arch/*.pkg.tar.zst
+
+# JVM crash logs
+hs_err_pid*.log
