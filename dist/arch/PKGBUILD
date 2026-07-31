@@ -4,14 +4,14 @@
 # Build from local source: run `makepkg -si` from this directory.
 # The repo root is expected at ${startdir}/../.. (referred to as $REPO_ROOT).
 
-pkgname=nuvio-desktop
+pkgname=nuvio-linux
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Nuvio desktop media player — Linux native mpv playback"
 arch=('x86_64')
 url="https://github.com/JJDizz1L/NuvioDesktop"
 license=('custom:commercial')
-depends=('mpv' 'glibc' 'gcc-libs' 'libx11')
+depends=('mpv' 'glibc' 'gcc-libs' 'libstdc++' 'libx11' 'libxext' 'libxrender' 'libxi' 'libxtst')
 makedepends=('jdk21-openjdk' 'gcc')
 provides=("${pkgname}")
 conflicts=("${pkgname}")
@@ -31,7 +31,7 @@ build() {
 
 package() {
   local REPO_ROOT="${startdir}/../.."
-  local APP_DIR="${pkgdir}/opt/nuvio-desktop"
+  local APP_DIR="${pkgdir}/opt/nuvio-linux"
 
   cd "${REPO_ROOT}"
 
@@ -41,9 +41,9 @@ package() {
 
   # Symlink launcher
   install -d "${pkgdir}/usr/bin"
-  ln -s /opt/nuvio-desktop/bin/Nuvio "${pkgdir}/usr/bin/nuvio-desktop"
+  ln -s /opt/nuvio-linux/bin/Nuvio "${pkgdir}/usr/bin/nuvio-linux"
 
   # Desktop entry
-  install -Dm644 "${startdir}/nuvio-desktop.desktop" \
-    "${pkgdir}/usr/share/applications/nuvio-desktop.desktop"
+  install -Dm644 "${startdir}/nuvio-linux.desktop" \
+    "${pkgdir}/usr/share/applications/nuvio-linux.desktop"
 }
