@@ -11,50 +11,76 @@
   [![License][license-shield]][license-url]
 
   <p>
-    A desktop media app for Windows, macOS, and Linux.
+    A Linux-first desktop media app.
     <br />
     Browse, organize, and play media from sources you add.
   </p>
 
 </div>
 
+> ### ⚠️ Hard Fork — Linux Only
+>
+> This is a **hard fork** of [Nuvio Desktop](https://github.com/NuvioMedia/NuvioDesktop),
+> maintained separately and focused **exclusively on Linux development**.
+> The macOS and Windows code paths are being removed. If you need those
+> platforms, use the upstream project instead.
+
 ## ⚠️ Alpha Software — Testers Only
 
-Nuvio Desktop is currently in alpha and is intended only for testers. It is under active development and is not suitable for daily use.
+Nuvio is currently in alpha and is intended only for testers. It is under active development and is not suitable for daily use.
 
 Expect breaking changes with every update. Features, settings, stored data, and compatibility may change or stop working without notice. Do not rely on this build as your primary media app, and report any issues you encounter during testing.
 
 ## About
 
-Nuvio Desktop is a media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.
+Nuvio is a media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.
 
-## Installation
+This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop), diverged from the `feat/hwaccel-libmpv-linux` branch. It keeps the upstream client codebase while replacing the desktop playback stack with a native Linux player.
 
-Download the latest desktop build from [GitHub Releases](https://github.com/NuvioMedia/NuvioDesktop/releases/latest).
+## What's Different From Upstream
 
-Release packages are provided for supported desktop platforms:
+- **Native Linux playback via MPV (libmpv).** The old embedded player is replaced by a C++/JNI bridge that embeds mpv using its render API, drawing video straight into the Compose scene — all overlay UI works on X11 and Wayland. The app itself runs under XWayland; the embedded player is display-agnostic (offscreen EGL) and works on both backends.
+- **Hardware acceleration.** Zero-copy decode via **VA-API (Mesa/AMD/Intel)** and **NVDEC (NVIDIA)**, chosen automatically by the app's decoder setting, with a software fallback.
+- **HDR support.** The embedded player loads your `mpv.conf` wholesale, so HDR/color configuration — tone-mapping, `target-peak`, inverse-tone-mapping, profiles — applies as-is.
+- **Discord Rich Presence.** Show what you're watching or browsing on your Discord profile. Configurable under **Settings → Integrations → Discord Rich Presence**.
+- **Arch Linux distribution.** A first-class Arch package with a bundled JRE (no system Java required), including a launcher and desktop entry.
 
-- Windows: MSI installer
-- macOS: DMG installer
-- Linux: DEB package, when available
+## Installation (Arch Linux)
+
+```bash
+git clone https://github.com/JJDizz1L/NuvioLinux.git
+cd NuvioLinux/dist/arch
+makepkg -si
+```
+
+This builds the self-contained `nuvio-linux` package and installs it to `/opt/nuvio-linux`.
+
+Launch it from your app menu, or from a terminal:
+
+```bash
+nuvio-linux
+```
+
+To update to a newer build, pull the latest code and re-run `makepkg -si`:
+
+```bash
+git pull
+makepkg -si
+```
+
+This fork does not produce Windows or macOS builds.
 
 ## Development
 
 ```bash
-git clone https://github.com/NuvioMedia/NuvioDesktop.git
-cd NuvioDesktop
+git clone https://github.com/JJDizz1L/NuvioLinux.git
+cd NuvioLinux
 ```
 
 Run from source:
 
 ```bash
-./gradlew :composeApp:run
-```
-
-On Windows PowerShell:
-
-```powershell
-.\gradlew.bat :composeApp:run
+./gradlew run
 ```
 
 Build a release package for the current host:
@@ -63,16 +89,9 @@ Build a release package for the current host:
 ./gradlew :composeApp:packageReleaseDistributionForCurrentOS
 ```
 
-Platform-specific packaging:
+Linux packaging:
 
 ```bash
-# Windows
-./gradlew :composeApp:packageReleaseMsi --rerun-tasks
-
-# macOS
-./scripts/build-macos-release-dmgs.sh --package-only
-
-# Linux
 ./gradlew :composeApp:packageReleaseDeb
 ```
 
@@ -81,6 +100,7 @@ Platform-specific packaging:
 - `composeApp/` contains the app code.
 - `composeApp/src/commonMain/` contains shared UI, features, repositories, and platform-agnostic logic.
 - `composeApp/src/desktopMain/` contains desktop-specific integrations.
+- `composeApp/src/desktopMain/native/` contains the C++/libmpv playback bridge.
 - `composeApp/Configuration/DesktopVersion.properties` contains the desktop release version and build code.
 
 ## Versioning
@@ -114,25 +134,27 @@ For comprehensive legal information, including our full disclaimer, third-party 
 - Kotlin
 - Compose Desktop packaging
 - Native desktop player integrations
+- libmpv (MPV render API) via a C++/JNI bridge
+- Discord IPC (Rich Presence)
 
 ## Star History
 
-<a href="https://www.star-history.com/#NuvioMedia/NuvioDesktop&type=date&legend=top-left">
+<a href="https://www.star-history.com/#JJDizz1L/NuvioLinux&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=NuvioMedia/NuvioDesktop&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=NuvioMedia/NuvioDesktop&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=NuvioMedia/NuvioDesktop&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JJDizz1L/NuvioLinux&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JJDizz1L/NuvioLinux&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=JJDizz1L/NuvioLinux&type=date&legend=top-left" />
  </picture>
 </a>
 
 <!-- MARKDOWN LINKS & IMAGES -->
-[contributors-shield]: https://img.shields.io/github/contributors/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[contributors-url]: https://github.com/NuvioMedia/NuvioDesktop/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[forks-url]: https://github.com/NuvioMedia/NuvioDesktop/network/members
-[stars-shield]: https://img.shields.io/github/stars/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[stars-url]: https://github.com/NuvioMedia/NuvioDesktop/stargazers
-[issues-shield]: https://img.shields.io/github/issues/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[issues-url]: https://github.com/NuvioMedia/NuvioDesktop/issues
-[license-shield]: https://img.shields.io/github/license/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[license-url]: https://github.com/NuvioMedia/NuvioDesktop/blob/main/LICENSE
+[contributors-shield]: https://img.shields.io/github/contributors/JJDizz1L/NuvioLinux.svg?style=for-the-badge
+[contributors-url]: https://github.com/JJDizz1L/NuvioLinux/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/JJDizz1L/NuvioLinux.svg?style=for-the-badge
+[forks-url]: https://github.com/JJDizz1L/NuvioLinux/network/members
+[stars-shield]: https://img.shields.io/github/stars/JJDizz1L/NuvioLinux.svg?style=for-the-badge
+[stars-url]: https://github.com/JJDizz1L/NuvioLinux/stargazers
+[issues-shield]: https://img.shields.io/github/issues/JJDizz1L/NuvioLinux.svg?style=for-the-badge
+[issues-url]: https://github.com/JJDizz1L/NuvioLinux/issues
+[license-shield]: https://img.shields.io/github/license/JJDizz1L/NuvioLinux.svg?style=for-the-badge
+[license-url]: https://github.com/JJDizz1L/NuvioLinux/blob/main/LICENSE
