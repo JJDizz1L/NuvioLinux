@@ -86,21 +86,32 @@ internal class NativePlayerController(
             "attach requested source=${sourceUrl.toPlaybackLogKey()} headers=${sourceHeaders.size} " +
                 "playWhenReady=$playWhenReady initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority"
         }
-        host.onPeerReady = { attachPending() }
+        log.d { "attach — host.isDisplayable=${host.isDisplayable}" }
+        host.onPeerReady = { log.d { "onPeerReady — calling attachPending" }; attachPending() }
         if (host.isDisplayable) {
+            log.d { "attach — host is displayable, calling attachPending immediately" }
             attachPending()
+        } else {
+            log.d { "attach — host not displayable, will attach on onPeerReady" }
         }
     }
 
     private fun attachPending() {
-        val pending = pendingSource ?: return
+        val pending = pendingSource ?: run {
+            log.d { "attachPending — pendingSource is null, skipping" }
+            return
+        }
+        log.d { "attachPending — scheduling on EDT" }
         SwingUtilities.invokeLater {
             if (!host.isDisplayable) {
+                log.d { "attachPending — host not displayable anymore, aborting" }
                 return@invokeLater
             }
+            log.d { "attachPending — disposing previous handle" }
             disposePlayerHandle()
             val teardown = disposeInFlight
             if (teardown == null || !teardown.isAlive) {
+                log.d { "attachPending — no teardown in flight, calling createPlayer directly" }
                 createPlayer(pending)
                 return@invokeLater
             }
@@ -123,13 +134,16 @@ internal class NativePlayerController(
     }
 
     private fun createPlayer(pending: PendingSource) {
+        log.d { "createPlayer — resolving AWT peer for source=${pending.sourceUrl.toPlaybackLogKey()}" }
+
         // Resolving the AWT peer must happen on the EDT; everything after it must not.
         val hostViewPtr = runCatching { AwtNativeViewResolver.resolveNativeViewPointer(host) }
             .getOrElse { error ->
-                log.w(error) { "attach failed to resolve host source=${pending.sourceUrl.toPlaybackLogKey()}" }
+                log.w(error) { "createPlayer — AWT peer resolution failed source=${pending.sourceUrl.toPlaybackLogKey()}" }
                 pending.onError(error.message)
                 return
             }
+        log.d { "createPlayer — AWT peer resolved: hostViewPtr=0x${hostViewPtr.toString(16)}" }
         val resolvedSource = if (pending.sourceUrl.startsWith("file:", ignoreCase = true)) {
             runCatching { java.io.File(java.net.URI(pending.sourceUrl)).absolutePath }.getOrElse {
                 val stripped = pending.sourceUrl.replaceFirst(Regex("^file:/{1,3}", RegexOption.IGNORE_CASE), "")
@@ -145,7 +159,9 @@ internal class NativePlayerController(
         // the app stops responding and Windows closes it as "stopped interacting" (Hang 1002).
         // Create off the EDT and come back to it for the parts that touch Swing state.
         Thread({
+            log.d { "createPlayer — background thread starting NativePlayerBridge.create" }
             runCatching {
+                log.d { "createPlayer — calling NativePlayerBridge.create(hostViewPtr=0x${hostViewPtr.toString(16)})" }
                 NativePlayerBridge.create(
                     hostViewPtr = hostViewPtr,
                     sourceUrl = resolvedSource,
@@ -156,7 +172,10 @@ internal class NativePlayerController(
                     decoderPriority = pending.decoderPriority,
                     nvidiaRtxSuperResolutionEnabled = pending.nvidiaRtxSuperResolutionEnabled,
                     eventSink = eventSink,
-                ).also { if (it == 0L) error("Native player did not return a handle.") }
+                ).also { handle ->
+                    log.d { "createPlayer — NativePlayerBridge.create returned handle=0x${handle.toString(16)}" }
+                    if (handle == 0L) error("Native player did not return a handle.")
+                }
             }.onSuccess { created ->
                 SwingUtilities.invokeLater {
                     if (pendingSource !== pending || !host.isDisplayable) {

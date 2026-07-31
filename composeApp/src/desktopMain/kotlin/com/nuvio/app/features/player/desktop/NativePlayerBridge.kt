@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player.desktop
 
+import co.touchlab.kermit.Logger
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicBoolean
@@ -9,6 +10,7 @@ internal fun interface NativePlayerEventSink {
 }
 
 internal object NativePlayerBridge {
+    private val log = Logger.withTag("NativePlayerBridge")
     private val windowsNativeRuntimeDependencyNames = listOf(
         "vcruntime140.dll",
         "vcruntime140_1.dll",
@@ -131,16 +133,22 @@ internal object NativePlayerBridge {
         val libraryName = nativeLibraryName(platform)
         val platformDir = nativeDirectoryName(platform)
         findPackagedApplicationLibrary(platformDir, libraryName)?.let { packagedLibrary ->
+            log.d { "loading from packaged app resources: ${packagedLibrary.absolutePath}" }
             loadNativeRuntimeDependencies(platform, packagedLibrary.parentFile)
             System.load(packagedLibrary.absolutePath)
+            log.d { "loaded from packaged app resources: ${packagedLibrary.absolutePath}" }
             return
         }
+        log.d { "lib not found in packaged app resources, trying local build directory" }
         findLocalBuildLibrary(platformDir, libraryName)?.let { localLibrary ->
+            log.d { "loading from local build: ${localLibrary.absolutePath}" }
             copyLocalRuntimeResources(platformDir, localLibrary.parentFile)
             loadNativeRuntimeDependencies(platform, localLibrary.parentFile)
             System.load(localLibrary.absolutePath)
+            log.d { "loaded from local build: ${localLibrary.absolutePath}" }
             return
         }
+        log.d { "lib not found in local build, extracting from classpath resources" }
 
         val resource = "/native/$platformDir/$libraryName"
         val input = NativePlayerBridge::class.java.getResourceAsStream(resource)
@@ -154,7 +162,9 @@ internal object NativePlayerBridge {
             file.outputStream().use { target -> source.copyTo(target) }
         }
         loadNativeRuntimeDependencies(platform, dir)
+        log.d { "loading from extracted temp file: ${file.absolutePath}" }
         System.load(file.absolutePath)
+        log.d { "loaded from extracted temp file: ${file.absolutePath}" }
     }
 
     private fun findPackagedApplicationLibrary(platformDir: String, libraryName: String): File? {

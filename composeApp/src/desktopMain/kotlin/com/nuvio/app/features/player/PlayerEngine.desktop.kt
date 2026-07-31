@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import co.touchlab.kermit.Logger
 import com.nuvio.app.core.ui.LocalNuvioPlatformDensity
 import com.nuvio.app.features.player.desktop.DesktopHostOs
 import com.nuvio.app.features.player.desktop.NativePlayerController
@@ -104,12 +105,14 @@ private fun NativePlayerSurface(
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
     onError: (String?) -> Unit,
 ) {
+    val log = remember { Logger.withTag("NativePlayerSurface") }
     val platformDensity = LocalNuvioPlatformDensity.current
     val host = remember { NativePlayerHost() }
     val controller = remember(host) { NativePlayerController(host) }
     val hostFirstPaintComplete = remember { mutableStateOf(false) }
     val hostFirstFullSizePaintComplete = remember { mutableStateOf(false) }
     val playbackHeaders = remember(sourceHeaders) { sanitizePlaybackHeaders(sourceHeaders) }
+    log.d { "composed — sourceUrl=${sourceUrl.take(80)}" }
     val latestOnPlayerControlsAction = rememberUpdatedState(onPlayerControlsAction)
     val latestOnPlayerControlsEvent = rememberUpdatedState(onPlayerControlsEvent)
     val latestOnPlayerControlsScrubChange = rememberUpdatedState(onPlayerControlsScrubChange)
@@ -129,13 +132,18 @@ private fun NativePlayerSurface(
             if (!displayable) {
                 hostFirstPaintComplete.value = false
                 hostFirstFullSizePaintComplete.value = false
+                log.d { "onDisplayableChanged — false, reset paint flags" }
+            } else {
+                log.d { "onDisplayableChanged — true" }
             }
         }
         host.onFirstPaint = {
             hostFirstPaintComplete.value = true
+            log.d { "onFirstPaint — hostFirstPaintComplete=true" }
         }
         host.onFirstFullSizePaint = {
             hostFirstFullSizePaintComplete.value = true
+            log.d { "onFirstFullSizePaint — hostFirstFullSizePaintComplete=true" }
         }
         onDispose {
             host.onDisplayableChanged = null
@@ -168,9 +176,12 @@ private fun NativePlayerSurface(
         initialPositionRequestKey,
     ) {
         if (!hostFirstFullSizePaintComplete.value) {
+            log.d { "LaunchedEffect guard — waiting for full-size paint" }
             return@LaunchedEffect
         }
+        log.d { "full-size paint ready, scheduling attach in 16ms" }
         delay(16L)
+        log.d { "calling controller.attach" }
         controller.attach(
             sourceUrl = sourceUrl,
             sourceHeaders = playbackHeaders,

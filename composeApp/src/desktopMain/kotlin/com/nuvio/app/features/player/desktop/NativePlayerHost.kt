@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player.desktop
 
+import co.touchlab.kermit.Logger
 import java.awt.Canvas
 import java.awt.Color
 import java.awt.Cursor
@@ -11,6 +12,7 @@ import java.awt.event.MouseMotionAdapter
 import java.awt.image.BufferedImage
 
 internal class NativePlayerHost : Canvas() {
+    private val log = Logger.withTag("NativePlayerHost")
     var onPeerReady: (() -> Unit)? = null
     var onDisplayableChanged: ((Boolean) -> Unit)? = null
     var onFirstPaint: (() -> Unit)? = null
@@ -72,21 +74,25 @@ internal class NativePlayerHost : Canvas() {
         if (!firstPaintNotified) {
             firstPaintNotified = true
             onFirstPaint?.invoke()
+            log.d { "paint — first paint, size=${width}x$height" }
         }
         if (!firstFullSizePaintNotified && width > 1 && height > 1) {
             firstFullSizePaintNotified = true
             onFirstFullSizePaint?.invoke()
+            log.d { "paint — first full-size paint, size=${width}x$height" }
         }
     }
 
     override fun addNotify() {
         super.addNotify()
+        log.d { "addNotify — displayable=true, peer ready" }
         onDisplayableChanged?.invoke(true)
         repaint()
         onPeerReady?.invoke()
     }
 
     override fun removeNotify() {
+        log.d { "removeNotify — peer removed" }
         onDisplayableChanged?.invoke(false)
         firstPaintNotified = false
         firstFullSizePaintNotified = false
