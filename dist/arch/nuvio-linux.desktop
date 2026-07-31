@@ -2,8 +2,8 @@
 Type=Application
 Name=Nuvio
 Comment=Nuvio desktop media player
-Exec=/opt/nuvio-desktop/bin/Nuvio
-Icon=/opt/nuvio-desktop/lib/Nuvio.png
+Exec=/opt/nuvio-linux/bin/Nuvio
+Icon=/opt/nuvio-linux/lib/Nuvio.png
 Categories=AudioVideo;Player;
 Terminal=false
 StartupNotify=true
