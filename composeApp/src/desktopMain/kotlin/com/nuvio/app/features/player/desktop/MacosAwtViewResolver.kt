@@ -9,6 +9,7 @@ internal object AwtNativeViewResolver {
         when (DesktopHostOs.current) {
             DesktopHostOs.MACOS -> MacosAwtViewResolver.resolveNativeViewPointer(component)
             DesktopHostOs.WINDOWS -> WindowsAwtViewResolver.resolveNativeViewPointer(component)
+            DesktopHostOs.LINUX -> LinuxAwtViewResolver.resolveNativeViewPointer(component)
             else -> error("Native desktop playback is not implemented for ${DesktopHostOs.current}.")
         }
 }

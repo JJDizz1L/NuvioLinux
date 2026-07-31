@@ -14,6 +14,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.unit.dp
+import com.nuvio.app.core.ui.NuvioTheme
 import com.nuvio.app.core.deeplink.handleAppUrl
 import com.nuvio.app.features.p2p.P2pStreamingEngine
 import com.nuvio.app.features.player.PlatformPlayerSurface
@@ -138,13 +139,15 @@ fun main(args: Array<String>) {
             if (smokePlayerUrl == null) {
                 App()
             } else {
-                PlatformPlayerSurface(
-                    sourceUrl = smokePlayerUrl,
-                    modifier = Modifier.fillMaxSize(),
-                    onControllerReady = {},
-                    onSnapshot = {},
-                    onError = {},
-                )
+                NuvioTheme {
+                    PlatformPlayerSurface(
+                        sourceUrl = smokePlayerUrl,
+                        modifier = Modifier.fillMaxSize(),
+                        onControllerReady = {},
+                        onSnapshot = {},
+                        onError = {},
+                    )
+                }
             }
         }
     }
