@@ -297,7 +297,7 @@ struct MpvPlayer {
 
         /* Configure mpv */
         p_mpv_set_option_string(mpv, "vo", "gpu-next");
-        p_mpv_set_option_string(mpv, "gpu-context", "auto");
+        p_mpv_set_option_string(mpv, "gpu-context", "x11");
         p_mpv_set_option_string(mpv, "hwdec", decoderPriority > 0 ? "auto-safe" : "no");
         p_mpv_set_option_string(mpv, "cache", "yes");
         p_mpv_set_option_string(mpv, "cache-secs", "300");
