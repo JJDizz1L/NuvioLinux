@@ -57,24 +57,12 @@ internal expect object PlayerSettingsStorage {
     fun saveStreamReuseLastLinkEnabled(enabled: Boolean)
     fun loadStreamReuseLastLinkCacheHours(): Int?
     fun saveStreamReuseLastLinkCacheHours(hours: Int)
-    fun loadAndroidPlaybackEngine(): String?
-    fun saveAndroidPlaybackEngine(engine: String)
-    fun loadAndroidLibmpvVideoOutput(): String?
-    fun saveAndroidLibmpvVideoOutput(output: String)
-    fun loadAndroidLibmpvHardwareDecodingEnabled(): Boolean?
-    fun saveAndroidLibmpvHardwareDecodingEnabled(enabled: Boolean)
-    fun loadAndroidLibmpvYuv420pEnabled(): Boolean?
-    fun saveAndroidLibmpvYuv420pEnabled(enabled: Boolean)
     fun loadDecoderPriority(): Int?
     fun saveDecoderPriority(priority: Int)
     fun loadStreamCacheSize(): String?
     fun saveStreamCacheSize(size: String)
     fun loadStreamCacheOnDisk(): Boolean?
     fun saveStreamCacheOnDisk(enabled: Boolean)
-    fun loadMapDV7ToHevc(): Boolean?
-    fun saveMapDV7ToHevc(enabled: Boolean)
-    fun loadTunnelingEnabled(): Boolean?
-    fun saveTunnelingEnabled(enabled: Boolean)
     fun loadStreamAutoPlayMode(): String?
     fun saveStreamAutoPlayMode(mode: String)
     fun loadStreamAutoPlaySource(): String?
@@ -114,38 +102,6 @@ internal expect object PlayerSettingsStorage {
     fun saveUseLibass(enabled: Boolean)
     fun loadLibassRenderType(): String?
     fun saveLibassRenderType(renderType: String)
-    fun loadIosVideoOutputPreset(): String?
-    fun saveIosVideoOutputPreset(preset: String)
-    fun loadIosToneMappingMode(): String?
-    fun saveIosToneMappingMode(mode: String)
-    fun loadIosTargetPrimaries(): String?
-    fun saveIosTargetPrimaries(primaries: String)
-    fun loadIosTargetTransfer(): String?
-    fun saveIosTargetTransfer(transfer: String)
-    fun loadIosHardwareDecoderMode(): String?
-    fun saveIosHardwareDecoderMode(mode: String)
-    fun loadIosAudioOutputMode(): String?
-    fun saveIosAudioOutputMode(mode: String)
-    fun loadIosExtendedDynamicRangeEnabled(): Boolean?
-    fun saveIosExtendedDynamicRangeEnabled(enabled: Boolean)
-    fun loadIosTargetColorspaceHintEnabled(): Boolean?
-    fun saveIosTargetColorspaceHintEnabled(enabled: Boolean)
-    fun loadIosHdrComputePeakEnabled(): Boolean?
-    fun saveIosHdrComputePeakEnabled(enabled: Boolean)
-    fun loadIosDebandEnabled(): Boolean?
-    fun saveIosDebandEnabled(enabled: Boolean)
-    fun loadIosInterpolationEnabled(): Boolean?
-    fun saveIosInterpolationEnabled(enabled: Boolean)
-    fun loadIosBrightness(): Int?
-    fun saveIosBrightness(value: Int)
-    fun loadIosContrast(): Int?
-    fun saveIosContrast(value: Int)
-    fun loadIosSaturation(): Int?
-    fun saveIosSaturation(value: Int)
-    fun loadIosGamma(): Int?
-    fun saveIosGamma(value: Int)
-    fun loadNvidiaRtxSuperResolutionEnabled(): Boolean?
-    fun saveNvidiaRtxSuperResolutionEnabled(enabled: Boolean)
     fun exportToSyncPayload(): JsonObject
     fun replaceFromSyncPayload(payload: JsonObject)
 }

@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nuvio.app.core.ui.NuvioAsyncImage as AsyncImage
 import com.nuvio.app.core.ui.nuvioDesktopDragScroll
-import com.nuvio.app.isIos
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
@@ -166,7 +165,7 @@ internal fun TabletStreamsLayout(
                     .weight(0.6f)
                     .fillMaxHeight()
                     .padding(
-                        top = if (isIos) 20.dp else 60.dp,
+                        top = 60.dp,
                         end = 12.dp,
                         bottom = 12.dp,
                     ),

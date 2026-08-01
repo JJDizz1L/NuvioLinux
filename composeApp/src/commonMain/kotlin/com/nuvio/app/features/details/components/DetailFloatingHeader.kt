@@ -44,7 +44,6 @@ import com.nuvio.app.core.ui.FullscreenActionButton
 import com.nuvio.app.core.ui.fullscreenActionHorizontalInsetForWidth
 import com.nuvio.app.core.ui.isFullscreenActionSupported
 import com.nuvio.app.features.details.MetaDetails
-import com.nuvio.app.isIos
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
 
@@ -61,11 +60,7 @@ fun DetailFloatingHeader(
 ) {
     val safeAreaTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val headerTopPadding = (safeAreaTop - 6.dp).coerceAtLeast(safeAreaTop * 0.8f)
-    val surfaceColor = backgroundColor ?: if (isIos) {
-        MaterialTheme.colorScheme.surface.copy(alpha = 1.0f)
-    } else {
-        MaterialTheme.colorScheme.background
-    }
+    val surfaceColor = backgroundColor ?: MaterialTheme.colorScheme.background
     var logoLoadError by remember(meta.id, meta.logo) {
         mutableStateOf(false)
     }
@@ -167,16 +162,6 @@ fun DetailFloatingHeader(
                         )
                     }
                 }
-            }
-
-            if (isIos) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(0.5.dp)
-                        .background(Color.White.copy(alpha = 0.15f)),
-                )
             }
         }
     }

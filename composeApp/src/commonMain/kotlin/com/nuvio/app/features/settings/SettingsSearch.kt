@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.isDesktop
-import com.nuvio.app.isIos
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
 
@@ -301,17 +300,9 @@ internal fun settingsSearchEntries(
         PlaybackSearchRow("introdb-attribution", stringResource(Res.string.settings_licenses_attributions_introdb_title), stringResource(Res.string.settings_licenses_attributions_introdb_body)),
         PlaybackSearchRow("imdb-datasets", stringResource(Res.string.settings_licenses_attributions_imdb_title), stringResource(Res.string.settings_licenses_attributions_imdb_body)),
         PlaybackSearchRow(
-            if (isIos) "mpvkit-license" else "exoplayer-license",
-            if (isIos) {
-                stringResource(Res.string.settings_licenses_attributions_mpvkit_title)
-            } else {
-                stringResource(Res.string.settings_licenses_attributions_exoplayer_title)
-            },
-            if (isIos) {
-                stringResource(Res.string.settings_licenses_attributions_mpvkit_license)
-            } else {
-                stringResource(Res.string.settings_licenses_attributions_exoplayer_license)
-            },
+            "exoplayer-license",
+            stringResource(Res.string.settings_licenses_attributions_exoplayer_title),
+            stringResource(Res.string.settings_licenses_attributions_exoplayer_license),
         ),
     ).forEach { row ->
         addRow(
@@ -565,14 +556,6 @@ internal fun settingsSearchEntries(
                     ),
                 )
             }
-            if (externalPlayerSupported && isIos) {
-                add(
-                    PlaybackSearchRow(
-                        "external-player-app",
-                        stringResource(Res.string.settings_playback_external_player_app),
-                    ),
-                )
-            }
             if (!isDesktop) {
                 add(
                     PlaybackSearchRow(
@@ -632,29 +615,27 @@ internal fun settingsSearchEntries(
             if (pluginsEnabled) add(PlaybackSearchRow("allowed-plugins", stringResource(Res.string.settings_playback_allowed_plugins)))
         },
     )
-    if (!isIos) {
-        addPlaybackRows(
-            addRow = ::addRow,
-            pageLabel = playbackPage,
-            section = playbackDecoder,
-            icon = Icons.Rounded.PlayArrow,
-            rows = listOf(
-                PlaybackSearchRow("decoder-priority", stringResource(Res.string.settings_playback_decoder_priority)),
-                PlaybackSearchRow("dv7-hevc", stringResource(Res.string.settings_playback_map_dv7_to_hevc), stringResource(Res.string.settings_playback_map_dv7_to_hevc_description)),
-                PlaybackSearchRow("tunneled-playback", stringResource(Res.string.settings_playback_tunneled_playback), stringResource(Res.string.settings_playback_tunneled_playback_description)),
-            ),
-        )
-        addPlaybackRows(
-            addRow = ::addRow,
-            pageLabel = playbackPage,
-            section = playbackSubtitleRendering,
-            icon = Icons.Rounded.PlayArrow,
-            rows = listOf(
-                PlaybackSearchRow("libass", stringResource(Res.string.settings_playback_enable_libass), stringResource(Res.string.settings_playback_enable_libass_description)),
-                PlaybackSearchRow("libass-render", stringResource(Res.string.settings_playback_render_type)),
-            ),
-        )
-    }
+    addPlaybackRows(
+        addRow = ::addRow,
+        pageLabel = playbackPage,
+        section = playbackDecoder,
+        icon = Icons.Rounded.PlayArrow,
+        rows = listOf(
+            PlaybackSearchRow("decoder-priority", stringResource(Res.string.settings_playback_decoder_priority)),
+            PlaybackSearchRow("stream-cache-size", stringResource(Res.string.settings_playback_stream_cache_size)),
+            PlaybackSearchRow("stream-cache-on-disk", stringResource(Res.string.settings_playback_stream_cache_on_disk)),
+        ),
+    )
+    addPlaybackRows(
+        addRow = ::addRow,
+        pageLabel = playbackPage,
+        section = playbackSubtitleRendering,
+        icon = Icons.Rounded.PlayArrow,
+        rows = listOf(
+            PlaybackSearchRow("libass", stringResource(Res.string.settings_playback_enable_libass), stringResource(Res.string.settings_playback_enable_libass_description)),
+            PlaybackSearchRow("libass-render", stringResource(Res.string.settings_playback_render_type)),
+        ),
+    )
     addPlaybackRows(
         addRow = ::addRow,
         pageLabel = playbackPage,

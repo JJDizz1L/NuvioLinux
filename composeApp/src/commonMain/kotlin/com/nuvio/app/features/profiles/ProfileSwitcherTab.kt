@@ -83,7 +83,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.core.ui.NuvioAsyncImage as AsyncImage
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvio
-import com.nuvio.app.isIos
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import nuvio.composeapp.generated.resources.*
@@ -132,11 +131,7 @@ fun ProfileSwitcherTab(
     }
 
     fun performProfileHoverHaptic() {
-        if (isIos) {
-            ProfileHoverHapticFeedback.perform()
-        } else {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
     fun updateDragTarget(localPosition: Offset) {

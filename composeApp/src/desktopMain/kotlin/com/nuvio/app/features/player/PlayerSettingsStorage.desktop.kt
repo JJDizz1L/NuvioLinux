@@ -44,15 +44,9 @@ internal actual object PlayerSettingsStorage {
     private const val addonSubtitleStartupModeKey = "addon_subtitle_startup_mode"
     private const val streamReuseLastLinkEnabledKey = "stream_reuse_last_link_enabled"
     private const val streamReuseLastLinkCacheHoursKey = "stream_reuse_last_link_cache_hours"
-    private const val androidPlaybackEngineKey = "android_playback_engine"
-    private const val androidLibmpvVideoOutputKey = "android_libmpv_video_output"
-    private const val androidLibmpvHardwareDecodingEnabledKey = "android_libmpv_hardware_decoding_enabled"
-    private const val androidLibmpvYuv420pEnabledKey = "android_libmpv_yuv420p_enabled"
     private const val decoderPriorityKey = "decoder_priority"
     private const val streamCacheSizeKey = "stream_cache_size"
     private const val streamCacheOnDiskKey = "stream_cache_on_disk"
-    private const val mapDV7ToHevcKey = "map_dv7_to_hevc"
-    private const val tunnelingEnabledKey = "tunneling_enabled"
     private const val streamAutoPlayModeKey = "stream_auto_play_mode"
     private const val streamAutoPlaySourceKey = "stream_auto_play_source"
     private const val streamAutoPlaySelectedAddonsKey = "stream_auto_play_selected_addons"
@@ -72,29 +66,12 @@ internal actual object PlayerSettingsStorage {
     private const val nextEpisodeThresholdMinutesBeforeEndKey = "next_episode_threshold_minutes_before_end_v2"
     private const val useLibassKey = "use_libass"
     private const val libassRenderTypeKey = "libass_render_type"
-    private const val iosVideoOutputPresetKey = "ios_video_output_preset"
-    private const val iosToneMappingModeKey = "ios_tone_mapping_mode"
-    private const val iosTargetPrimariesKey = "ios_target_primaries"
-    private const val iosTargetTransferKey = "ios_target_transfer"
-    private const val iosHardwareDecoderModeKey = "ios_hardware_decoder_mode"
-    private const val iosAudioOutputModeKey = "ios_audio_output_mode"
-    private const val iosExtendedDynamicRangeEnabledKey = "ios_extended_dynamic_range_enabled"
-    private const val iosTargetColorspaceHintEnabledKey = "ios_target_colorspace_hint_enabled"
-    private const val iosHdrComputePeakEnabledKey = "ios_hdr_compute_peak_enabled"
-    private const val iosDebandEnabledKey = "ios_deband_enabled"
-    private const val iosInterpolationEnabledKey = "ios_interpolation_enabled"
-    private const val iosBrightnessKey = "ios_brightness"
-    private const val iosContrastKey = "ios_contrast"
-    private const val iosSaturationKey = "ios_saturation"
-    private const val iosGammaKey = "ios_gamma"
-    private const val nvidiaRtxSuperResolutionEnabledKey = "nvidia_rtx_super_resolution_enabled"
     private val syncKeys = listOf(
         showLoadingOverlayKey,
         showParentalGuideKey,
         resizeModeKey,
         holdToSpeedEnabledKey,
         holdToSpeedValueKey,
-        nvidiaRtxSuperResolutionEnabledKey,
         touchGesturesEnabledKey,
         externalPlayerEnabledKey,
         externalPlayerForwardSubtitlesKey,
@@ -117,15 +94,9 @@ internal actual object PlayerSettingsStorage {
         addonSubtitleStartupModeKey,
         streamReuseLastLinkEnabledKey,
         streamReuseLastLinkCacheHoursKey,
-        androidPlaybackEngineKey,
-        androidLibmpvVideoOutputKey,
-        androidLibmpvHardwareDecodingEnabledKey,
-        androidLibmpvYuv420pEnabledKey,
         decoderPriorityKey,
         streamCacheSizeKey,
         streamCacheOnDiskKey,
-        mapDV7ToHevcKey,
-        tunnelingEnabledKey,
         streamAutoPlayModeKey,
         streamAutoPlaySourceKey,
         streamAutoPlaySelectedAddonsKey,
@@ -143,21 +114,6 @@ internal actual object PlayerSettingsStorage {
         nextEpisodeThresholdMinutesBeforeEndKey,
         useLibassKey,
         libassRenderTypeKey,
-        iosVideoOutputPresetKey,
-        iosToneMappingModeKey,
-        iosTargetPrimariesKey,
-        iosTargetTransferKey,
-        iosHardwareDecoderModeKey,
-        iosAudioOutputModeKey,
-        iosExtendedDynamicRangeEnabledKey,
-        iosTargetColorspaceHintEnabledKey,
-        iosHdrComputePeakEnabledKey,
-        iosDebandEnabledKey,
-        iosInterpolationEnabledKey,
-        iosBrightnessKey,
-        iosContrastKey,
-        iosSaturationKey,
-        iosGammaKey,
     )
     private val store = DesktopStorage.store("nuvio_player_settings")
 
@@ -216,25 +172,12 @@ internal actual object PlayerSettingsStorage {
     actual fun saveStreamReuseLastLinkEnabled(enabled: Boolean) = saveBoolean(streamReuseLastLinkEnabledKey, enabled)
     actual fun loadStreamReuseLastLinkCacheHours(): Int? = loadInt(streamReuseLastLinkCacheHoursKey)
     actual fun saveStreamReuseLastLinkCacheHours(hours: Int) = saveInt(streamReuseLastLinkCacheHoursKey, hours)
-    actual fun loadAndroidPlaybackEngine(): String? = loadString(androidPlaybackEngineKey)
-    actual fun saveAndroidPlaybackEngine(engine: String) = saveString(androidPlaybackEngineKey, engine)
-    actual fun loadAndroidLibmpvVideoOutput(): String? = loadString(androidLibmpvVideoOutputKey)
-    actual fun saveAndroidLibmpvVideoOutput(output: String) = saveString(androidLibmpvVideoOutputKey, output)
-    actual fun loadAndroidLibmpvHardwareDecodingEnabled(): Boolean? = loadBoolean(androidLibmpvHardwareDecodingEnabledKey)
-    actual fun saveAndroidLibmpvHardwareDecodingEnabled(enabled: Boolean) =
-        saveBoolean(androidLibmpvHardwareDecodingEnabledKey, enabled)
-    actual fun loadAndroidLibmpvYuv420pEnabled(): Boolean? = loadBoolean(androidLibmpvYuv420pEnabledKey)
-    actual fun saveAndroidLibmpvYuv420pEnabled(enabled: Boolean) = saveBoolean(androidLibmpvYuv420pEnabledKey, enabled)
     actual fun loadDecoderPriority(): Int? = loadInt(decoderPriorityKey)
     actual fun saveDecoderPriority(priority: Int) = saveInt(decoderPriorityKey, priority)
     actual fun loadStreamCacheSize(): String? = loadString(streamCacheSizeKey)
     actual fun saveStreamCacheSize(size: String) = saveString(streamCacheSizeKey, size)
     actual fun loadStreamCacheOnDisk(): Boolean? = loadBoolean(streamCacheOnDiskKey)
     actual fun saveStreamCacheOnDisk(enabled: Boolean) = saveBoolean(streamCacheOnDiskKey, enabled)
-    actual fun loadMapDV7ToHevc(): Boolean? = loadBoolean(mapDV7ToHevcKey)
-    actual fun saveMapDV7ToHevc(enabled: Boolean) = saveBoolean(mapDV7ToHevcKey, enabled)
-    actual fun loadTunnelingEnabled(): Boolean? = loadBoolean(tunnelingEnabledKey)
-    actual fun saveTunnelingEnabled(enabled: Boolean) = saveBoolean(tunnelingEnabledKey, enabled)
     actual fun loadStreamAutoPlayMode(): String? = loadString(streamAutoPlayModeKey)
     actual fun saveStreamAutoPlayMode(mode: String) = saveString(streamAutoPlayModeKey, mode)
     actual fun loadStreamAutoPlaySource(): String? = loadString(streamAutoPlaySourceKey)
@@ -273,39 +216,6 @@ internal actual object PlayerSettingsStorage {
     actual fun saveUseLibass(enabled: Boolean) = saveBoolean(useLibassKey, enabled)
     actual fun loadLibassRenderType(): String? = loadString(libassRenderTypeKey)
     actual fun saveLibassRenderType(renderType: String) = saveString(libassRenderTypeKey, renderType)
-    actual fun loadIosVideoOutputPreset(): String? = loadString(iosVideoOutputPresetKey)
-    actual fun saveIosVideoOutputPreset(preset: String) = saveString(iosVideoOutputPresetKey, preset)
-    actual fun loadIosToneMappingMode(): String? = loadString(iosToneMappingModeKey)
-    actual fun saveIosToneMappingMode(mode: String) = saveString(iosToneMappingModeKey, mode)
-    actual fun loadIosTargetPrimaries(): String? = loadString(iosTargetPrimariesKey)
-    actual fun saveIosTargetPrimaries(primaries: String) = saveString(iosTargetPrimariesKey, primaries)
-    actual fun loadIosTargetTransfer(): String? = loadString(iosTargetTransferKey)
-    actual fun saveIosTargetTransfer(transfer: String) = saveString(iosTargetTransferKey, transfer)
-    actual fun loadIosHardwareDecoderMode(): String? = loadString(iosHardwareDecoderModeKey)
-    actual fun saveIosHardwareDecoderMode(mode: String) = saveString(iosHardwareDecoderModeKey, mode)
-    actual fun loadIosAudioOutputMode(): String? = loadString(iosAudioOutputModeKey)
-    actual fun saveIosAudioOutputMode(mode: String) = saveString(iosAudioOutputModeKey, mode)
-    actual fun loadIosExtendedDynamicRangeEnabled(): Boolean? = loadBoolean(iosExtendedDynamicRangeEnabledKey)
-    actual fun saveIosExtendedDynamicRangeEnabled(enabled: Boolean) = saveBoolean(iosExtendedDynamicRangeEnabledKey, enabled)
-    actual fun loadIosTargetColorspaceHintEnabled(): Boolean? = loadBoolean(iosTargetColorspaceHintEnabledKey)
-    actual fun saveIosTargetColorspaceHintEnabled(enabled: Boolean) = saveBoolean(iosTargetColorspaceHintEnabledKey, enabled)
-    actual fun loadIosHdrComputePeakEnabled(): Boolean? = loadBoolean(iosHdrComputePeakEnabledKey)
-    actual fun saveIosHdrComputePeakEnabled(enabled: Boolean) = saveBoolean(iosHdrComputePeakEnabledKey, enabled)
-    actual fun loadIosDebandEnabled(): Boolean? = loadBoolean(iosDebandEnabledKey)
-    actual fun saveIosDebandEnabled(enabled: Boolean) = saveBoolean(iosDebandEnabledKey, enabled)
-    actual fun loadIosInterpolationEnabled(): Boolean? = loadBoolean(iosInterpolationEnabledKey)
-    actual fun saveIosInterpolationEnabled(enabled: Boolean) = saveBoolean(iosInterpolationEnabledKey, enabled)
-    actual fun loadIosBrightness(): Int? = loadInt(iosBrightnessKey)
-    actual fun saveIosBrightness(value: Int) = saveInt(iosBrightnessKey, value)
-    actual fun loadIosContrast(): Int? = loadInt(iosContrastKey)
-    actual fun saveIosContrast(value: Int) = saveInt(iosContrastKey, value)
-    actual fun loadIosSaturation(): Int? = loadInt(iosSaturationKey)
-    actual fun saveIosSaturation(value: Int) = saveInt(iosSaturationKey, value)
-    actual fun loadIosGamma(): Int? = loadInt(iosGammaKey)
-    actual fun saveIosGamma(value: Int) = saveInt(iosGammaKey, value)
-
-    actual fun loadNvidiaRtxSuperResolutionEnabled(): Boolean? = loadBoolean(nvidiaRtxSuperResolutionEnabledKey)
-    actual fun saveNvidiaRtxSuperResolutionEnabled(enabled: Boolean) = saveBoolean(nvidiaRtxSuperResolutionEnabledKey, enabled)
 
     private fun scoped(key: String): String = ProfileScopedKey.of(key)
     private fun loadString(key: String): String? = store.getString(scoped(key))
@@ -348,17 +258,9 @@ internal actual object PlayerSettingsStorage {
         loadAddonSubtitleStartupMode()?.let { put(addonSubtitleStartupModeKey, encodeSyncString(it)) }
         loadStreamReuseLastLinkEnabled()?.let { put(streamReuseLastLinkEnabledKey, encodeSyncBoolean(it)) }
         loadStreamReuseLastLinkCacheHours()?.let { put(streamReuseLastLinkCacheHoursKey, encodeSyncInt(it)) }
-        loadAndroidPlaybackEngine()?.let { put(androidPlaybackEngineKey, encodeSyncString(it)) }
-        loadAndroidLibmpvVideoOutput()?.let { put(androidLibmpvVideoOutputKey, encodeSyncString(it)) }
-        loadAndroidLibmpvHardwareDecodingEnabled()?.let {
-            put(androidLibmpvHardwareDecodingEnabledKey, encodeSyncBoolean(it))
-        }
-        loadAndroidLibmpvYuv420pEnabled()?.let { put(androidLibmpvYuv420pEnabledKey, encodeSyncBoolean(it)) }
         loadDecoderPriority()?.let { put(decoderPriorityKey, encodeSyncInt(it)) }
         loadStreamCacheSize()?.let { put(streamCacheSizeKey, encodeSyncString(it)) }
         loadStreamCacheOnDisk()?.let { put(streamCacheOnDiskKey, encodeSyncBoolean(it)) }
-        loadMapDV7ToHevc()?.let { put(mapDV7ToHevcKey, encodeSyncBoolean(it)) }
-        loadTunnelingEnabled()?.let { put(tunnelingEnabledKey, encodeSyncBoolean(it)) }
         loadStreamAutoPlayMode()?.let { put(streamAutoPlayModeKey, encodeSyncString(it)) }
         loadStreamAutoPlaySource()?.let { put(streamAutoPlaySourceKey, encodeSyncString(it)) }
         loadStreamAutoPlaySelectedAddons()?.let { put(streamAutoPlaySelectedAddonsKey, encodeSyncStringSet(it)) }
@@ -376,22 +278,6 @@ internal actual object PlayerSettingsStorage {
         loadNextEpisodeThresholdMinutesBeforeEnd()?.let { put(nextEpisodeThresholdMinutesBeforeEndKey, encodeSyncFloat(it)) }
         loadUseLibass()?.let { put(useLibassKey, encodeSyncBoolean(it)) }
         loadLibassRenderType()?.let { put(libassRenderTypeKey, encodeSyncString(it)) }
-        loadIosVideoOutputPreset()?.let { put(iosVideoOutputPresetKey, encodeSyncString(it)) }
-        loadIosToneMappingMode()?.let { put(iosToneMappingModeKey, encodeSyncString(it)) }
-        loadIosTargetPrimaries()?.let { put(iosTargetPrimariesKey, encodeSyncString(it)) }
-        loadIosTargetTransfer()?.let { put(iosTargetTransferKey, encodeSyncString(it)) }
-        loadIosHardwareDecoderMode()?.let { put(iosHardwareDecoderModeKey, encodeSyncString(it)) }
-        loadIosAudioOutputMode()?.let { put(iosAudioOutputModeKey, encodeSyncString(it)) }
-        loadIosExtendedDynamicRangeEnabled()?.let { put(iosExtendedDynamicRangeEnabledKey, encodeSyncBoolean(it)) }
-        loadIosTargetColorspaceHintEnabled()?.let { put(iosTargetColorspaceHintEnabledKey, encodeSyncBoolean(it)) }
-        loadIosHdrComputePeakEnabled()?.let { put(iosHdrComputePeakEnabledKey, encodeSyncBoolean(it)) }
-        loadIosDebandEnabled()?.let { put(iosDebandEnabledKey, encodeSyncBoolean(it)) }
-        loadIosInterpolationEnabled()?.let { put(iosInterpolationEnabledKey, encodeSyncBoolean(it)) }
-        loadIosBrightness()?.let { put(iosBrightnessKey, encodeSyncInt(it)) }
-        loadIosContrast()?.let { put(iosContrastKey, encodeSyncInt(it)) }
-        loadIosSaturation()?.let { put(iosSaturationKey, encodeSyncInt(it)) }
-        loadIosGamma()?.let { put(iosGammaKey, encodeSyncInt(it)) }
-        loadNvidiaRtxSuperResolutionEnabled()?.let { put(nvidiaRtxSuperResolutionEnabledKey, encodeSyncBoolean(it)) }
     }
 
     actual fun replaceFromSyncPayload(payload: JsonObject) {
@@ -423,16 +309,9 @@ internal actual object PlayerSettingsStorage {
         payload.decodeSyncString(addonSubtitleStartupModeKey)?.let(::saveAddonSubtitleStartupMode)
         payload.decodeSyncBoolean(streamReuseLastLinkEnabledKey)?.let(::saveStreamReuseLastLinkEnabled)
         payload.decodeSyncInt(streamReuseLastLinkCacheHoursKey)?.let(::saveStreamReuseLastLinkCacheHours)
-        payload.decodeSyncString(androidPlaybackEngineKey)?.let(::saveAndroidPlaybackEngine)
-        payload.decodeSyncString(androidLibmpvVideoOutputKey)?.let(::saveAndroidLibmpvVideoOutput)
-        payload.decodeSyncBoolean(androidLibmpvHardwareDecodingEnabledKey)
-            ?.let(::saveAndroidLibmpvHardwareDecodingEnabled)
-        payload.decodeSyncBoolean(androidLibmpvYuv420pEnabledKey)?.let(::saveAndroidLibmpvYuv420pEnabled)
         payload.decodeSyncInt(decoderPriorityKey)?.let(::saveDecoderPriority)
         payload.decodeSyncString(streamCacheSizeKey)?.let(::saveStreamCacheSize)
         payload.decodeSyncBoolean(streamCacheOnDiskKey)?.let(::saveStreamCacheOnDisk)
-        payload.decodeSyncBoolean(mapDV7ToHevcKey)?.let(::saveMapDV7ToHevc)
-        payload.decodeSyncBoolean(tunnelingEnabledKey)?.let(::saveTunnelingEnabled)
         payload.decodeSyncString(streamAutoPlayModeKey)?.let(::saveStreamAutoPlayMode)
         payload.decodeSyncString(streamAutoPlaySourceKey)?.let(::saveStreamAutoPlaySource)
         payload.decodeSyncStringSet(streamAutoPlaySelectedAddonsKey)?.let(::saveStreamAutoPlaySelectedAddons)
@@ -452,21 +331,5 @@ internal actual object PlayerSettingsStorage {
         payload.decodeSyncFloat(nextEpisodeThresholdMinutesBeforeEndKey)?.let(::saveNextEpisodeThresholdMinutesBeforeEnd)
         payload.decodeSyncBoolean(useLibassKey)?.let(::saveUseLibass)
         payload.decodeSyncString(libassRenderTypeKey)?.let(::saveLibassRenderType)
-        payload.decodeSyncString(iosVideoOutputPresetKey)?.let(::saveIosVideoOutputPreset)
-        payload.decodeSyncString(iosToneMappingModeKey)?.let(::saveIosToneMappingMode)
-        payload.decodeSyncString(iosTargetPrimariesKey)?.let(::saveIosTargetPrimaries)
-        payload.decodeSyncString(iosTargetTransferKey)?.let(::saveIosTargetTransfer)
-        payload.decodeSyncString(iosHardwareDecoderModeKey)?.let(::saveIosHardwareDecoderMode)
-        payload.decodeSyncString(iosAudioOutputModeKey)?.let(::saveIosAudioOutputMode)
-        payload.decodeSyncBoolean(iosExtendedDynamicRangeEnabledKey)?.let(::saveIosExtendedDynamicRangeEnabled)
-        payload.decodeSyncBoolean(iosTargetColorspaceHintEnabledKey)?.let(::saveIosTargetColorspaceHintEnabled)
-        payload.decodeSyncBoolean(iosHdrComputePeakEnabledKey)?.let(::saveIosHdrComputePeakEnabled)
-        payload.decodeSyncBoolean(iosDebandEnabledKey)?.let(::saveIosDebandEnabled)
-        payload.decodeSyncBoolean(iosInterpolationEnabledKey)?.let(::saveIosInterpolationEnabled)
-        payload.decodeSyncInt(iosBrightnessKey)?.let(::saveIosBrightness)
-        payload.decodeSyncInt(iosContrastKey)?.let(::saveIosContrast)
-        payload.decodeSyncInt(iosSaturationKey)?.let(::saveIosSaturation)
-        payload.decodeSyncInt(iosGammaKey)?.let(::saveIosGamma)
-        payload.decodeSyncBoolean(nvidiaRtxSuperResolutionEnabledKey)?.let(::saveNvidiaRtxSuperResolutionEnabled)
     }
 }

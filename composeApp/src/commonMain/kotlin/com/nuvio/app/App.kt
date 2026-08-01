@@ -3046,17 +3046,7 @@ private fun MainAppContent(
                     }
                 }
                 entry<PlayerRoute>(
-                    metadata = if (isIos) {
-                        NavDisplay.transitionSpec {
-                            fadeIn(animationSpec = tween(220)) togetherWith
-                                fadeOut(animationSpec = tween(220))
-                        } + NavDisplay.popTransitionSpec {
-                            fadeIn(animationSpec = tween(220)) togetherWith
-                                fadeOut(animationSpec = tween(220))
-                        }
-                    } else {
-                        emptyMap()
-                    },
+                    metadata = emptyMap(),
                 ) { route ->
                     val onBack = rememberGuardedPopBackStack(
                         navController = navController,
