@@ -36,11 +36,6 @@ private const val MinCustomDownscaleRatio = 1.08f
 private const val MaxDesktopSourceSizePx = 1536
 private const val MaxScaledBitmapPixels = 1_250_000L
 
-private val IsWindowsDesktop: Boolean =
-    System.getProperty("os.name")
-        ?.startsWith("Windows", ignoreCase = true)
-        ?: false
-
 @Composable
 internal actual fun NuvioAsyncImage(
     model: Any?,
@@ -62,7 +57,7 @@ internal actual fun NuvioAsyncImage(
 ) {
     val context = LocalPlatformContext.current
     val effectiveDesktopImageScaling = remember(desktopImageScaling) {
-        if (IsWindowsDesktop) desktopImageScaling else NuvioDesktopImageScaling.Disabled
+        NuvioDesktopImageScaling.Disabled
     }
     val requestModel = remember(context, model, effectiveDesktopImageScaling) {
         if (effectiveDesktopImageScaling == NuvioDesktopImageScaling.Disabled) {

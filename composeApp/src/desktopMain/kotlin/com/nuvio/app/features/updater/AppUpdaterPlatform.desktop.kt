@@ -120,12 +120,7 @@ actual object AppUpdaterPlatform {
         File(DesktopStorage.rootDir.resolve("updates").also { it.createDirectories() }.toUri())
 
     private fun launchInstaller(updateFile: File) {
-        val command = when (currentOs) {
-            DesktopUpdaterOs.WINDOWS -> windowsInstallerCommand(updateFile)
-            DesktopUpdaterOs.MACOS -> listOf("open", updateFile.absolutePath)
-            DesktopUpdaterOs.LINUX -> listOf("xdg-open", updateFile.absolutePath)
-            DesktopUpdaterOs.UNKNOWN -> error("Desktop updates are not supported on this operating system.")
-        }
+        val command = listOf("xdg-open", updateFile.absolutePath)
         ProcessBuilder(command).start()
     }
 
@@ -138,8 +133,6 @@ actual object AppUpdaterPlatform {
 }
 
 private enum class DesktopUpdaterOs {
-    WINDOWS,
-    MACOS,
     LINUX,
     UNKNOWN;
 
@@ -147,16 +140,6 @@ private enum class DesktopUpdaterOs {
         get() {
             val archFragments = desktopArchitectureFragments()
             return when (this) {
-                WINDOWS -> AppUpdateAssetSelector(
-                    fileExtensions = listOf(".msi", ".exe"),
-                    preferredNameFragments = archFragments + listOf("windows", "win"),
-                    fallbackNameFragments = listOf("universal", "all"),
-                )
-                MACOS -> AppUpdateAssetSelector(
-                    fileExtensions = listOf(".dmg", ".pkg"),
-                    preferredNameFragments = archFragments + listOf("macos", "mac", "darwin"),
-                    fallbackNameFragments = listOf("universal", "all"),
-                )
                 LINUX -> AppUpdateAssetSelector(
                     fileExtensions = listOf(".deb", ".AppImage"),
                     preferredNameFragments = archFragments + listOf("linux"),
@@ -169,12 +152,7 @@ private enum class DesktopUpdaterOs {
     companion object {
         fun current(): DesktopUpdaterOs {
             val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
-            return when {
-                osName.contains("win") -> WINDOWS
-                osName.contains("mac") -> MACOS
-                osName.contains("linux") -> LINUX
-                else -> UNKNOWN
-            }
+            return if (osName.contains("linux")) LINUX else UNKNOWN
         }
     }
 }
@@ -187,12 +165,4 @@ private fun desktopArchitectureFragments(): List<String> {
         arch.contains("64") -> listOf("x64", "x86_64", "amd64")
         else -> emptyList()
     }
-}
-
-internal fun windowsInstallerCommand(updateFile: File): List<String> {
-    if (!updateFile.extension.equals("msi", ignoreCase = true)) {
-        return listOf(updateFile.absolutePath)
-    }
-
-    return listOf("msiexec", "/i", updateFile.absolutePath)
 }

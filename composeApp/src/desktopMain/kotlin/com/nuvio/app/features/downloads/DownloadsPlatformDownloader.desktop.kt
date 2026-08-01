@@ -163,15 +163,8 @@ internal actual object DownloadsPlatformDownloader {
     }
 }
 
-private fun openDirectoryWithPlatformCommand(directory: File): Boolean {
-    val osName = System.getProperty("os.name").orEmpty().lowercase()
-    val command = when {
-        osName.contains("mac") -> listOf("open", directory.absolutePath)
-        osName.contains("win") -> listOf("explorer", directory.absolutePath)
-        else -> listOf("xdg-open", directory.absolutePath)
-    }
-    return runCatching { ProcessBuilder(command).start() }.isSuccess
-}
+private fun openDirectoryWithPlatformCommand(directory: File): Boolean =
+    runCatching { ProcessBuilder(listOf("xdg-open", directory.absolutePath)).start() }.isSuccess
 
 private class DesktopDownloadsTaskHandle(
     private val job: Job,

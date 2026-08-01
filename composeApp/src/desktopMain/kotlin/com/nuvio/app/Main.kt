@@ -19,10 +19,8 @@ import com.nuvio.app.core.deeplink.handleAppUrl
 import com.nuvio.app.features.p2p.P2pStreamingEngine
 import com.nuvio.app.features.player.PlatformPlayerSurface
 import com.nuvio.app.features.player.desktop.DesktopAppFullscreenController
-import com.nuvio.app.features.player.desktop.DesktopHostOs
 import com.nuvio.app.features.player.desktop.DesktopWindowGeometry
 import com.nuvio.app.features.player.desktop.DesktopWindowModeStorage
-import com.nuvio.app.features.player.desktop.applyNativeDesktopWindowChrome
 import com.nuvio.app.features.player.desktop.installDesktopAppFullscreenShortcuts
 import com.nuvio.app.features.player.desktop.preloadNativePlayerBridgeAsync
 import com.nuvio.app.features.player.desktop.registerDesktopAppFullscreenToggle
@@ -32,10 +30,8 @@ import javax.swing.JComponent
 
 private val NuvioDesktopNativeBackground = AwtColor(0x0D, 0x0D, 0x0D)
 private const val NuvioDesktopIconPath = "icons/nuvio-app-icon.png"
-private const val MacosDarkAquaAppearance = "NSAppearanceNameDarkAqua"
 
 fun main(args: Array<String>) {
-    configureDesktopChrome()
     installDesktopOpenUriHandler()
     handleDesktopLaunchArgs(args)
     preloadNativePlayerBridgeAsync()
@@ -53,9 +49,7 @@ fun main(args: Array<String>) {
             height = savedGeometry?.height?.dp ?: 820.dp,
             position = savedGeometry?.let { WindowPosition.Absolute(x = it.x.dp, y = it.y.dp) }
                 ?: WindowPosition.PlatformDefault,
-            // Windows fullscreen is emulated natively (see DesktopAppFullscreenController)
-            // rather than driven by WindowPlacement, so it's restored separately below.
-            placement = if (wasFullscreenOnLastExit && DesktopHostOs.current != DesktopHostOs.WINDOWS) {
+            placement = if (wasFullscreenOnLastExit) {
                 WindowPlacement.Fullscreen
             } else {
                 WindowPlacement.Floating
@@ -79,24 +73,17 @@ fun main(args: Array<String>) {
                 (window.contentPane as? JComponent)?.isOpaque = true
             }
             LaunchedEffect(window) {
-                applyNativeDesktopWindowChrome(window)
-                // Windows fullscreen is emulated natively and isn't reflected by
-                // WindowPlacement, so it must be re-applied once the window peer exists.
                 fullscreenController.applyRestoredFullscreenState(window, windowState, wasFullscreenOnLastExit)
             }
             LaunchedEffect(windowState) {
-                // Covers OS-driven placement changes too (e.g. the native macOS
-                // green-button fullscreen toggle), not just our own shortcuts.
-                if (DesktopHostOs.current != DesktopHostOs.WINDOWS) {
-                    snapshotFlow { windowState.placement }
-                        .collect { placement ->
-                            DesktopWindowModeStorage.saveWasFullscreen(placement == WindowPlacement.Fullscreen)
-                        }
-                }
+                snapshotFlow { windowState.placement }
+                    .collect { placement ->
+                        DesktopWindowModeStorage.saveWasFullscreen(placement == WindowPlacement.Fullscreen)
+                    }
             }
             LaunchedEffect(windowState) {
-                // Only persist geometry while windowed: fullscreen/native-Windows-fullscreen
-                // coordinates aren't a meaningful "windowed position" to restore later.
+                // Only persist geometry while windowed: fullscreen coordinates
+                // aren't a meaningful "windowed position" to restore later.
                 snapshotFlow { Triple(windowState.placement, windowState.position, windowState.size) }
                     .collect { (placement, position, size) ->
                         val isWindowed = placement == WindowPlacement.Floating &&
@@ -150,12 +137,6 @@ fun main(args: Array<String>) {
                 }
             }
         }
-    }
-}
-
-private fun configureDesktopChrome() {
-    if (System.getProperty("os.name").contains("mac", ignoreCase = true)) {
-        System.setProperty("apple.awt.application.appearance", MacosDarkAquaAppearance)
     }
 }
 

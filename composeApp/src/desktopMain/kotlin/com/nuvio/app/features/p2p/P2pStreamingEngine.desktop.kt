@@ -531,34 +531,21 @@ actual object P2pStreamingEngine {
     ) {
         companion object {
             fun current(): DesktopTorrServerPlatform {
-                val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
                 val arch = System.getProperty("os.arch").orEmpty().lowercase(Locale.ROOT)
-                val os = when {
-                    osName.contains("mac") -> DesktopTorrServerOs(resourceName = "macos", distName = "darwin")
-                    osName.contains("win") -> DesktopTorrServerOs(resourceName = "windows", distName = "windows")
-                    osName.contains("linux") -> DesktopTorrServerOs(resourceName = "linux", distName = "linux")
-                    else -> throw P2pStreamingException("Unsupported desktop OS for TorrServer: $osName")
-                }
                 val archName = when (arch) {
                     "aarch64", "arm64" -> "arm64"
                     "amd64", "x86_64", "x64" -> "amd64"
                     "x86", "i386", "i686" -> "386"
                     else -> throw P2pStreamingException("Unsupported desktop architecture for TorrServer: $arch")
                 }
-                val extension = if (os.distName == "windows") ".exe" else ""
                 return DesktopTorrServerPlatform(
-                    resourceDir = "${os.resourceName}-$archName",
-                    distFileName = "TorrServer-${os.distName}-$archName$extension",
-                    binaryName = "TorrServer$extension",
+                    resourceDir = "linux-$archName",
+                    distFileName = "TorrServer-linux-$archName",
+                    binaryName = "TorrServer",
                 )
             }
         }
     }
-
-    private data class DesktopTorrServerOs(
-        val resourceName: String,
-        val distName: String,
-    )
 
     private data class TorrServerFile(
         val id: Int,

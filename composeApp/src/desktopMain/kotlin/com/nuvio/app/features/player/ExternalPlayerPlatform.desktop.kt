@@ -56,13 +56,6 @@ internal actual object ExternalPlayerPlatform {
         return openWithPlatformCommand(rawUri)
     }
 
-    private fun openWithPlatformCommand(rawUri: String): Boolean {
-        val osName = System.getProperty("os.name").orEmpty().lowercase()
-        val command = when {
-            osName.contains("mac") -> listOf("open", rawUri)
-            osName.contains("win") -> listOf("rundll32", "url.dll,FileProtocolHandler", rawUri)
-            else -> listOf("xdg-open", rawUri)
-        }
-        return runCatching { ProcessBuilder(command).start() }.isSuccess
-    }
+    private fun openWithPlatformCommand(rawUri: String): Boolean =
+        runCatching { ProcessBuilder(listOf("xdg-open", rawUri)).start() }.isSuccess
 }

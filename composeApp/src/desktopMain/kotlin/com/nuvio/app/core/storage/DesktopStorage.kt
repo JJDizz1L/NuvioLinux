@@ -37,19 +37,9 @@ internal object DesktopStorage {
     }
 
     private fun resolveAppDataDir(): Path {
-        val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
         val userHome = Paths.get(System.getProperty("user.home").orEmpty())
-        return when {
-            osName.contains("mac") -> userHome.resolve("Library/Application Support/Nuvio")
-            osName.contains("win") -> {
-                val appData = System.getenv("APPDATA")?.takeIf { it.isNotBlank() }
-                (appData?.let(Paths::get) ?: userHome.resolve("AppData/Roaming")).resolve("Nuvio")
-            }
-            else -> {
-                val xdgConfig = System.getenv("XDG_CONFIG_HOME")?.takeIf { it.isNotBlank() }
-                (xdgConfig?.let(Paths::get) ?: userHome.resolve(".config")).resolve("nuvio")
-            }
-        }
+        val xdgConfig = System.getenv("XDG_CONFIG_HOME")?.takeIf { it.isNotBlank() }
+        return (xdgConfig?.let(Paths::get) ?: userHome.resolve(".config")).resolve("nuvio")
     }
 
     internal class Store(

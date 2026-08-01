@@ -1316,7 +1316,6 @@ JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerB
     jint decoderPriority,
     jlong streamCacheBytes,
     jboolean streamCacheOnDisk,
-    jboolean nvidiaRtxSuperResolutionEnabled,
     jobject eventSink)
 {
     LOG("create: hostViewPtr=0x%llx", (unsigned long long)hostViewPtr);

@@ -1,7 +1,6 @@
 package com.nuvio.app.features.discord
 
 import java.io.IOException
-import java.io.RandomAccessFile
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
 import java.nio.ByteBuffer
@@ -30,12 +29,10 @@ private const val OP_PONG = 4
 
 /**
  * Minimal Discord IPC client. Speaks the classic rich-presence protocol over
- * the unix domain socket (Linux/macOS) or named pipe (Windows):
+ * the unix domain socket:
  *   frame = int32-le opcode + int32-le length + UTF-8 JSON payload
  * Handshake:  {v: 1, client_id: "..."}
  * SET_ACTIVITY: {cmd: "SET_ACTIVITY", args: {pid, activity}} (activity null = clear)
- * Windows connections must prefix the stream with a 0xFFFFFFFF dword (pipe
- * message-mode marker) before the first frame.
  *
  * A dedicated reader thread watches the connection for EOF/CLOSE so a dead
  * socket (Discord restarted, or another client took the slot) is detected
@@ -45,7 +42,6 @@ private const val OP_PONG = 4
  */
 internal class DiscordRpcClient {
     private var socket: SocketChannel? = null
-    private var pipe: RandomAccessFile? = null
     private var handshaken = false
     private var readerThread: Thread? = null
 
@@ -58,37 +54,12 @@ internal class DiscordRpcClient {
     var onConnectionLost: (() -> Unit)? = null
 
     val isConnected: Boolean
-        get() = !dead && (socket?.isConnected == true || pipe != null)
+        get() = !dead && (socket?.isConnected == true)
 
     fun connect(): Boolean {
         if (isConnected) return true
         if (dead) disconnect()
-        val windows = System.getProperty("os.name")?.contains("win", ignoreCase = true) == true
-        return if (windows) {
-            connectWindowsPipe()
-        } else {
-            connectUnixSocket()
-        }
-    }
-
-    private fun connectWindowsPipe(): Boolean {
-        for (name in listOf("\\\\.\\pipe\\discord-ipc-0")) {
-            try {
-                val raf = RandomAccessFile(name, "rw")
-                // Discord's Windows pipe protocol requires the connection to
-                // start with a 0xFFFFFFFF dword, which switches the pipe into
-                // message mode — without it the handshake frame is malformed.
-                raf.write(byteArrayOf(0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte()))
-                pipe = raf
-                handshaken = false
-                dead = false
-                startReader()
-                return true
-            } catch (_: Exception) {
-                // pipe not present; try the next candidate
-            }
-        }
-        return false
+        return connectUnixSocket()
     }
 
     private fun connectUnixSocket(): Boolean {
@@ -122,10 +93,6 @@ internal class DiscordRpcClient {
             candidates += "$xdgRuntime/vesktop-ipc-0"
             candidates += "$xdgRuntime/app/com.discordapp.Discord/discord-ipc-0"
             candidates += "$xdgRuntime/snap.discord/discord-ipc-0"
-        }
-        val macTmp = System.getenv("TMPDIR")
-        if (!macTmp.isNullOrBlank()) {
-            candidates += "$macTmp/discord-ipc"
         }
         candidates += "/tmp/discord-ipc-0"
         candidates += "/tmp/discord-ipc"
@@ -178,8 +145,7 @@ internal class DiscordRpcClient {
                 socket.write(frame)
             }
         } else {
-            val pipe = pipe ?: throw IOException("not connected")
-            pipe.write(frame.array())
+            throw IOException("not connected")
         }
     }
 
@@ -190,13 +156,8 @@ internal class DiscordRpcClient {
     private fun startReader() {
         val reader = Thread({
             try {
-                val channel = socket
-                if (channel != null) {
-                    readSocketFrames(channel)
-                } else {
-                    val raf = pipe
-                    if (raf != null) readPipeFrames(raf)
-                }
+                val channel = socket ?: throw IOException("not connected")
+                readSocketFrames(channel)
             } catch (_: Exception) {
                 // connection dropped
             }
@@ -241,54 +202,12 @@ internal class DiscordRpcClient {
         return true
     }
 
-    private fun readPipeFrames(raf: RandomAccessFile) {
-        val header = ByteArray(8)
-        while (true) {
-            if (!readFully(raf, header)) return
-            val buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
-            val op = buffer.int
-            val length = buffer.int
-            if (!skipPipe(raf, length)) return
-            if (op == OP_PING) {
-                writeFrame(OP_PONG, "")
-            } else if (op == OP_CLOSE) {
-                return
-            }
-        }
-    }
-
-    private fun readFully(raf: RandomAccessFile, bytes: ByteArray): Boolean {
-        var offset = 0
-        while (offset < bytes.size) {
-            val n = raf.read(bytes, offset, bytes.size - offset)
-            if (n < 0) return false
-            offset += n
-        }
-        return true
-    }
-
-    private fun skipPipe(raf: RandomAccessFile, length: Int): Boolean {
-        var remaining = length
-        val buffer = ByteArray(minOf(4096, maxOf(remaining, 1)))
-        while (remaining > 0) {
-            val n = raf.read(buffer, 0, minOf(buffer.size, remaining))
-            if (n < 0) return false
-            remaining -= n
-        }
-        return true
-    }
-
     fun disconnect() {
         try {
             socket?.close()
         } catch (_: Exception) {
         }
-        try {
-            pipe?.close()
-        } catch (_: Exception) {
-        }
         socket = null
-        pipe = null
         handshaken = false
         dead = false
         readerThread?.interrupt()
