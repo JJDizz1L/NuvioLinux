@@ -103,9 +103,19 @@ Build a release package for the current host:
 
 Linux packaging:
 
+Build a Debian `.deb` package for **Debian-based** distros (Debian, Ubuntu, and derivatives):
+
 ```bash
 ./gradlew :composeApp:packageReleaseDeb
 ```
+
+The resulting `.deb` is written to `composeApp/build/compose/binaries/main/deb/`. Install it with:
+
+```bash
+sudo apt install ./composeApp/build/compose/binaries/main/deb/*.deb
+```
+
+> Note: this fork's primary Linux distribution is the [Arch Linux package](#installation-arch-linux) (self-contained, bundled JRE). The `.deb` target is provided for Debian-based systems but is the less-tested path. Both require a native `mpv` installation at runtime.
 
 ## Project Structure
 
