@@ -52,12 +52,12 @@ Prebuilt packages are attached to each [release](https://github.com/JJDizz1L/Nuv
 ### Install directly from the release URL
 
 ```bash
-sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.15-alpha/nuvio-linux-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.15.1/nuvio-linux-0.1.0-2-x86_64.pkg.tar.zst
 ```
 
 ### Install a manually downloaded package
 
-Download `nuvio-linux-0.1.0-1-x86_64.pkg.tar.zst` from the latest
+Download `nuvio-linux-0.1.0-2-x86_64.pkg.tar.zst` from the latest
 [release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
 
 ```bash

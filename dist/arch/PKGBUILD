@@ -6,7 +6,7 @@
 
 pkgname=nuvio-linux
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Nuvio desktop media player — Linux native mpv playback"
 arch=('x86_64')
 url="https://github.com/JJDizz1L/NuvioDesktop"
@@ -20,7 +20,11 @@ noextract=()
 sha256sums=()
 
 export GRADLE_OPTS="-Dorg.gradle.parallel=false"
-export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+# Build with a baseline x86-64 JDK (e.g. Temurin) so the bundled JRE is
+# portable. Distro JDKs built with -march=native/-march=x86-64-v3/v4 (e.g.
+# CachyOS) produce a runtime that only runs on those CPUs.
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
+echo "[nuvio-pkg] Using JAVA_HOME=${JAVA_HOME}"
 
 build() {
   local REPO_ROOT="${startdir}/../.."
