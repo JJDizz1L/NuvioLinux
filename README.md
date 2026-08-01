@@ -47,25 +47,37 @@ This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMe
 
 ## Installation (Arch Linux)
 
+Prebuilt packages are attached to each [release](https://github.com/JJDizz1L/NuvioLinux/releases). The package is self-contained (bundled JRE, no system Java required) and installs to `/opt/nuvio-linux`.
+
+### Install directly from the release URL
+
+```bash
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.15-alpha/nuvio-linux-0.1.0-1-x86_64.pkg.tar.zst
+```
+
+### Install a manually downloaded package
+
+Download `nuvio-linux-0.1.0-1-x86_64.pkg.tar.zst` from the latest
+[release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
+
+```bash
+sudo pacman -U ./nuvio-linux-0.1.0-1-x86_64.pkg.tar.zst
+```
+
+### Build from source
+
 ```bash
 git clone https://github.com/JJDizz1L/NuvioLinux.git
 cd NuvioLinux/dist/arch
 makepkg -si
 ```
 
-This builds the self-contained `nuvio-linux` package and installs it to `/opt/nuvio-linux`.
+### Launching
 
 Launch it from your app menu, or from a terminal:
 
 ```bash
 nuvio-linux
-```
-
-To update to a newer build, pull the latest code and re-run `makepkg -si`:
-
-```bash
-git pull
-makepkg -si
 ```
 
 This fork does not produce Windows or macOS builds.
