@@ -13,15 +13,6 @@ on:
           - draft
           - publish
         default: dry-run
-      target:
-        description: Platforms to build in build-only mode
-        required: true
-        type: choice
-        options:
-          - all
-          - windows
-          - macos
-        default: all
       exclude_commits:
         description: Optional comma-separated commit hashes to omit from the notes
         required: false
@@ -37,7 +28,7 @@ concurrency:
 
 jobs:
   metadata:
-    name: ${{ inputs.mode }} ${{ inputs.target }} desktop release
+    name: ${{ inputs.mode }} desktop release
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -69,15 +60,9 @@ jobs:
           RELEASE_COMMIT: ${{ steps.release.outputs.release_commit }}
           RELEASE_REF_TYPE: ${{ github.ref_type }}
           RELEASE_MODE: ${{ inputs.mode }}
-          RELEASE_TARGET: ${{ inputs.target }}
         run: |
           if [[ "${RELEASE_REF_TYPE}" != "branch" ]]; then
             echo "Releases must be dispatched from a branch, not ${RELEASE_REF_TYPE}." >&2
-            exit 1
-          fi
-
-          if [[ "${RELEASE_MODE}" != "build-only" && "${RELEASE_TARGET}" != "all" ]]; then
-            echo "Release validation, draft, and publish modes require target=all." >&2
             exit 1
           fi
 
@@ -139,232 +124,24 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  macos:
-    name: macOS ${{ matrix.arch }}
-    if: inputs.mode != 'dry-run' && inputs.target != 'windows'
+  linux:
+    name: Linux x64
+    if: inputs.mode != 'dry-run'
     needs: metadata
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     environment: desktop-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x86_64
     env:
       LOCAL_PROPERTIES_BASE64: ${{ secrets.NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 }}
-      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      MACOS_CERTIFICATE_SHA256: ${{ vars.MACOS_CERTIFICATE_SHA256 }}
-      MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
-      MACOS_NOTARY_APP_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_PASSWORD }}
-      MACOS_NOTARY_TEAM_ID: ${{ vars.MACOS_NOTARY_TEAM_ID }}
-      NUVIO_MACOS_NOTARY_KEYCHAIN_PROFILE: ${{ vars.MACOS_NOTARY_PROFILE }}
-      NUVIO_MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
 
     steps:
       - name: Check out release source
         uses: actions/checkout@v6
 
-      - name: Fetch macOS runtime
-        env:
-          MACOS_ARCH: ${{ matrix.arch }}
-        run: git lfs pull --include="composeApp/src/desktopMain/native/macos/runtime/${MACOS_ARCH}/**" --exclude=""
-
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      - name: Configure desktop runtime
-        run: |
-          required_values=(
-            LOCAL_PROPERTIES_BASE64
-            MACOS_CERTIFICATE_P12_BASE64
-            MACOS_CERTIFICATE_PASSWORD
-            MACOS_CERTIFICATE_SHA256
-            MACOS_NOTARY_APPLE_ID
-            MACOS_NOTARY_APP_PASSWORD
-            MACOS_NOTARY_TEAM_ID
-            NUVIO_MACOS_NOTARY_KEYCHAIN_PROFILE
-            NUVIO_MACOS_SIGNING_IDENTITY
-          )
-          missing=()
-          for value_name in "${required_values[@]}"; do
-            if [[ -z "${!value_name}" ]]; then
-              missing+=("${value_name}")
-            fi
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing required desktop release values: %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-
-          printf '%s' "${LOCAL_PROPERTIES_BASE64}" | base64 --decode > local.properties
-          sed -i '' -E '/^[[:space:]]*(sdk\.dir|NUVIO_RELEASE_(STORE_FILE|STORE_PASSWORD|KEY_ALIAS|KEY_PASSWORD)|NUVIO_MACOS_(SIGNING_IDENTITY|NOTARY_APPLE_ID|NOTARY_TEAM_ID|NOTARY_PASSWORD|NOTARY_KEYCHAIN_PROFILE|NOTARY_KEYCHAIN_PATH))[[:space:]]*=/d' local.properties
-
-          required_properties=(
-            NUVIO_SUPABASE_URL
-            NUVIO_SUPABASE_ANON_KEY
-            TRAKT_CLIENT_ID
-            TRAKT_CLIENT_SECRET
-          )
-          for property_name in "${required_properties[@]}"; do
-            if ! grep -Eq "^${property_name}=.+" local.properties; then
-              echo "Missing required desktop property: ${property_name}" >&2
-              exit 1
-            fi
-          done
-
-      - name: Configure Apple signing and notarization
-        run: |
-          certificate_path="${RUNNER_TEMP}/nuvio-release.p12"
-          keychain_path="${RUNNER_TEMP}/nuvio-release.keychain-db"
-          keychain_password="$(openssl rand -hex 32)"
-
-          printf '%s' "${MACOS_CERTIFICATE_P12_BASE64}" | base64 --decode > "${certificate_path}"
-          chmod 600 "${certificate_path}"
-
-          actual_sha256="$(
-            openssl pkcs12 \
-              -in "${certificate_path}" \
-              -clcerts \
-              -nokeys \
-              -passin env:MACOS_CERTIFICATE_PASSWORD \
-              | openssl x509 -noout -fingerprint -sha256 \
-              | sed -E 's/^.*=//; s/://g' \
-              | tr '[:upper:]' '[:lower:]'
-          )"
-          expected_sha256="$(
-            printf '%s' "${MACOS_CERTIFICATE_SHA256}" \
-              | tr -d ':' \
-              | tr '[:upper:]' '[:lower:]'
-          )"
-          if [[ "${actual_sha256}" != "${expected_sha256}" ]]; then
-            echo "The Apple signing certificate checksum does not match." >&2
-            exit 1
-          fi
-
-          security create-keychain -p "${keychain_password}" "${keychain_path}"
-          security set-keychain-settings -lut 21600 "${keychain_path}"
-          security unlock-keychain -p "${keychain_password}" "${keychain_path}"
-          security import "${certificate_path}" \
-            -k "${keychain_path}" \
-            -P "${MACOS_CERTIFICATE_PASSWORD}" \
-            -T /usr/bin/codesign
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k "${keychain_password}" \
-            "${keychain_path}"
-          security list-keychains -d user -s "${keychain_path}"
-          security find-identity -v -p codesigning "${keychain_path}" \
-            | grep -F "${NUVIO_MACOS_SIGNING_IDENTITY}"
-
-          xcrun notarytool store-credentials \
-            "${NUVIO_MACOS_NOTARY_KEYCHAIN_PROFILE}" \
-            --apple-id "${MACOS_NOTARY_APPLE_ID}" \
-            --team-id "${MACOS_NOTARY_TEAM_ID}" \
-            --password "${MACOS_NOTARY_APP_PASSWORD}" \
-            --keychain "${keychain_path}" \
-            --validate
-
-          echo "NUVIO_MACOS_NOTARY_KEYCHAIN_PATH=${keychain_path}" >> "${GITHUB_ENV}"
-
-      - name: Build, sign, and notarize DMG
-        env:
-          MACOS_ARCH: ${{ matrix.arch }}
-        run: |
-          ./gradlew \
-            :composeApp:notarizeReleaseDmgWithKeychain \
-            "-Pnuvio.macos.arch=${MACOS_ARCH}" \
-            -Pcompose.desktop.packaging.checkJdkVendor=false \
-            --no-configuration-cache \
-            --no-daemon \
-            --stacktrace
-
-      - name: Verify notarized DMG
-        env:
-          MACOS_ARCH: ${{ matrix.arch }}
-          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
-        run: |
-          dmg_path="composeApp/build/compose/release-dmgs/Nuvio-macOS-${MACOS_ARCH}-${RELEASE_VERSION}.dmg"
-          if [[ ! -f "${dmg_path}" ]]; then
-            echo "Expected DMG was not produced: ${dmg_path}" >&2
-            exit 1
-          fi
-          xcrun stapler validate "${dmg_path}"
-          codesign --verify --strict --verbose=2 "${dmg_path}"
-          spctl --assess --type open --context context:primary-signature --verbose=2 "${dmg_path}"
-
-      - name: Upload DMG
-        uses: actions/upload-artifact@v7
-        with:
-          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-macos-${{ matrix.arch }}
-          path: composeApp/build/compose/release-dmgs/Nuvio-macOS-${{ matrix.arch }}-${{ needs.metadata.outputs.version }}.dmg
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Remove temporary signing material
-        if: always()
-        run: |
-          keychain_path="${RUNNER_TEMP}/nuvio-release.keychain-db"
-          if [[ -f "${keychain_path}" ]]; then
-            security delete-keychain "${keychain_path}"
-          fi
-          rm -f "${RUNNER_TEMP}/nuvio-release.p12"
-
-  windows:
-    name: Windows x64
-    if: inputs.mode != 'dry-run' && inputs.target != 'macos'
-    needs: metadata
-    runs-on: windows-2022
-    environment: desktop-release
-    env:
-      LOCAL_PROPERTIES_BASE64: ${{ secrets.NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 }}
-      WEBVIEW2_VERSION: 1.0.4078.44
-      TORRSERVER_WINDOWS_SHA256: 13031185a54abe0f729f9f3bdb7271a349a89ac8c559327d773c66007ed604f4
-
-    steps:
-      - name: Check out release source
-        uses: actions/checkout@v6
-
-      - name: Fetch Windows runtime
-        shell: bash
-        run: |
-          git lfs pull --include="composeApp/src/desktopMain/native/windows/runtime/**,composeApp/src/desktopMain/resources/torrserver/windows-amd64/TorrServer.exe" --exclude=""
-          runtime_path="composeApp/src/desktopMain/native/windows/runtime/libmpv-2.dll"
-          if [[ ! -f "${runtime_path}" ]]; then
-            echo "The bundled Windows libmpv runtime is missing." >&2
-            exit 1
-          fi
-          runtime_size="$(wc -c < "${runtime_path}")"
-          if (( runtime_size < 1000000 )); then
-            echo "The bundled Windows libmpv runtime was not materialized from Git LFS." >&2
-            exit 1
-          fi
-          torrserver_path="composeApp/src/desktopMain/resources/torrserver/windows-amd64/TorrServer.exe"
-          if [[ ! -f "${torrserver_path}" ]]; then
-            echo "The bundled Windows TorrServer executable is missing." >&2
-            exit 1
-          fi
-          torrserver_sha256="$(sha256sum "${torrserver_path}" | awk '{print $1}')"
-          if [[ "${torrserver_sha256}" != "${TORRSERVER_WINDOWS_SHA256}" ]]; then
-            echo "The bundled Windows TorrServer executable checksum does not match." >&2
-            exit 1
-          fi
-
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -378,7 +155,7 @@ jobs:
           fi
 
           printf '%s' "${LOCAL_PROPERTIES_BASE64}" | base64 --decode > local.properties
-          sed -i -E '/^[[:space:]]*(sdk\.dir|NUVIO_RELEASE_(STORE_FILE|STORE_PASSWORD|KEY_ALIAS|KEY_PASSWORD)|NUVIO_MACOS_(SIGNING_IDENTITY|NOTARY_APPLE_ID|NOTARY_TEAM_ID|NOTARY_PASSWORD|NOTARY_KEYCHAIN_PROFILE|NOTARY_KEYCHAIN_PATH))[[:space:]]*=/d' local.properties
+          sed -i -E '/^[[:space:]]*(sdk\.dir|NUVIO_RELEASE_(STORE_FILE|STORE_PASSWORD|KEY_ALIAS|KEY_PASSWORD))[[:space:]]*=/d' local.properties
 
           required_properties=(
             NUVIO_SUPABASE_URL
@@ -393,147 +170,43 @@ jobs:
             fi
           done
 
-      - name: Install WebView2 SDK
-        shell: pwsh
+      - name: Install mpv
         run: |
-          nuget install Microsoft.Web.WebView2 `
-            -Version $env:WEBVIEW2_VERSION `
-            -OutputDirectory "$env:RUNNER_TEMP\nuget" `
-            -DirectDownload `
-            -NonInteractive `
-            -NoCache
+          sudo apt-get update
+          sudo apt-get install -y libmpv-dev
 
-          $webView2Root = Join-Path $env:RUNNER_TEMP "nuget\Microsoft.Web.WebView2.$env:WEBVIEW2_VERSION"
-          $loaderLibrary = Join-Path $webView2Root "build\native\x64\WebView2Loader.dll.lib"
-          if (-not (Test-Path $loaderLibrary)) {
-            throw "WebView2Loader.dll.lib was not found at $loaderLibrary"
-          }
-          "WEBVIEW2_ROOT=$webView2Root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Build MSI
-        shell: pwsh
+      - name: Build .deb
         run: |
-          & .\gradlew.bat `
-            :composeApp:packageReleaseMsi `
-            "-Pnuvio.webview2.dir=$env:WEBVIEW2_ROOT" `
-            "-Pcompose.desktop.packaging.checkJdkVendor=false" `
-            --no-configuration-cache `
-            --no-daemon `
+          ./gradlew \
+            :composeApp:packageReleaseDeb \
+            -Pcompose.desktop.packaging.checkJdkVendor=false \
+            --no-configuration-cache \
+            --no-daemon \
             --stacktrace
 
-      - name: Verify MSI
-        shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+      - name: Verify .deb
         run: |
-          $msiRelativePath = "composeApp\build\compose\release-msis\Nuvio-Windows-x64-$env:RELEASE_VERSION.msi"
-          if (-not (Test-Path $msiRelativePath)) {
-            throw "Expected MSI was not produced: $msiRelativePath"
-          }
-          $msiPath = (Resolve-Path $msiRelativePath).Path
-          $extractDir = Join-Path $env:RUNNER_TEMP "nuvio-msi-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $extractLog = Join-Path $env:RUNNER_TEMP "nuvio-msi-extract.log"
-          New-Item -ItemType Directory -Path $extractDir | Out-Null
+          deb_path="$(ls composeApp/build/compose/binaries/main-release/deb/*.deb 2>/dev/null || true)"
+          if [[ -z "${deb_path}" ]]; then
+            echo "Expected .deb was not produced under composeApp/build/compose/binaries/main-release/deb/." >&2
+            exit 1
+          fi
+          dpkg-deb --info "${deb_path}" | head -30
 
-          $extractArguments = @(
-            "/a",
-            "`"$msiPath`"",
-            "/qn",
-            "TARGETDIR=`"$extractDir`"",
-            "/l*v",
-            "`"$extractLog`""
-          )
-          $extractProcess = Start-Process `
-            -FilePath msiexec.exe `
-            -ArgumentList $extractArguments `
-            -Wait `
-            -PassThru
-          if ($extractProcess.ExitCode -ne 0) {
-            Get-Content $extractLog -Tail 200
-            throw "MSI administrative extraction failed with exit code $($extractProcess.ExitCode)."
-          }
-
-          $appJar = Get-ChildItem $extractDir `
-            -Recurse `
-            -Filter "composeApp-desktop-*.jar" `
-            | Select-Object -First 1
-          if ($null -eq $appJar) {
-            throw "The extracted MSI does not contain the desktop application JAR."
-          }
-
-          $jarEntries = & jar tf $appJar.FullName
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not inspect the extracted desktop application JAR."
-          }
-          $requiredEntries = @(
-            "native/windows/player_bridge.dll",
-            "native/windows/libmpv-2.dll",
-            "native/windows/WebView2Loader.dll",
-            "native/windows/vcruntime140.dll",
-            "native/windows/msvcp140.dll",
-            "native/windows/runtime-files.txt",
-            "torrserver/windows-amd64/TorrServer.exe"
-          )
-          foreach ($entry in $requiredEntries) {
-            if ($jarEntries -notcontains $entry) {
-              throw "The extracted MSI application is missing $entry"
-            }
-          }
-
-          $javaRuntimeJvm = Get-ChildItem $extractDir `
-            -Recurse `
-            -Filter "jvm.dll" `
-            | Where-Object { $_.FullName -match "[\\/]runtime[\\/]bin[\\/]server[\\/]jvm\.dll$" } `
-            | Select-Object -First 1
-          if ($null -eq $javaRuntimeJvm) {
-            throw "The extracted MSI does not contain the bundled Java runtime."
-          }
-
-          $manifestPath = "composeApp\build\compose\release-msis\Nuvio-Windows-x64-$env:RELEASE_VERSION-contents.txt"
-          $extractedFiles = Get-ChildItem $extractDir -Recurse -File | Sort-Object FullName
-          $nativeEntries = $jarEntries `
-            | Where-Object { $_ -like "native/windows/*" } `
-            | Sort-Object
-          $manifest = [Collections.Generic.List[string]]::new()
-          $manifest.Add("MSI=Nuvio-Windows-x64-$env:RELEASE_VERSION.msi")
-          $manifest.Add("MSI_SHA256=$((Get-FileHash $msiPath -Algorithm SHA256).Hash.ToLowerInvariant())")
-          $manifest.Add("MSI_SIGNATURE_STATUS=$((Get-AuthenticodeSignature $msiPath).Status)")
-          $manifest.Add("EXTRACTED_FILE_COUNT=$($extractedFiles.Count)")
-          $manifest.Add("APP_JAR=$([IO.Path]::GetRelativePath($extractDir, $appJar.FullName).Replace('\', '/'))")
-          $manifest.Add("JAVA_RUNTIME_JVM=$([IO.Path]::GetRelativePath($extractDir, $javaRuntimeJvm.FullName).Replace('\', '/'))")
-          $manifest.Add("")
-          $manifest.Add("NATIVE_JAR_ENTRIES")
-          foreach ($entry in $nativeEntries) {
-            $manifest.Add($entry)
-          }
-          $manifest.Add("")
-          $manifest.Add("EXTRACTED_FILES")
-          foreach ($file in $extractedFiles) {
-            $relativePath = [IO.Path]::GetRelativePath($extractDir, $file.FullName).Replace('\', '/')
-            $manifest.Add("$relativePath`t$($file.Length)")
-          }
-          $manifest | Set-Content $manifestPath -Encoding utf8
-
-          Get-Item $msiPath | Format-List Name, Length, LastWriteTime
-          $manifest | Select-Object -First (9 + $nativeEntries.Count)
-
-      - name: Upload MSI
+      - name: Upload .deb
         uses: actions/upload-artifact@v7
         with:
-          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-windows-x64
-          path: |
-            composeApp/build/compose/release-msis/Nuvio-Windows-x64-${{ needs.metadata.outputs.version }}.msi
-            composeApp/build/compose/release-msis/Nuvio-Windows-x64-${{ needs.metadata.outputs.version }}-contents.txt
+          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-linux-x64
+          path: composeApp/build/compose/binaries/main-release/deb/*.deb
           if-no-files-found: error
           retention-days: 14
 
   release:
     name: Create ${{ inputs.mode }} release
-    if: inputs.mode != 'build-only' && inputs.mode != 'dry-run' && inputs.target == 'all'
+    if: inputs.mode != 'build-only' && inputs.mode != 'dry-run'
     needs:
       - metadata
-      - macos
-      - windows
+      - linux
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -552,36 +225,25 @@ jobs:
 
       - name: Create checksums
         run: |
-          release_assets=(
-            "release/Nuvio-macOS-arm64-${RELEASE_VERSION}.dmg"
-            "release/Nuvio-macOS-x86_64-${RELEASE_VERSION}.dmg"
-            "release/Nuvio-Windows-x64-${RELEASE_VERSION}.msi"
-          )
           if [[ ! -s release/release-notes.md ]]; then
             echo "Release notes are missing." >&2
             exit 1
           fi
 
+          deb_path="$(ls release/*.deb 2>/dev/null || true)"
+          if [[ -z "${deb_path}" ]]; then
+            echo "Release asset is missing: a .deb under release/." >&2
+            exit 1
+          fi
+
           : > release/SHA256SUMS.txt
-          for asset in "${release_assets[@]}"; do
-            if [[ ! -f "${asset}" ]]; then
-              echo "Release asset is missing: ${asset}" >&2
-              exit 1
-            fi
-            checksum="$(sha256sum "${asset}" | awk '{print $1}')"
-            printf '%s  %s\n' "${checksum}" "$(basename "${asset}")" >> release/SHA256SUMS.txt
-          done
+          checksum="$(sha256sum "${deb_path}" | awk '{print $1}')"
+          printf '%s  %s\n' "${checksum}" "$(basename "${deb_path}")" >> release/SHA256SUMS.txt
 
           cat release/SHA256SUMS.txt >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Create GitHub release
         run: |
-          release_assets=(
-            "release/Nuvio-macOS-arm64-${RELEASE_VERSION}.dmg"
-            "release/Nuvio-macOS-x86_64-${RELEASE_VERSION}.dmg"
-            "release/Nuvio-Windows-x64-${RELEASE_VERSION}.msi"
-            "release/SHA256SUMS.txt"
-          )
           release_args=(
             "${RELEASE_TAG}"
             --target "${RELEASE_COMMIT}"
@@ -591,4 +253,6 @@ jobs:
           if [[ "${RELEASE_MODE}" == "draft" ]]; then
             release_args+=(--draft)
           fi
-          gh release create --repo "${GITHUB_REPOSITORY}" "${release_args[@]}" "${release_assets[@]}"
+          gh release create --repo "${GITHUB_REPOSITORY}" "${release_args[@]}" \
+            release/*.deb \
+            "release/SHA256SUMS.txt"

@@ -35,7 +35,7 @@ body:
         - Sync (Trakt / remote)
         - Downloads / Offline
         - Installer / Updater
-        - Platform-specific (Windows / macOS / Linux)
+        - Platform-specific (Linux)
         - Other
     validations:
       required: true

@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-version_file="${VERSION_FILE:-iosApp/Configuration/Version.xcconfig}"
-version_key="${VERSION_KEY:-MARKETING_VERSION}"
+version_file="${VERSION_FILE:-composeApp/Configuration/DesktopVersion.properties}"
+version_key="${VERSION_KEY:-VERSION_NAME}"
 first_parent="${VERSION_FIRST_PARENT:-false}"
 target_ref="${1:-HEAD}"
 

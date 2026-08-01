@@ -107,7 +107,7 @@ To keep issues fixable, bug reports should include:
 
 - A short, specific issue title that describes the bug
 - App version (release version or commit hash)
-- Desktop platform (Windows / macOS / Linux), hardware, and OS version
+- Desktop platform (Linux), hardware, and OS version
 - Install method (GitHub Release desktop installer/package / CI / built from source)
 - Steps to reproduce (exact steps)
 - Expected vs actual behavior
@@ -121,7 +121,7 @@ Logs are optional for most issues, but they are **required** for crash reports.
 
 **Desktop:**
 
-Copy the relevant terminal/console output, installer logs, updater logs, or Windows Event Viewer crash details from around the time the issue occurred.
+Copy the relevant terminal/console output, installer logs, updater logs, or crash reports from around the time the issue occurred.
 
 ---
 
