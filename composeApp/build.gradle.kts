@@ -363,20 +363,6 @@ abstract class PrepareMacosTorrServerResourcesTask @Inject constructor(
     }
 }
 
-fun readXcconfigValue(file: File, key: String): String? {
-    if (!file.exists()) return null
-    return file.readLines()
-        .asSequence()
-        .map(String::trim)
-        .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('=') }
-        .map { line ->
-            val separatorIndex = line.indexOf('=')
-            line.substring(0, separatorIndex).trim() to line.substring(separatorIndex + 1).trim()
-        }
-        .firstOrNull { (entryKey, _) -> entryKey == key }
-        ?.second
-}
-
 fun shellQuote(value: String): String = "'${value.replace("'", "'\"'\"'")}'"
 
 fun cmdQuote(value: String): String = "\"${value.replace("\"", "\"\"")}\""
@@ -415,7 +401,6 @@ fun jpackageCompatibleVersion(version: String): String {
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinxSerialization)
@@ -449,12 +434,6 @@ val macosNotaryKeychainPath = localOrEnvProperty("NUVIO_MACOS_NOTARY_KEYCHAIN_PA
 val macosNotaryAppSpecificPassword = macosNotaryPassword
     ?.takeUnless { it.startsWith("@keychain:", ignoreCase = true) }
 
-val appVersionConfigFile = rootProject.file("iosApp/Configuration/Version.xcconfig")
-val releaseAppVersionName = readXcconfigValue(appVersionConfigFile, "MARKETING_VERSION")
-    ?: error("MARKETING_VERSION is missing from ${appVersionConfigFile.path}")
-val releaseAppVersionCode = readXcconfigValue(appVersionConfigFile, "CURRENT_PROJECT_VERSION")
-    ?.toIntOrNull()
-    ?: error("CURRENT_PROJECT_VERSION is missing or invalid in ${appVersionConfigFile.path}")
 val desktopVersionConfigFile = rootProject.file("composeApp/Configuration/DesktopVersion.properties")
 val desktopVersionProps = Properties().apply {
     if (desktopVersionConfigFile.exists()) {
@@ -480,62 +459,15 @@ val desktopReleaseVersionCode = (
     ?.takeIf { it.isNotBlank() }
     ?.toIntOrNull()
     ?: 1
+val releaseAppVersionName = desktopReleaseVersionName
+val releaseAppVersionCode = desktopReleaseVersionCode
 val desktopReleasePackageVersion = jpackageCompatibleVersion(desktopReleaseVersionName)
 val windowsMsiUpgradeUuid = "395990ee-9b8a-3548-922c-e7a23a495b8d"
-val iosDistribution = (
-    providers.gradleProperty("nuvio.ios.distribution").orNull
-        ?: System.getenv("NUVIO_IOS_DISTRIBUTION")
-        ?: supabaseProps.getProperty("NUVIO_IOS_DISTRIBUTION")
-        ?: "appstore"
-    ).trim().lowercase()
-require(iosDistribution == "appstore" || iosDistribution == "full") {
-    "NUVIO_IOS_DISTRIBUTION must be 'appstore' or 'full'."
-}
-val iosDistributionSourceDir = if (iosDistribution == "full") {
-    "src/iosFull/kotlin"
-} else {
-    "src/iosAppStore/kotlin"
-}
-val iosFrameworkBundleId = "com.nuvio.media"
-val nuvioEngineAppleFramework = rootProject.file("../nuvio-engine/platform/apple/NuvioEngine.xcframework")
 val fullCommonSourceDir = project.file("src/fullCommonMain/kotlin")
 val fullPluginSourceDir = fullCommonSourceDir.resolve("com/nuvio/app/features/plugins")
 val generatedRuntimeConfigDir = layout.buildDirectory.dir("generated/runtime-config/kotlin")
 val requestedGradleTasks = gradle.startParameter.taskNames.map { taskName ->
     taskName.substringAfterLast(':').lowercase()
-}
-val requestedAndroidDistributions = requestedGradleTasks.mapNotNull { taskName ->
-    when {
-        "playstore" in taskName -> "playstore"
-        "full" in taskName -> "full"
-        else -> null
-    }
-}.toSet()
-require(requestedAndroidDistributions.size <= 1) {
-    "Build Android full and playstore distributions separately, or set -Pnuvio.android.distribution=full|playstore."
-}
-val configuredAndroidDistribution = providers.gradleProperty("nuvio.android.distribution").orNull
-    ?: supabaseProps.getProperty("NUVIO_ANDROID_DISTRIBUTION")
-val isAmbiguousAndroidPackageTask = requestedGradleTasks.any { taskName ->
-    taskName == "build" ||
-        taskName.startsWith("assemble") ||
-        taskName.startsWith("bundle")
-} && requestedAndroidDistributions.isEmpty()
-require(configuredAndroidDistribution != null || !isAmbiguousAndroidPackageTask) {
-    "Set -Pnuvio.android.distribution=full|playstore for aggregate Android assemble/bundle tasks."
-}
-val androidDistribution = (
-    configuredAndroidDistribution
-        ?: requestedAndroidDistributions.singleOrNull()
-        ?: "playstore"
-    ).trim().lowercase()
-require(androidDistribution == "playstore" || androidDistribution == "full") {
-    "nuvio.android.distribution must be 'playstore' or 'full'."
-}
-val androidDistributionSourceDir = if (androidDistribution == "full") {
-    "src/androidFull/kotlin"
-} else {
-    "src/androidPlaystore/kotlin"
 }
 val runtimeLocalProperties = Properties().apply {
     val file = rootProject.file("local.properties")
@@ -1050,128 +982,15 @@ tasks.withType<KotlinCompilationTask<*>>().configureEach {
 }
 
 kotlin {
-    android {
-        namespace = "com.nuvio.app"
-        compileSdk {
-            version = release(libs.versions.android.compileSdk.get().toInt()) {
-                minorApiLevel = libs.versions.android.compileSdkMinor.get().toInt()
-            }
-        }
-        minSdk = libs.versions.android.minSdk.get().toInt()
-        androidResources.enable = true
-        withHostTest {}
-
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_11)
-        }
-    }
-
     jvm("desktop") {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
     }
-    
-    val iosTargets = listOf(
-        iosArm64(),
-        iosSimulatorArm64()
-    )
 
-    iosTargets.forEach { iosTarget ->
-        val nuvioEngineSlice = if (iosTarget.name == "iosArm64") {
-            "ios-arm64"
-        } else {
-            "ios-arm64_x86_64-simulator"
-        }
-        val nuvioEngineSliceDirectory = nuvioEngineAppleFramework.resolve(nuvioEngineSlice)
-        iosTarget.compilations.getByName("main") {
-            cinterops {
-                create("commoncrypto") {
-                    defFile(project.file("src/nativeInterop/cinterop/commoncrypto.def"))
-                    compilerOpts("-I${project.projectDir}/src/nativeInterop/cinterop")
-                }
-                if (iosDistribution == "full") {
-                    check(nuvioEngineSliceDirectory.resolve("libCNuvioEngine.a").isFile) {
-                        "Build the local Nuvio Engine Apple XCFramework before compiling iOS Full."
-                    }
-                    create("nuvioengine") {
-                        defFile(project.file("src/nativeInterop/cinterop/nuvioengine.def"))
-                        compilerOpts("-I${nuvioEngineSliceDirectory.resolve("Headers").absolutePath}")
-                        extraOpts("-libraryPath", nuvioEngineSliceDirectory.absolutePath)
-                    }
-                }
-            }
-
-            if (iosDistribution == "full") {
-                defaultSourceSet.kotlin.srcDir(fullCommonSourceDir)
-            }
-            defaultSourceSet.kotlin.srcDir(project.file(iosDistributionSourceDir))
-            defaultSourceSet.dependencies {
-                implementation(libs.ktor.client.darwin)
-                if (iosDistribution == "full") {
-                    implementation(libs.quickjs.kt)
-                    implementation(libs.ksoup)
-                }
-            }
-        }
-
-        iosTarget.binaries.framework {
-            baseName = "ComposeApp"
-            isStatic = true
-            freeCompilerArgs += listOf("-Xbinary=bundleId=$iosFrameworkBundleId")
-            if (iosDistribution == "full") {
-                linkerOpts(
-                    "-lc++",
-                    "-framework", "Security",
-                    "-framework", "SystemConfiguration",
-                    "-framework", "CoreFoundation",
-                )
-            }
-        }
-    }
-    
     sourceSets {
         val commonMain by getting {
             kotlin.srcDir(generatedRuntimeConfigDir)
-        }
-        androidMain {
-            kotlin.srcDir(project.file(androidDistributionSourceDir))
-            if (androidDistribution == "full") {
-                kotlin.srcDir(fullCommonSourceDir)
-            }
-
-            dependencies {
-                implementation(libs.compose.uiToolingPreview)
-                implementation(libs.androidx.appcompat)
-                implementation(libs.androidx.activity.compose)
-                implementation(libs.androidx.core.splashscreen)
-                implementation(libs.androidx.work.runtime)
-                implementation(libs.coil.gif)
-                implementation("androidx.recyclerview:recyclerview:1.4.0")
-                implementation("com.squareup.okhttp3:okhttp:4.12.0")
-                implementation("com.google.code.gson:gson:2.11.0")
-                implementation("io.github.peerless2012:ass-media:0.4.0-beta01")
-                implementation(libs.ktor.client.okhttp)
-                implementation(libs.sentry.android)
-                implementation(libs.androidx.media3.exoplayer.hls)
-                implementation(libs.androidx.media3.exoplayer.dash)
-                implementation(libs.androidx.media3.exoplayer.smoothstreaming)
-                implementation(libs.androidx.media3.exoplayer.rtsp)
-                implementation(libs.androidx.media3.datasource)
-                implementation(libs.androidx.media3.datasource.okhttp)
-                implementation(libs.androidx.media3.decoder)
-                implementation(libs.androidx.media3.session)
-                implementation(libs.androidx.media3.common)
-                implementation(libs.androidx.media3.container)
-                implementation(libs.androidx.media3.extractor)
-                implementation(libs.mpv.android.lib)
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-                implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("lib-*.aar"))))
-                if (androidDistribution == "full") {
-                    implementation(files("libs/quickjs-kt-android-1.0.5-nuvio.aar"))
-                    implementation(libs.ksoup)
-                }
-            }
         }
         val desktopMain by getting {
             kotlin.srcDir(fullPluginSourceDir)
@@ -1429,12 +1248,4 @@ if (isMacHost) {
         keychainPath.set(macosNotaryKeychainPath.orEmpty())
         signingIdentity.set(macosSigningIdentity.orEmpty())
     }
-}
-configurations.matching { it.name == "iosMainImplementation" }.configureEach {
-    project.dependencies.add(name, libs.ktor.client.darwin)
-}
-
-configurations.all {
-    exclude(group = "androidx.media3", module = "media3-exoplayer")
-    exclude(group = "androidx.media3", module = "media3-ui")
 }
