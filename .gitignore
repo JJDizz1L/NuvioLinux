@@ -12,12 +12,6 @@ local.properties
 captures
 .externalNativeBuild
 .cxx
-*.xcodeproj/*
-!*.xcodeproj/project.pbxproj
-!*.xcodeproj/xcshareddata/
-!*.xcodeproj/project.xcworkspace/
-!*.xcworkspace/contents.xcworkspacedata
-**/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
 logs/
 analysis/
@@ -25,14 +19,10 @@ Docs
 keystore/
 scripts/build-distribution.sh
 asset
-scripts/scrape_android_compose_animation_docs.py
 tools
 AGENTS.md
 
 PERFORMANCE_FINDINGS.md
-
-# Local MPVKit iOS build environment (sparse APFS image, see MPVKit docs)
-.mpvkit-build.sparseimage
 
 # Arch package build artifacts
 dist/arch/pkg/

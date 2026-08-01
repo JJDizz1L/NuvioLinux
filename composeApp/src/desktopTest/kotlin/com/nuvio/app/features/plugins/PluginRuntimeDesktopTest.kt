@@ -1,5 +1,6 @@
 package com.nuvio.app.features.plugins
 
+import com.nuvio.app.features.plugins.runtime.PluginRuntime
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals

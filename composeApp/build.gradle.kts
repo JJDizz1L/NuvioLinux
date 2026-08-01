@@ -463,8 +463,6 @@ val releaseAppVersionName = desktopReleaseVersionName
 val releaseAppVersionCode = desktopReleaseVersionCode
 val desktopReleasePackageVersion = jpackageCompatibleVersion(desktopReleaseVersionName)
 val windowsMsiUpgradeUuid = "395990ee-9b8a-3548-922c-e7a23a495b8d"
-val fullCommonSourceDir = project.file("src/fullCommonMain/kotlin")
-val fullPluginSourceDir = fullCommonSourceDir.resolve("com/nuvio/app/features/plugins")
 val generatedRuntimeConfigDir = layout.buildDirectory.dir("generated/runtime-config/kotlin")
 val requestedGradleTasks = gradle.startParameter.taskNames.map { taskName ->
     taskName.substringAfterLast(':').lowercase()
@@ -993,7 +991,6 @@ kotlin {
             kotlin.srcDir(generatedRuntimeConfigDir)
         }
         val desktopMain by getting {
-            kotlin.srcDir(fullPluginSourceDir)
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)

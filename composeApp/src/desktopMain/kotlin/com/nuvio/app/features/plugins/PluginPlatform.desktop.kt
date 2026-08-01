@@ -1,7 +1,6 @@
 package com.nuvio.app.features.plugins
 
 import com.nuvio.app.core.storage.DesktopStorage
-import java.util.Locale
 
 internal object PluginStorage {
     private const val pluginsStateKey = "plugins_state"
@@ -24,19 +23,11 @@ internal object PluginStorage {
 
 internal fun currentPluginPlatform(): String = "desktop"
 
-internal fun currentPluginPlatformTags(): Set<String> {
-    val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
-    val osTag = when {
-        osName.contains("mac") || osName.contains("darwin") -> "macos"
-        osName.contains("win") -> "windows"
-        osName.contains("linux") -> "linux"
-        else -> null
-    }
-    return buildSet {
+internal fun currentPluginPlatformTags(): Set<String> =
+    buildSet {
         add(currentPluginPlatform())
         add("jvm")
-        osTag?.let(::add)
+        add("linux")
     }
-}
 
 internal fun currentEpochMillis(): Long = System.currentTimeMillis()
