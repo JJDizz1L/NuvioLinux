@@ -47,7 +47,7 @@ This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMe
 
 ## Installation (Arch Linux)
 
-Prebuilt packages are attached to each [release](https://github.com/JJDizz1L/NuvioLinux/releases). The package is self-contained (bundled JRE, no system Java required) and installs to `/opt/nuvio-linux`.
+Prebuilt packages are attached to each [release](https://github.com/JJDizz1L/NuvioLinux/releases). The package is self-contained (bundled JRE, no system Java required), installs to `/opt/nuvio-linux`, and is compiled for **generic x86-64** — it runs on any x86-64 CPU (no AVX2/AVX-512 requirement).
 
 ### Install directly from the release URL
 
@@ -61,7 +61,7 @@ Download `nuvio-linux-0.1.0-2-x86_64.pkg.tar.zst` from the latest
 [release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
 
 ```bash
-sudo pacman -U ./nuvio-linux-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U ./nuvio-linux-0.1.0-2-x86_64.pkg.tar.zst
 ```
 
 ### Build from source
@@ -71,6 +71,11 @@ git clone https://github.com/JJDizz1L/NuvioLinux.git
 cd NuvioLinux/dist/arch
 makepkg -si
 ```
+
+> To keep the bundled JRE portable, build with a **baseline x86-64 JDK** (e.g.
+> Eclipse Temurin 21) — distro JDKs compiled with `-march=native` /
+> `-march=x86-64-v3/v4` (e.g. CachyOS) produce a runtime that only runs on
+> those CPUs. Point `JAVA_HOME` at a generic JDK before running `makepkg`.
 
 ### Launching
 
