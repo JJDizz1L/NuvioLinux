@@ -154,6 +154,7 @@ typedef void         (*mpv_wakeup_t)(mpv_handle*);
 typedef int          (*mpv_observe_property_t)(mpv_handle*, uint64_t, const char*, mpv_format);
 typedef int          (*mpv_unobserve_property_t)(mpv_handle*, uint64_t);
 typedef int          (*mpv_request_event_t)(mpv_handle*, mpv_event_id, int);
+typedef int          (*mpv_request_log_messages_t)(mpv_handle*, const char*);
 typedef int          (*mpv_command_t)(mpv_handle*, const char**);
 typedef int          (*mpv_command_string_t)(mpv_handle*, const char*);
 typedef int64_t      (*mpv_get_time_us_t)(mpv_handle*);
@@ -236,6 +237,7 @@ static mpv_wakeup_t                 p_mpv_wakeup                  = nullptr;
 static mpv_observe_property_t       p_mpv_observe_property        = nullptr;
 static mpv_unobserve_property_t     p_mpv_unobserve_property      = nullptr;
 static mpv_request_event_t          p_mpv_request_event           = nullptr;
+static mpv_request_log_messages_t   p_mpv_request_log_messages    = nullptr;
 static mpv_command_t                p_mpv_command                 = nullptr;
 static mpv_command_string_t         p_mpv_command_string          = nullptr;
 static mpv_get_time_us_t            p_mpv_get_time_us             = nullptr;
@@ -284,6 +286,7 @@ static int load_libmpv() {
     LOAD_SYM(mpv_observe_property);
     LOAD_SYM(mpv_unobserve_property);
     LOAD_SYM(mpv_request_event);
+    LOAD_SYM(mpv_request_log_messages);
     LOAD_SYM(mpv_command);
     LOAD_SYM(mpv_command_string);
     LOAD_SYM(mpv_get_time_us);
@@ -1130,6 +1133,11 @@ struct MpvPlayer {
             return -1;
         }
 
+        /* Forward mpv's internal logs to stderr (warn+ by default, info+ with
+         * NUVIO_MPV_DEBUG) so stream/open failures become visible. */
+        p_mpv_request_log_messages(mpv, g_debug ? "info" : "warn");
+        DBG("mpv log messages requested (level=%s)", g_debug ? "info" : "warn");
+
         /* Create the render context before any playback starts. The render
          * thread creates it (GL with a dedicated offscreen EGL context, else
          * the SW renderer) and owns all mpv_render_* calls from then on.
@@ -1221,11 +1229,19 @@ struct MpvPlayer {
             }
 
             if (evId == MPV_EVENT_LOG_MESSAGE && evData) {
-                /* Surface mpv's own diagnostics (e.g. "Using hardware decoding
-                 * (vaapi-copy)" / "Falling back to software decoding"). */
+                /* Surface mpv's own diagnostics (e.g. "Failed to open <url>",
+                 * "Using hardware decoding (vaapi-copy)"). Warnings and errors
+                 * always print; info/debug only with NUVIO_MPV_DEBUG. */
                 mpv_event_log_message *msg = (mpv_event_log_message*)evData;
                 if (msg->text) {
-                    DBG("[mpv/%s] %s", msg->prefix ? msg->prefix : "?", msg->text);
+                    const char *level = msg->level ? msg->level : "?";
+                    const char *prefix = msg->prefix ? msg->prefix : "?";
+                    if (strcmp(level, "error") == 0 || strcmp(level, "fatal") == 0 ||
+                        strcmp(level, "warn") == 0) {
+                        LOG("[mpv/%s] %s", prefix, msg->text);
+                    } else {
+                        DBG("[mpv/%s] %s", prefix, msg->text);
+                    }
                 }
             }
 

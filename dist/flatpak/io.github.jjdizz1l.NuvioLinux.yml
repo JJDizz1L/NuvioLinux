@@ -50,12 +50,25 @@ modules:
         url: https://github.com/libass/libass/releases/download/0.17.3/libass-0.17.3.tar.xz
         sha256: eae425da50f0015c21f7b3a9c7262a910f0218af469e22e2931462fed3c50959
 
+  - name: openssl
+    buildsystem: simple
+    build-commands:
+      - ./Configure --prefix=/app --openssldir=/etc/ssl no-shared no-tests no-docs no-module no-legacy
+      - make -j${FLATPAK_BUILDER_N_JOBS}
+      - make install_sw
+    sources:
+      - type: archive
+        url: https://www.openssl.org/source/openssl-3.4.1.tar.gz
+        sha256: 002a2d6b30b58bf4bea46c43bdd96365aaf8daa6c428782aa4feee06da197df3
+
   - name: ffmpeg
     buildsystem: simple
     build-commands:
       - ./configure --prefix=/app --disable-doc --disable-debug --disable-avdevice
-        --disable-postproc --disable-swscale --disable-network --disable-everything
-        --enable-protocol=file,http,https,tcp,tls --enable-demuxer=matroska,avi,mp4,mov,mpegts,webm_dash_manifest
+        --disable-postproc --disable-swscale --disable-everything
+        --enable-network --enable-openssl
+        --enable-protocol=file,http,https,tcp,tls
+        --enable-demuxer=matroska,avi,mp4,mov,mpegts,webm_dash_manifest,hls
         --enable-parser=h264,hevc,aac,mp3,ac3,vp9,av1
         --enable-decoder=h264,hevc,aac,mp3,ac3,eac3,opus,vorbis,vp9,av1,flac
         --enable-encoder=png --enable-ffmpeg --disable-ffplay --disable-ffprobe
