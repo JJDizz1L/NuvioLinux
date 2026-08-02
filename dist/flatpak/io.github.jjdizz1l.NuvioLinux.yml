@@ -7,12 +7,20 @@ rename-desktop-file: nuvio-linux.desktop
 rename-icon: nuvio-linux
 separate-locales: false
 
+add-extensions:
+  org.freedesktop.Platform.VAAPI.Intel:
+    version: '25.08'
+    directory: lib/intel-vaapi-driver
+    download-if: have-intel-gpu
+    enable-if: have-intel-gpu
+
 finish-args:
   - --share=network
   - --socket=x11
   - --socket=wayland
   - --socket=pulseaudio
   - --device=dri
+  - --device=all
   - --filesystem=home/.config/mpv:ro
   - --filesystem=home/.mpv:ro
   - --filesystem=xdg-download:rw
@@ -145,6 +153,8 @@ modules:
       - -Dvaapi-drm=enabled
       - -Dvaapi-x11=enabled
       - -Dvaapi-wayland=enabled
+      - -Dcuda-hwaccel=enabled
+      - -Dcuda-interop=enabled
       - -Dgbm=enabled
       - -Dpipewire=enabled
       - -Dpulse=enabled
@@ -158,7 +168,7 @@ modules:
     buildsystem: simple
     build-commands:
       - cp -a /run/build/nuvio-linux/nuvio-src/nuvio-app /app/nuvio
-      - mkdir -p /app/bin
+      - mkdir -p /app/bin /app/lib/intel-vaapi-driver
       - cp /run/build/nuvio-linux/nuvio-src/nuvio-linux /app/bin/nuvio-linux
       - chmod +x /app/bin/nuvio-linux
       - install -Dm644 /run/build/nuvio-linux/nuvio-src/nuvio-linux.desktop /app/share/applications/nuvio-linux.desktop
