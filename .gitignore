@@ -38,3 +38,6 @@ dist/flatpak/flatpak-src/
 dist/flatpak/*.flatpak
 *.AppImage
 dist/arch/*.pkg.tar.zst
+
+# Generated release notes
+release-notes.md
