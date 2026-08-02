@@ -29,6 +29,10 @@ cp -a composeApp/build/compose/binaries/main/app/nuvio-linux "${SRC}/nuvio-app"
 
 cat > "${SRC}/nuvio-linux" <<EOF
 #!/bin/sh
+# Point libva at the Mesa GL extension's VA-API drivers (radeonsi etc.).
+# The extension mounts at /usr/lib/x86_64-linux-gnu/GL/default/, which is not
+# in libva's default driver search path.
+export LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/GL/default/lib/dri:/usr/lib/x86_64-linux-gnu/dri"
 exec /app/nuvio/bin/nuvio-linux "\$@"
 EOF
 chmod +x "${SRC}/nuvio-linux"
