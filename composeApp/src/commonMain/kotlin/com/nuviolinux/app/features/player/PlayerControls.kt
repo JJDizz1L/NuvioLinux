@@ -46,7 +46,13 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -520,6 +526,7 @@ private fun ProgressControls(
     val aspectRatioPainter = appIconPainter(AppIconResource.PlayerAspectRatio)
     val subtitlesPainter = appIconPainter(AppIconResource.PlayerSubtitles)
     val audioPainter = appIconPainter(AppIconResource.PlayerAudioFilled)
+    var latestScrubMs by remember { mutableLongStateOf(displayedPositionMs) }
 
     Column(modifier = modifier) {
         Slider(
@@ -528,8 +535,13 @@ private fun ProgressControls(
                 .height(metrics.sliderTouchHeight)
                 .graphicsLayer(scaleY = metrics.sliderScaleY),
             value = displayedPositionMs.coerceIn(0L, durationMs).toFloat(),
-            onValueChange = { value -> onScrubChange(value.toLong()) },
-            onValueChangeFinished = { onScrubFinished(displayedPositionMs.coerceIn(0L, durationMs)) },
+            onValueChange = { value ->
+                latestScrubMs = value.toLong()
+                onScrubChange(value.toLong())
+            },
+            onValueChangeFinished = {
+                onScrubFinished(latestScrubMs.coerceIn(0L, durationMs))
+            },
             valueRange = 0f..durationMs.toFloat(),
         )
         Row(
@@ -777,9 +789,16 @@ private fun VolumeControlPill(
     onMuteToggle: () -> Unit,
 ) {
     val level = (volumeLevel ?: 1f).coerceIn(0f, 1f)
+    var isDragging by remember { mutableStateOf(false) }
+    var localVolume by remember { mutableFloatStateOf(level) }
+    LaunchedEffect(volumeLevel) {
+        if (!isDragging) {
+            localVolume = (volumeLevel ?: 1f).coerceIn(0f, 1f)
+        }
+    }
     val volumeIcon = when {
-        level <= 0f -> Icons.Rounded.VolumeOff
-        level < 0.5f -> Icons.Rounded.VolumeDown
+        localVolume <= 0f -> Icons.Rounded.VolumeOff
+        localVolume < 0.5f -> Icons.Rounded.VolumeDown
         else -> Icons.Rounded.VolumeUp
     }
     Row(
@@ -792,14 +811,22 @@ private fun VolumeControlPill(
     ) {
         Icon(
             imageVector = volumeIcon,
-            contentDescription = stringResource(Res.string.compose_player_volume_level, percentageLabel(level)),
+            contentDescription = stringResource(Res.string.compose_player_volume_level, percentageLabel(localVolume)),
             tint = Color.White,
             modifier = Modifier.size(18.dp),
         )
         Slider(
             modifier = Modifier.width(88.dp),
-            value = level,
-            onValueChange = onVolumeChange,
+            value = localVolume,
+            onValueChange = {
+                isDragging = true
+                localVolume = it.coerceIn(0f, 1f)
+                onVolumeChange(it.coerceIn(0f, 1f))
+            },
+            onValueChangeFinished = {
+                isDragging = false
+                onVolumeChange(localVolume.coerceIn(0f, 1f))
+            },
             valueRange = 0f..1f,
             colors = SliderDefaults.colors(
                 thumbColor = Color.White,

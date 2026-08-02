@@ -201,8 +201,8 @@ internal fun Modifier.playerSurfaceDragGestures(
 
 /**
  * Mouse-wheel volume control for desktop. Every wheel notch moves the volume
- * by [percentPerNotch]. Disabled while a modal panel is open so scrolling a
- * list never changes the volume.
+ * by [percentPerNotch]; scrolling up raises the volume. Disabled while a modal
+ * panel is open so scrolling a list never changes the volume.
  */
 internal fun Modifier.playerSurfaceVolumeWheel(
     percentPerNotch: Float,
@@ -216,7 +216,7 @@ internal fun Modifier.playerSurfaceVolumeWheel(
                 var deltaY = 0f
                 event.changes.forEach { deltaY += it.scrollDelta.y }
                 if (deltaY != 0f && isEnabled()) {
-                    onVolumeDeltaPercent(deltaY * percentPerNotch)
+                    onVolumeDeltaPercent(-deltaY * percentPerNotch)
                 }
             }
         }

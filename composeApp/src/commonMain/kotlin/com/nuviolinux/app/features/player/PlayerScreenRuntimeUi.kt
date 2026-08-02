@@ -443,6 +443,12 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 onSnapshot = { snapshot ->
                     playbackSnapshot = snapshot
                     if (!snapshot.isLoading) initialLoadCompleted = true
+                    val pendingScrub = scrubbingPositionMs
+                    if (!isScrubbingTimeline && pendingScrub != null && !snapshot.isLoading &&
+                        abs(snapshot.positionMs - pendingScrub) < 2_000L
+                    ) {
+                        scrubbingPositionMs = null
+                    }
                     if (snapshot.isEnded) {
                         shouldPlay = false
                         controlsVisible = !playerControlsLocked
@@ -1036,10 +1042,14 @@ private fun PlayerScreenRuntime.handlePlayerControlsScrubChange(positionMs: Long
 }
 
 private fun PlayerScreenRuntime.handlePlayerControlsScrubFinished(positionMs: Long) {
-    playerControlsLog.d { "scrubFinished positionMs=$positionMs controller=${playerController != null} ${playerControlLogContext()}" }
+    val target = (scrubbingPositionMs ?: positionMs).coerceAtLeast(0L)
+    playerControlsLog.d { "scrubFinished positionMs=$target controller=${playerController != null} ${playerControlLogContext()}" }
     isScrubbingTimeline = false
-    scrubbingPositionMs = null
-    playerController?.seekTo(positionMs)
+    // Keep the scrub position so the thumb stays at the target instead of
+    // snapping back to the stale polled snapshot; cleared in onSnapshot once
+    // the seek position is confirmed.
+    scrubbingPositionMs = target
+    playerController?.seekTo(target)
     scheduleProgressSyncAfterSeek()
 }
 
