@@ -29,8 +29,8 @@ import java.awt.Desktop
 import java.awt.Color as AwtColor
 import javax.swing.JComponent
 
-private val NuvioDesktopNativeBackground = AwtColor(0x0D, 0x0D, 0x0D)
-private const val NuvioDesktopIconPath = "icons/nuvio-app-icon.png"
+private val NuvioLinuxNativeBackground = AwtColor(0x0D, 0x0D, 0x0D)
+private const val NuvioLinuxIconPath = "icons/nuvio-app-icon.png"
 
 fun main(args: Array<String>) {
     installDesktopOpenUriHandler()
@@ -65,12 +65,12 @@ fun main(args: Array<String>) {
             },
             title = if (smokePlayerUrl == null) AppIdentity.displayName else "Nuvio Linux Player Smoke",
             state = windowState,
-            icon = painterResource(NuvioDesktopIconPath),
+            icon = painterResource(NuvioLinuxIconPath),
         ) {
             SideEffect {
-                window.background = NuvioDesktopNativeBackground
-                window.rootPane.background = NuvioDesktopNativeBackground
-                window.contentPane.background = NuvioDesktopNativeBackground
+                window.background = NuvioLinuxNativeBackground
+                window.rootPane.background = NuvioLinuxNativeBackground
+                window.contentPane.background = NuvioLinuxNativeBackground
                 (window.contentPane as? JComponent)?.isOpaque = true
             }
             LaunchedEffect(window) {

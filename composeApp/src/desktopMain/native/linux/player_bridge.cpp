@@ -1,5 +1,5 @@
 /*
- * Linux mpv player bridge for NuvioDesktop.
+ * Linux mpv player bridge for Nuvio Linux.
  * Dynamically loads libmpv.so.2 and renders video via the libmpv render API
  * (software mode) into memory buffers consumed by the Compose UI.
  * Display-agnostic: works on both X11 and Wayland sessions.
