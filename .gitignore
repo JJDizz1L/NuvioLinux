@@ -24,6 +24,7 @@ AGENTS.md
 
 PERFORMANCE_FINDINGS.md
 cleanup.md
+upstream-port.md
 
 # Arch package build artifacts
 dist/arch/pkg/
