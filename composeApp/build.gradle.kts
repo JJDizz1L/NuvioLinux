@@ -260,6 +260,10 @@ val desktopReleaseVersionCode = (
 val releaseAppVersionName = desktopReleaseVersionName
 val releaseAppVersionCode = desktopReleaseVersionCode
 val desktopReleasePackageVersion = jpackageCompatibleVersion(desktopReleaseVersionName)
+// Native packages carry the app version itself so all artifacts share one
+// number. RPM forbids hyphens in the version component (0.1.15-alpha ->
+// 0.1.15alpha); DEB accepts the raw form (0.1.15-alpha).
+val desktopRpmReleaseVersion = desktopReleaseVersionName.replace("-", "")
 val generatedRuntimeConfigDir = layout.buildDirectory.dir("generated/runtime-config/kotlin")
 val requestedGradleTasks = gradle.startParameter.taskNames.map { taskName ->
     taskName.substringAfterLast(':').lowercase()
@@ -429,7 +433,7 @@ if (isLinuxHost) {
             "--define", "_buildrootdir ${topDir.absolutePath}/BUILDROOT",
             "--define", "_rpmdir ${topDir.absolutePath}/RPMS",
             "--define", "_srcrpmdir ${topDir.absolutePath}/SRPMS",
-            "--define", "appversion ${desktopReleasePackageVersion}",
+            "--define", "appversion ${desktopRpmReleaseVersion}",
             "--define", "apprelease 1",
             rootProject.file("dist/rpm/nuvio-linux.spec").absolutePath,
         )
@@ -460,7 +464,7 @@ if (isLinuxHost) {
             val controlDir = stagingDir.resolve("DEBIAN")
             controlDir.mkdirs()
             rootProject.file("dist/deb/control.in").readText()
-                .replace("__VERSION__", desktopReleasePackageVersion)
+                .replace("__VERSION__", desktopReleaseVersionName)
                 .let { controlDir.resolve("control").writeText(it) }
             rootProject.file("dist/deb/postinst").copyTo(controlDir.resolve("postinst"))
             rootProject.file("dist/deb/postrm").copyTo(controlDir.resolve("postrm"))
@@ -474,7 +478,7 @@ if (isLinuxHost) {
             "--build",
             "--root-owner-group",
             stagingDir.absolutePath,
-            outDir.resolve("nuvio-linux_${desktopReleasePackageVersion}_amd64.deb").absolutePath,
+            outDir.resolve("nuvio-linux_${desktopReleaseVersionName}_amd64.deb").absolutePath,
         )
     }
 }
