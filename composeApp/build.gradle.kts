@@ -434,7 +434,7 @@ if (isLinuxHost) {
             "--define", "_rpmdir ${topDir.absolutePath}/RPMS",
             "--define", "_srcrpmdir ${topDir.absolutePath}/SRPMS",
             "--define", "appversion ${desktopRpmReleaseVersion}",
-            "--define", "apprelease 1",
+            "--define", "apprelease 2",
             rootProject.file("dist/rpm/nuvio-linux.spec").absolutePath,
         )
         doLast {

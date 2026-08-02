@@ -1190,7 +1190,7 @@ struct MpvPlayer {
         }
 
         jclass sinkClass = (jclass)env->NewGlobalRef(
-            env->FindClass("com/nuvio/app/features/player/desktop/NativePlayerEventSink"));
+            env->FindClass("com/nuviolinux/app/features/player/desktop/NativePlayerEventSink"));
         jmethodID onEventMethod = env->GetMethodID(
             sinkClass, "onPlayerEvent", "(Ljava/lang/String;D)V");
 
@@ -1301,11 +1301,11 @@ static void throw_jni_error(JNIEnv *env, const char *msg) {
 /*  JNI Functions                                                      */
 /* ------------------------------------------------------------------ */
 
-#define JNI_CLASS "com/nuvio/app/features/player/desktop/NativePlayerBridge"
+#define JNI_CLASS "com/nuviolinux/app/features/player/desktop/NativePlayerBridge"
 
 extern "C" {
 
-JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_create(
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_create(
     JNIEnv *env, jclass clazz,
     jlong hostViewPtr,
     jstring sourceUrl,
@@ -1374,7 +1374,7 @@ JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerB
     return handle;
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_dispose(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_dispose(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1390,7 +1390,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
  * new frame was rendered; false when no new frame was available (caller keeps
  * the last one).
  */
-JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_renderFrame(
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_renderFrame(
     JNIEnv *env, jclass clazz, jlong handle, jint width, jint height, jobject buffer)
 {
     MpvPlayer *player = get_player(handle);
@@ -1428,20 +1428,20 @@ JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlay
     return player->renderResult ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_updateControls(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_updateControls(
     JNIEnv *env, jclass clazz, jlong handle, jstring controlsJson)
 {
     /* Controls overlay requires WebKitGTK; not implemented yet.
      * Compose-based controls work independently. */
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_requestFocus(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_requestFocus(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     /* AWT focus handling is sufficient. */
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setPaused(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setPaused(
     JNIEnv *env, jclass clazz, jlong handle, jboolean paused)
 {
     MpvPlayer *player = get_player(handle);
@@ -1453,7 +1453,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_seekTo(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_seekTo(
     JNIEnv *env, jclass clazz, jlong handle, jlong positionMs)
 {
     MpvPlayer *player = get_player(handle);
@@ -1467,7 +1467,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_seekBy(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_seekBy(
     JNIEnv *env, jclass clazz, jlong handle, jlong offsetMs)
 {
     MpvPlayer *player = get_player(handle);
@@ -1481,7 +1481,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setSpeed(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setSpeed(
     JNIEnv *env, jclass clazz, jlong handle, jfloat speed)
 {
     MpvPlayer *player = get_player(handle);
@@ -1495,7 +1495,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_adjustVolume(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_adjustVolume(
     JNIEnv *env, jclass clazz, jlong handle, jfloat delta)
 {
     MpvPlayer *player = get_player(handle);
@@ -1512,7 +1512,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setVolume(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setVolume(
     JNIEnv *env, jclass clazz, jlong handle, jfloat level)
 {
     MpvPlayer *player = get_player(handle);
@@ -1526,7 +1526,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT jfloat JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_volume(
+JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_volume(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1534,7 +1534,7 @@ JNIEXPORT jfloat JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayer
     return (jfloat)(player->cachedVolume.load() / 100.0);
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setResizeMode(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setResizeMode(
     JNIEnv *env, jclass clazz, jlong handle, jint mode)
 {
     MpvPlayer *player = get_player(handle);
@@ -1567,7 +1567,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
 }
 
 /* Getters use atomic cache — no mutex needed */
-JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_durationMs(
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_durationMs(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1575,7 +1575,7 @@ JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerB
     return (jlong)(player->cachedDuration * 1000.0);
 }
 
-JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_positionMs(
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_positionMs(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1584,7 +1584,7 @@ JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerB
     return pos < 0 ? 0 : (jlong)(pos * 1000.0);
 }
 
-JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_bufferedPositionMs(
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_bufferedPositionMs(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1592,7 +1592,7 @@ JNIEXPORT jlong JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerB
     return (jlong)(player->cachedBufferedPosition * 1000.0);
 }
 
-JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isLoading(
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_isLoading(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1600,7 +1600,7 @@ JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlay
     return player->cachedPausedForCache ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isEnded(
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_isEnded(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1608,7 +1608,7 @@ JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlay
     return player->cachedEnded ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_isPaused(
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_isPaused(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1616,7 +1616,7 @@ JNIEXPORT jboolean JNICALL Java_com_nuvio_app_features_player_desktop_NativePlay
     return player->cachedPaused ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jfloat JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_speed(
+JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_speed(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1624,7 +1624,7 @@ JNIEXPORT jfloat JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayer
     return (jfloat)player->cachedSpeed.load();
 }
 
-JNIEXPORT jstring JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_audioTracksJson(
+JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_audioTracksJson(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1633,7 +1633,7 @@ JNIEXPORT jstring JNICALL Java_com_nuvio_app_features_player_desktop_NativePlaye
     return env->NewStringUTF(player->cachedAudioTracksJson.c_str());
 }
 
-JNIEXPORT jstring JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_subtitleTracksJson(
+JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_subtitleTracksJson(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1642,7 +1642,7 @@ JNIEXPORT jstring JNICALL Java_com_nuvio_app_features_player_desktop_NativePlaye
     return env->NewStringUTF(player->cachedSubtitleTracksJson.c_str());
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_selectAudioTrack(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_selectAudioTrack(
     JNIEnv *env, jclass clazz, jlong handle, jint trackId)
 {
     MpvPlayer *player = get_player(handle);
@@ -1655,7 +1655,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_selectSubtitleTrack(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_selectSubtitleTrack(
     JNIEnv *env, jclass clazz, jlong handle, jint trackId)
 {
     MpvPlayer *player = get_player(handle);
@@ -1673,7 +1673,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_addSubtitleUrl(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_addSubtitleUrl(
     JNIEnv *env, jclass clazz, jlong handle, jstring url)
 {
     MpvPlayer *player = get_player(handle);
@@ -1689,7 +1689,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_clearExternalSubtitles(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_clearExternalSubtitles(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
@@ -1701,7 +1701,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_clearExternalSubtitlesAndSelect(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_clearExternalSubtitlesAndSelect(
     JNIEnv *env, jclass clazz, jlong handle, jint trackId)
 {
     MpvPlayer *player = get_player(handle);
@@ -1721,7 +1721,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_setSubtitleDelayMs(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setSubtitleDelayMs(
     JNIEnv *env, jclass clazz, jlong handle, jint delayMs)
 {
     MpvPlayer *player = get_player(handle);
@@ -1734,7 +1734,7 @@ JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBr
     });
 }
 
-JNIEXPORT void JNICALL Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_applySubtitleStyle(
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_applySubtitleStyle(
     JNIEnv *env, jclass clazz, jlong handle,
     jstring textColor, jstring backgroundColor, jstring outlineColor,
     jfloat outlineSize, jboolean bold, jfloat fontSize, jint subPos)
