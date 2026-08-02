@@ -4,8 +4,8 @@
 # The repo root is expected at ${startdir}/../.. (referred to as $REPO_ROOT).
 
 pkgname=nuvio-linux
-pkgver=0.1.15alpha
-pkgrel=3
+pkgver=0.1.16alpha
+pkgrel=1
 pkgdesc="Nuvio Linux desktop media player — Linux native mpv playback"
 arch=('x86_64')
 url="https://github.com/JJDizz1L/NuvioLinux"
