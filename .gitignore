@@ -23,6 +23,7 @@ tools
 AGENTS.md
 
 PERFORMANCE_FINDINGS.md
+cleanup.md
 
 # Arch package build artifacts
 dist/arch/pkg/
