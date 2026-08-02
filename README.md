@@ -44,6 +44,40 @@ This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMe
 - **HDR support.** The embedded player loads your `mpv.conf` wholesale, so HDR/color configuration — tone-mapping, `target-peak`, inverse-tone-mapping, profiles — applies as-is.
 - **Discord Rich Presence.** Show what you're watching or browsing on your Discord profile. Configurable under **Settings → Integrations → Discord Rich Presence**.
 - **Arch Linux distribution.** A first-class Arch package with a bundled JRE (no system Java required), including a launcher and desktop entry.
+- **Fedora/RPM, AppImage, and Flatpak packages.** Release artifacts for Fedora/RHEL (`dnf`), a portable AppImage, and a sandboxed Flatpak — all compiled for **generic x86-64**.
+
+## Installation (Fedora / RHEL)
+
+Install the `.rpm` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases) (requires system `mpv`):
+
+```bash
+sudo dnf install ./nuvio-linux-*.x86_64.rpm
+```
+
+## Installation (AppImage)
+
+Download `Nuvio-*-x86_64.AppImage` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases), then:
+
+```bash
+chmod +x Nuvio-*.AppImage
+./Nuvio-*.AppImage
+```
+
+Requires system `mpv` and `libfuse2` (or run with `--appimage-extract-and-run` on FUSE-less systems).
+
+## Installation (Flatpak)
+
+Download `nuvio-linux-*.flatpak` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases), then:
+
+```bash
+flatpak install --user ./nuvio-linux-*.flatpak
+flatpak run io.github.jjdizz1l.NuvioLinux
+```
+
+The Flatpak bundles libmpv built from source — no system `mpv` needed. Your
+`~/.config/mpv/mpv.conf` is honored read-only. P2P/TorrServer works via the
+bundled binary. Updates are delivered through the bundle (the in-app updater
+is disabled in the sandbox).
 
 ## Installation (Arch Linux)
 
@@ -120,7 +154,26 @@ The resulting `.deb` is written to `composeApp/build/compose/binaries/main/deb/`
 sudo apt install ./composeApp/build/compose/binaries/main/deb/*.deb
 ```
 
-> Note: this fork's primary Linux distribution is the [Arch Linux package](#installation-arch-linux) (self-contained, bundled JRE). The `.deb` target is provided for Debian-based systems but is the less-tested path. Both require a native `mpv` installation at runtime.
+Build a Fedora/RHEL `.rpm` (declares `Requires: mpv`; needs `rpmbuild`):
+
+```bash
+./dist/rpm/build-rpm.sh
+```
+
+Build a portable `.AppImage` (needs `appimagetool`; uses system mpv):
+
+```bash
+./dist/appimage/build-appimage.sh
+```
+
+Build a Flatpak bundle (`io.github.jjdizz1l.NuvioLinux`; builds libmpv + deps
+from source inside the sandbox for baseline x86-64 portability):
+
+```bash
+./dist/flatpak/build-flatpak.sh
+```
+
+> Note: this fork's primary Linux distribution is the [Arch Linux package](#installation-arch-linux) (self-contained, bundled JRE). All Linux packages require a native `mpv` installation at runtime — except the Flatpak, which bundles libmpv built from source. All artifacts are attached to each [release](https://github.com/JJDizz1L/NuvioLinux/releases).
 
 ## Project Structure
 
@@ -128,6 +181,7 @@ sudo apt install ./composeApp/build/compose/binaries/main/deb/*.deb
 - `composeApp/src/commonMain/` contains shared UI, features, repositories, and platform-agnostic logic.
 - `composeApp/src/desktopMain/` contains desktop-specific integrations.
 - `composeApp/src/desktopMain/native/` contains the C++/libmpv playback bridge.
+- `dist/arch/`, `dist/rpm/`, `dist/appimage/`, `dist/flatpak/` contain the per-distribution packaging scripts.
 - `composeApp/Configuration/DesktopVersion.properties` contains the desktop release version and build code.
 
 ## Versioning

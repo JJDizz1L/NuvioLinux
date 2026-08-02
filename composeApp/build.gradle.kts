@@ -363,6 +363,36 @@ if (isLinuxHost) {
     }
 }
 
+if (isLinuxHost) {
+    val rpmOutputDir = layout.buildDirectory.dir("compose/binaries/main-release/rpm")
+    val packageReleaseRpm = tasks.register<Exec>("packageReleaseRpm") {
+        group = "distribution"
+        description = "Builds a Fedora RPM with a Requires: mpv dependency."
+        notCompatibleWithConfigurationCache("Invokes jpackage for RPM packaging.")
+        dependsOn("createReleaseDistributable", buildLinuxPlayerBridge)
+        inputs.dir(layout.buildDirectory.dir("compose/binaries/main-release/app"))
+        outputs.dir(rpmOutputDir)
+        val jpackageBin = File(System.getProperty("java.home"), "bin/jpackage")
+        val appImageDir = layout.buildDirectory.dir("compose/binaries/main-release/app/Nuvio")
+        val outDir = rpmOutputDir.get().asFile
+        commandLine(
+            jpackageBin.absolutePath,
+            "--type", "rpm",
+            "--app-image", appImageDir.get().asFile.absolutePath,
+            "--name", "nuvio-linux",
+            "--linux-package-name", "nuvio-linux",
+            "--app-version", desktopReleasePackageVersion,
+            "--vendor", "Nuvio Media",
+            "--linux-package-deps", "mpv",
+            "--linux-rpm-license-type", "Commercial",
+            "--linux-app-release", "1",
+            "--linux-app-category", "AudioVideo",
+            "--dest", outDir.absolutePath,
+        )
+        doFirst { outDir.mkdirs() }
+    }
+}
+
 tasks.withType<KotlinCompilationTask<*>>().configureEach {
     dependsOn(generateRuntimeConfigs)
 }
@@ -451,6 +481,8 @@ compose.desktop {
             )
             linux {
                 iconFile.set(project.file("src/desktopMain/resources/icons/nuvio-app-icon.png"))
+                rpmLicenseType = "Commercial"
+                rpmPackageVersion = desktopReleasePackageVersion
             }
         }
 

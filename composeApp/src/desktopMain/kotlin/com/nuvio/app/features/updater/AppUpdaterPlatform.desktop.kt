@@ -38,11 +38,11 @@ actual object AppUpdaterPlatform {
     actual val isSupported: Boolean = currentOs != DesktopUpdaterOs.UNKNOWN
 
     actual val releaseSource: AppUpdateReleaseSource = AppUpdateReleaseSource(
-        owner = "NuvioMedia",
-        repo = "NuvioDesktop",
+        owner = "JJDizz1L",
+        repo = "NuvioLinux",
         channelBranch = null,
         includePrereleases = true,
-        userAgent = "NuvioDesktop",
+        userAgent = "NuvioLinux",
     )
 
     actual val assetSelector: AppUpdateAssetSelector
@@ -141,7 +141,7 @@ private enum class DesktopUpdaterOs {
             val archFragments = desktopArchitectureFragments()
             return when (this) {
                 LINUX -> AppUpdateAssetSelector(
-                    fileExtensions = listOf(".deb", ".AppImage"),
+                    fileExtensions = listOf(".deb", ".rpm", ".AppImage"),
                     preferredNameFragments = archFragments + listOf("linux"),
                     fallbackNameFragments = listOf("universal", "all"),
                 )

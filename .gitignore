@@ -30,3 +30,11 @@ dist/arch/*.pkg.tar.zst
 
 # JVM crash logs
 hs_err_pid*.log
+
+# Packaging artifacts
+dist/flatpak/build/
+dist/flatpak/repo/
+dist/flatpak/flatpak-src/
+dist/flatpak/*.flatpak
+Nuvio-*.AppImage
+dist/arch/*.pkg.tar.zst

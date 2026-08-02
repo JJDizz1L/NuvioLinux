@@ -173,12 +173,12 @@ jobs:
       - name: Install mpv
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmpv-dev
+          sudo apt-get install -y libmpv-dev rpm
 
-      - name: Build .deb
+      - name: Build .deb and .rpm
         run: |
           ./gradlew \
-            :composeApp:packageReleaseDeb \
+            :composeApp:packageReleaseDeb :composeApp:packageReleaseRpm \
             -Pcompose.desktop.packaging.checkJdkVendor=false \
             --no-configuration-cache \
             --no-daemon \
@@ -193,11 +193,184 @@ jobs:
           fi
           dpkg-deb --info "${deb_path}" | head -30
 
-      - name: Upload .deb
+      - name: Verify .rpm
+        run: |
+          rpm_path="$(ls composeApp/build/compose/binaries/main-release/rpm/*.rpm 2>/dev/null || true)"
+          if [[ -z "${rpm_path}" ]]; then
+            echo "Expected .rpm was not produced under composeApp/build/compose/binaries/main-release/rpm/." >&2
+            exit 1
+          fi
+          rpm -qpi "${rpm_path}" | head -20
+          if ! rpm -qp --requires "${rpm_path}" | grep -q '^mpv'; then
+            echo "RPM is missing the Requires: mpv dependency." >&2
+            exit 1
+          fi
+
+      - name: Upload .deb and .rpm
         uses: actions/upload-artifact@v7
         with:
           name: nuvio-desktop-${{ needs.metadata.outputs.version }}-linux-x64
-          path: composeApp/build/compose/binaries/main-release/deb/*.deb
+          path: |
+            composeApp/build/compose/binaries/main-release/deb/*.deb
+            composeApp/build/compose/binaries/main-release/rpm/*.rpm
+          if-no-files-found: error
+          retention-days: 14
+
+  appimage:
+    name: Linux AppImage
+    if: inputs.mode != 'dry-run'
+    needs: metadata
+    runs-on: ubuntu-latest
+    environment: desktop-release
+    env:
+      LOCAL_PROPERTIES_BASE64: ${{ secrets.NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 }}
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Configure desktop runtime
+        shell: bash
+        run: |
+          if [[ -z "${LOCAL_PROPERTIES_BASE64}" ]]; then
+            echo "Missing required desktop release value: LOCAL_PROPERTIES_BASE64" >&2
+            exit 1
+          fi
+
+          printf '%s' "${LOCAL_PROPERTIES_BASE64}" | base64 --decode > local.properties
+          sed -i -E '/^[[:space:]]*(sdk\.dir|NUVIO_RELEASE_(STORE_FILE|STORE_PASSWORD|KEY_ALIAS|KEY_PASSWORD))[[:space:]]*=/d' local.properties
+
+          required_properties=(
+            NUVIO_SUPABASE_URL
+            NUVIO_SUPABASE_ANON_KEY
+            TRAKT_CLIENT_ID
+            TRAKT_CLIENT_SECRET
+          )
+          for property_name in "${required_properties[@]}"; do
+            if ! grep -Eq "^${property_name}=.+" local.properties; then
+              echo "Missing required desktop property: ${property_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install mpv
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv-dev
+
+      - name: Install appimagetool
+        run: |
+          sudo apt-get install -y libfuse2 file
+          curl -sL -o /usr/local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
+
+      - name: Build AppImage
+        run: |
+          APPDIR_APPIMAGETOOL=/usr/local/bin/appimagetool \
+            ./dist/appimage/build-appimage.sh
+
+      - name: Verify AppImage
+        run: |
+          appimage_path="$(ls Nuvio-*.AppImage 2>/dev/null || true)"
+          if [[ -z "${appimage_path}" ]]; then
+            echo "Expected .AppImage was not produced." >&2
+            exit 1
+          fi
+          file "${appimage_path}"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-appimage-x64
+          path: Nuvio-*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  flatpak:
+    name: Linux Flatpak
+    if: inputs.mode != 'dry-run'
+    needs: metadata
+    runs-on: [self-hosted, linux, x64]
+    environment: desktop-release
+    env:
+      LOCAL_PROPERTIES_BASE64: ${{ secrets.NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 }}
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Configure desktop runtime
+        shell: bash
+        run: |
+          if [[ -z "${LOCAL_PROPERTIES_BASE64}" ]]; then
+            echo "Missing required desktop release value: LOCAL_PROPERTIES_BASE64" >&2
+            exit 1
+          fi
+
+          printf '%s' "${LOCAL_PROPERTIES_BASE64}" | base64 --decode > local.properties
+          sed -i -E '/^[[:space:]]*(sdk\.dir|NUVIO_RELEASE_(STORE_FILE|STORE_PASSWORD|KEY_ALIAS|KEY_PASSWORD))[[:space:]]*=/d' local.properties
+
+          required_properties=(
+            NUVIO_SUPABASE_URL
+            NUVIO_SUPABASE_ANON_KEY
+            TRAKT_CLIENT_ID
+            TRAKT_CLIENT_SECRET
+          )
+          for property_name in "${required_properties[@]}"; do
+            if ! grep -Eq "^${property_name}=.+" local.properties; then
+              echo "Missing required desktop property: ${property_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install Flatpak tooling and runtimes
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08
+          command -v flatpak-builder || {
+            echo "flatpak-builder is required on the self-hosted runner." >&2
+            exit 1
+          }
+
+      - name: Build Flatpak
+        run: |
+          ./dist/flatpak/build-flatpak.sh
+
+      - name: Verify Flatpak
+        run: |
+          bundle_path="$(ls dist/flatpak/nuvio-linux-*.flatpak 2>/dev/null || true)"
+          if [[ -z "${bundle_path}" ]]; then
+            echo "Expected .flatpak bundle was not produced." >&2
+            exit 1
+          fi
+          flatpak install --user -y "${bundle_path}"
+
+      - name: Upload Flatpak
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-flatpak
+          path: dist/flatpak/nuvio-linux-*.flatpak
           if-no-files-found: error
           retention-days: 14
 
@@ -207,6 +380,8 @@ jobs:
     needs:
       - metadata
       - linux
+      - appimage
+      - flatpak
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -230,15 +405,22 @@ jobs:
             exit 1
           fi
 
-          deb_path="$(ls release/*.deb 2>/dev/null || true)"
-          if [[ -z "${deb_path}" ]]; then
-            echo "Release asset is missing: a .deb under release/." >&2
+          release_assets=(
+            $(ls release/*.deb 2>/dev/null || true)
+            $(ls release/*.rpm 2>/dev/null || true)
+            $(ls release/*.AppImage 2>/dev/null || true)
+            $(ls release/*.flatpak 2>/dev/null || true)
+          )
+          if (( ${#release_assets[@]} == 0 )); then
+            echo "No release assets found under release/." >&2
             exit 1
           fi
 
           : > release/SHA256SUMS.txt
-          checksum="$(sha256sum "${deb_path}" | awk '{print $1}')"
-          printf '%s  %s\n' "${checksum}" "$(basename "${deb_path}")" >> release/SHA256SUMS.txt
+          for asset in "${release_assets[@]}"; do
+            checksum="$(sha256sum "${asset}" | awk '{print $1}')"
+            printf '%s  %s\n' "${checksum}" "$(basename "${asset}")" >> release/SHA256SUMS.txt
+          done
 
           cat release/SHA256SUMS.txt >> "${GITHUB_STEP_SUMMARY}"
 
@@ -255,4 +437,7 @@ jobs:
           fi
           gh release create --repo "${GITHUB_REPOSITORY}" "${release_args[@]}" \
             release/*.deb \
+            release/*.rpm \
+            release/*.AppImage \
+            release/*.flatpak \
             "release/SHA256SUMS.txt"
