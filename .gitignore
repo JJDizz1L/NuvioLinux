@@ -2,8 +2,8 @@
 .kotlin
 .gradle
 **/build/
-!composeApp/src/**/kotlin/com/nuvio/app/core/build/
-!composeApp/src/**/kotlin/com/nuvio/app/core/build/**
+!composeApp/src/**/kotlin/com/nuviolinux/app/core/build/
+!composeApp/src/**/kotlin/com/nuviolinux/app/core/build/**
 xcuserdata
 !src/**/build/
 local.properties
@@ -36,5 +36,5 @@ dist/flatpak/build/
 dist/flatpak/repo/
 dist/flatpak/flatpak-src/
 dist/flatpak/*.flatpak
-Nuvio-*.AppImage
+*.AppImage
 dist/arch/*.pkg.tar.zst

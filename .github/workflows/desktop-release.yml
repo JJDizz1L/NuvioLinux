@@ -119,7 +119,7 @@ jobs:
         if: inputs.mode != 'build-only'
         uses: actions/upload-artifact@v7
         with:
-          name: nuvio-desktop-${{ steps.release.outputs.version }}-release-notes
+          name: nuvio-linux-${{ steps.release.outputs.version }}-release-notes
           path: release-notes.md
           if-no-files-found: error
           retention-days: 14
@@ -192,6 +192,18 @@ jobs:
             exit 1
           fi
           dpkg-deb --info "${deb_path}" | head -30
+          if ! dpkg-deb -f "${deb_path}" Depends | grep -q mpv; then
+            echo ".deb is missing the Depends: mpv dependency." >&2
+            exit 1
+          fi
+          if ! dpkg-deb -c "${deb_path}" | grep -q 'usr/share/applications/nuvio-linux.desktop'; then
+            echo ".deb is missing the desktop entry." >&2
+            exit 1
+          fi
+          if ! dpkg-deb -c "${deb_path}" | grep -q 'usr/share/icons/hicolor/.*/apps/nuvio-linux.png'; then
+            echo ".deb is missing hicolor icons." >&2
+            exit 1
+          fi
 
       - name: Verify .rpm
         run: |
@@ -205,11 +217,19 @@ jobs:
             echo "RPM is missing the Requires: mpv dependency." >&2
             exit 1
           fi
+          if ! rpm -qlp "${rpm_path}" | grep -q 'usr/share/applications/nuvio-linux.desktop'; then
+            echo "RPM is missing the desktop entry." >&2
+            exit 1
+          fi
+          if ! rpm -qlp "${rpm_path}" | grep -q 'usr/share/icons/hicolor/.*/apps/nuvio-linux.png'; then
+            echo "RPM is missing hicolor icons." >&2
+            exit 1
+          fi
 
       - name: Upload .deb and .rpm
         uses: actions/upload-artifact@v7
         with:
-          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-linux-x64
+          name: nuvio-linux-${{ needs.metadata.outputs.version }}-linux-x64
           path: |
             composeApp/build/compose/binaries/main-release/deb/*.deb
             composeApp/build/compose/binaries/main-release/rpm/*.rpm
@@ -281,18 +301,27 @@ jobs:
 
       - name: Verify AppImage
         run: |
-          appimage_path="$(ls Nuvio-*.AppImage 2>/dev/null || true)"
+          appimage_path="$(ls nuvio-linux-*.AppImage 2>/dev/null || true)"
           if [[ -z "${appimage_path}" ]]; then
             echo "Expected .AppImage was not produced." >&2
             exit 1
           fi
           file "${appimage_path}"
+          if ! APPIMAGE_EXTRACT_AND_RUN=1 "${appimage_path}" --appimage-extract "*.desktop" >/dev/null 2>&1; then
+            echo "Could not extract the AppImage desktop entry." >&2
+            exit 1
+          fi
+          if ! grep -q '^Name=Nuvio Linux AppImage$' squashfs-root/nuvio-linux.desktop; then
+            echo "AppImage desktop entry is not named 'Nuvio Linux AppImage'." >&2
+            exit 1
+          fi
+          rm -rf squashfs-root
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7
         with:
-          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-appimage-x64
-          path: Nuvio-*.AppImage
+          name: nuvio-linux-${{ needs.metadata.outputs.version }}-appimage-x64
+          path: nuvio-linux-*.AppImage
           if-no-files-found: error
           retention-days: 14
 
@@ -369,7 +398,7 @@ jobs:
       - name: Upload Flatpak
         uses: actions/upload-artifact@v7
         with:
-          name: nuvio-desktop-${{ needs.metadata.outputs.version }}-flatpak
+          name: nuvio-linux-${{ needs.metadata.outputs.version }}-flatpak
           path: dist/flatpak/nuvio-linux-*.flatpak
           if-no-files-found: error
           retention-days: 14
@@ -394,7 +423,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: nuvio-desktop-${{ needs.metadata.outputs.version }}-*
+          pattern: nuvio-linux-${{ needs.metadata.outputs.version }}-*
           path: release
           merge-multiple: true
 

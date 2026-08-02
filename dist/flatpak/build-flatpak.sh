@@ -18,50 +18,46 @@ REPO_DIR="dist/flatpak/repo"
 VERSION="$(grep -E '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties | cut -d= -f2)"
 BUNDLE="dist/flatpak/nuvio-linux-${VERSION}.flatpak"
 
-echo "[nuvio-flatpak] building app image (version ${VERSION})..."
+echo "[nuvio-linux-flatpak] building app image (version ${VERSION})..."
 ./gradlew :composeApp:createDistributable
 
-echo "[nuvio-flatpak] assembling flatpak sources..."
+echo "[nuvio-linux-flatpak] assembling flatpak sources..."
 SRC="dist/flatpak/flatpak-src"
 rm -rf "${SRC}"
 mkdir -p "${SRC}"
-cp -a composeApp/build/compose/binaries/main/app/Nuvio "${SRC}/Nuvio"
+cp -a composeApp/build/compose/binaries/main/app/nuvio-linux "${SRC}/nuvio-app"
 
-cat > "${SRC}/nuvio" <<EOF
+cat > "${SRC}/nuvio-linux" <<EOF
 #!/bin/sh
-exec /app/nuvio/bin/Nuvio "\$@"
+exec /app/nuvio/bin/nuvio-linux "\$@"
 EOF
-chmod +x "${SRC}/nuvio"
+chmod +x "${SRC}/nuvio-linux"
 
-cat > "${SRC}/nuvio-linux.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Nuvio
-Comment=Nuvio desktop media player
-Exec=nuvio
-Icon=nuvio-linux
-Categories=AudioVideo;Player;
-Terminal=false
-StartupNotify=true
-MimeType=x-scheme-handler/nuvio;x-scheme-handler/stremio;
-EOF
+sed \
+  -e 's/^Name=Nuvio Linux$/Name=Nuvio Linux Flatpak/' \
+  -e 's|^Exec=.*|Exec=nuvio-linux %u|' \
+  dist/desktop/nuvio-linux.desktop > "${SRC}/nuvio-linux.desktop"
+
+sed \
+  -e 's/<name>Nuvio Linux<\/name>/<name>Nuvio Linux Flatpak<\/name>/' \
+  dist/desktop/io.github.jjdizz1l.NuvioLinux.metainfo.xml > "${SRC}/io.github.jjdizz1l.NuvioLinux.metainfo.xml"
 
 if command -v convert >/dev/null 2>&1; then
   convert composeApp/src/desktopMain/resources/icons/nuvio-app-icon.png -resize 512x512 "${SRC}/nuvio-linux.png"
 else
-  cp composeApp/src/desktopMain/resources/icons/nuvio-app-icon.png "${SRC}/nuvio-linux.png"
+  cp dist/desktop/icons/hicolor/512x512/apps/nuvio-linux.png "${SRC}/nuvio-linux.png"
 fi
 
-echo "[nuvio-flatpak] building (this compiles ffmpeg/libplacebo/libmpv — takes a while)..."
-flatpak-builder --force-clean --ccache --state-dir="${BUILD_DIR}/.cache" \
+echo "[nuvio-linux-flatpak] building (this compiles ffmpeg/libplacebo/libmpv — takes a while)..."
+flatpak-builder --force-clean --ccache --default-branch=stable --state-dir="${BUILD_DIR}/.cache" \
   "${BUILD_DIR}/app" "${MANIFEST}" 2>&1 | tail -20
 
-echo "[nuvio-flatpak] exporting repo..."
+echo "[nuvio-linux-flatpak] exporting repo..."
 rm -rf "${REPO_DIR}"
-flatpak build-export "${REPO_DIR}" "${BUILD_DIR}/app"
+flatpak build-export "${REPO_DIR}" "${BUILD_DIR}/app" stable
 
-echo "[nuvio-flatpak] bundling ${BUNDLE}..."
+echo "[nuvio-linux-flatpak] bundling ${BUNDLE}..."
 flatpak build-bundle "${REPO_DIR}" "${BUNDLE}" io.github.jjdizz1l.NuvioLinux stable
 
 ls -la "${BUNDLE}"
-echo "[nuvio-flatpak] done."
+echo "[nuvio-linux-flatpak] done."

@@ -1,0 +1,21 @@
+package com.nuviolinux.app.features.settings
+
+import kotlinx.serialization.json.JsonObject
+
+internal expect object ThemeSettingsStorage {
+    fun loadSelectedTheme(): String?
+    fun saveSelectedTheme(themeName: String)
+    fun loadAmoledEnabled(): Boolean?
+    fun saveAmoledEnabled(enabled: Boolean)
+    fun loadLiquidGlassNativeTabBarEnabled(): Boolean?
+    fun saveLiquidGlassNativeTabBarEnabled(enabled: Boolean)
+    fun loadDesktopNavigationLayout(): String?
+    fun saveDesktopNavigationLayout(layoutName: String)
+    fun loadSelectedAppLanguage(): String?
+    fun saveSelectedAppLanguage(languageCode: String)
+    fun applySelectedAppLanguage(languageCode: String)
+    fun loadNavBarStyle(): String?
+    fun saveNavBarStyle(styleKey: String)
+    fun exportToSyncPayload(): JsonObject
+    fun replaceFromSyncPayload(payload: JsonObject)
+}

@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Downloads / Releases
-    url: https://github.com/NuvioMedia/NuvioDesktop/releases
+    url: https://github.com/JJDizz1L/NuvioLinux/releases
     about: Grab the latest desktop release here.
   - name: Documentation
-    url: https://github.com/NuvioMedia/NuvioDesktop/blob/main/README.md
+    url: https://github.com/JJDizz1L/NuvioLinux/blob/dev/README.md
     about: Read the desktop README for setup and usage details.

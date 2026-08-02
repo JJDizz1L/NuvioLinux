@@ -1,0 +1,126 @@
+package com.nuviolinux.app.features.settings
+
+import com.nuviolinux.app.core.ui.AppTheme
+import com.nuviolinux.app.core.ui.NativeTabBridge
+import com.nuviolinux.app.core.ui.ThemeColors
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+object ThemeSettingsRepository {
+    private val _selectedTheme = MutableStateFlow(AppTheme.WHITE)
+    val selectedTheme: StateFlow<AppTheme> = _selectedTheme.asStateFlow()
+
+    private val _amoledEnabled = MutableStateFlow(false)
+    val amoledEnabled: StateFlow<Boolean> = _amoledEnabled.asStateFlow()
+
+    private val _liquidGlassNativeTabBarEnabled = MutableStateFlow(false)
+    val liquidGlassNativeTabBarEnabled: StateFlow<Boolean> = _liquidGlassNativeTabBarEnabled.asStateFlow()
+
+    private val _desktopNavigationLayout = MutableStateFlow(DesktopNavigationLayout.Default)
+    val desktopNavigationLayout: StateFlow<DesktopNavigationLayout> = _desktopNavigationLayout.asStateFlow()
+
+    private val _selectedAppLanguage = MutableStateFlow(AppLanguage.DEVICE)
+    val selectedAppLanguage: StateFlow<AppLanguage> = _selectedAppLanguage.asStateFlow()
+
+    private val _navBarStyle = MutableStateFlow(NavBarStyle.ADAPTIVE)
+    val navBarStyle: StateFlow<NavBarStyle> = _navBarStyle.asStateFlow()
+
+    private var hasLoaded = false
+
+    fun ensureLoaded() {
+        if (hasLoaded) return
+        loadFromDisk()
+    }
+
+    fun onProfileChanged() {
+        loadFromDisk()
+    }
+
+    fun clearLocalState() {
+        hasLoaded = false
+        _selectedTheme.value = AppTheme.WHITE
+        _amoledEnabled.value = false
+        _liquidGlassNativeTabBarEnabled.value = false
+        _desktopNavigationLayout.value = DesktopNavigationLayout.Default
+        NativeTabBridge.publishAccentColor(AppTheme.WHITE.nativeTabAccentHex())
+        NativeTabBridge.publishLiquidGlassEnabled(false)
+        _selectedAppLanguage.value = AppLanguage.DEVICE
+        _navBarStyle.value = NavBarStyle.ADAPTIVE
+    }
+
+    private fun loadFromDisk() {
+        hasLoaded = true
+        val stored = ThemeSettingsStorage.loadSelectedTheme()
+        val theme = if (stored != null) {
+            try {
+                AppTheme.valueOf(stored)
+            } catch (_: IllegalArgumentException) {
+                AppTheme.WHITE
+            }
+        } else {
+            AppTheme.WHITE
+        }
+        _selectedTheme.value = theme
+        NativeTabBridge.publishAccentColor(theme.nativeTabAccentHex())
+        _amoledEnabled.value = ThemeSettingsStorage.loadAmoledEnabled() ?: false
+        val liquidGlassEnabled = ThemeSettingsStorage.loadLiquidGlassNativeTabBarEnabled() ?: false
+        _liquidGlassNativeTabBarEnabled.value = liquidGlassEnabled
+        NativeTabBridge.publishLiquidGlassEnabled(liquidGlassEnabled)
+        _desktopNavigationLayout.value = DesktopNavigationLayout.fromName(
+            ThemeSettingsStorage.loadDesktopNavigationLayout(),
+        )
+        val appLanguage = AppLanguage.fromCode(ThemeSettingsStorage.loadSelectedAppLanguage())
+        ThemeSettingsStorage.applySelectedAppLanguage(appLanguage.code)
+        _selectedAppLanguage.value = appLanguage
+        _navBarStyle.value = NavBarStyle.fromKey(ThemeSettingsStorage.loadNavBarStyle())
+    }
+
+    fun setTheme(theme: AppTheme) {
+        ensureLoaded()
+        if (_selectedTheme.value == theme) return
+        _selectedTheme.value = theme
+        ThemeSettingsStorage.saveSelectedTheme(theme.name)
+        NativeTabBridge.publishAccentColor(theme.nativeTabAccentHex())
+    }
+
+    fun setAmoled(enabled: Boolean) {
+        ensureLoaded()
+        if (_amoledEnabled.value == enabled) return
+        _amoledEnabled.value = enabled
+        ThemeSettingsStorage.saveAmoledEnabled(enabled)
+    }
+
+    fun setLiquidGlassNativeTabBar(enabled: Boolean) {
+        ensureLoaded()
+        if (_liquidGlassNativeTabBarEnabled.value == enabled) return
+        _liquidGlassNativeTabBarEnabled.value = enabled
+        ThemeSettingsStorage.saveLiquidGlassNativeTabBarEnabled(enabled)
+        NativeTabBridge.publishLiquidGlassEnabled(enabled)
+    }
+
+    fun setDesktopNavigationLayout(layout: DesktopNavigationLayout) {
+        ensureLoaded()
+        if (_desktopNavigationLayout.value == layout) return
+        _desktopNavigationLayout.value = layout
+        ThemeSettingsStorage.saveDesktopNavigationLayout(layout.name)
+    }
+
+    fun setAppLanguage(language: AppLanguage) {
+        ensureLoaded()
+        if (_selectedAppLanguage.value == language) return
+        ThemeSettingsStorage.saveSelectedAppLanguage(language.code)
+        ThemeSettingsStorage.applySelectedAppLanguage(language.code)
+        _selectedAppLanguage.value = language
+    }
+
+    fun setNavBarStyle(style: NavBarStyle) {
+        ensureLoaded()
+        if (_navBarStyle.value == style) return
+        _navBarStyle.value = style
+        ThemeSettingsStorage.saveNavBarStyle(style.key)
+    }
+}
+
+private fun AppTheme.nativeTabAccentHex(): String =
+    ThemeColors.getColorPalette(this).nativeAccentHex

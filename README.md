@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="composeApp/src/commonMain/composeResources/drawable/app_logo_wordmark.png" alt="Nuvio" width="300" />
+  <img src="composeApp/src/commonMain/composeResources/drawable/app_logo_wordmark.png" alt="Nuvio Linux" width="300" />
   <br />
   <br />
 
@@ -27,13 +27,13 @@
 
 ## ⚠️ Alpha Software — Testers Only
 
-Nuvio is currently in alpha and is intended only for testers. It is under active development and is not suitable for daily use.
+Nuvio Linux is currently in alpha and is intended only for testers. It is under active development and is not suitable for daily use.
 
 Expect breaking changes with every update. Features, settings, stored data, and compatibility may change or stop working without notice. Do not rely on this build as your primary media app, and report any issues you encounter during testing.
 
 ## About
 
-Nuvio is a media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.
+Nuvio Linux is a media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.
 
 This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop), diverged from the `feat/hwaccel-libmpv-linux` branch. It keeps the upstream client codebase while replacing the desktop playback stack with a native Linux player.
 
@@ -56,11 +56,11 @@ sudo dnf install ./nuvio-linux-*.x86_64.rpm
 
 ## Installation (AppImage)
 
-Download `Nuvio-*-x86_64.AppImage` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases), then:
+Download `nuvio-linux-*-x86_64.AppImage` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases), then:
 
 ```bash
-chmod +x Nuvio-*.AppImage
-./Nuvio-*.AppImage
+chmod +x nuvio-linux-*.AppImage
+./nuvio-linux-*.AppImage
 ```
 
 Requires system `mpv` and `libfuse2` (or run with `--appimage-extract-and-run` on FUSE-less systems).
@@ -202,9 +202,9 @@ Use the version helper when changing desktop release versions:
 
 ## Legal & DMCA
 
-Nuvio functions solely as a client-side interface for browsing metadata and playing media provided by user-installed extensions and/or user-provided sources. It is intended for content the user owns or is otherwise authorized to access.
+Nuvio Linux functions solely as a client-side interface for browsing metadata and playing media provided by user-installed extensions and/or user-provided sources. It is intended for content the user owns or is otherwise authorized to access.
 
-Nuvio is not affiliated with any third-party extensions, catalogs, sources, or content providers. It does not host, store, or distribute any media content.
+Nuvio Linux is not affiliated with any third-party extensions, catalogs, sources, or content providers. It does not host, store, or distribute any media content.
 
 For comprehensive legal information, including our full disclaimer, third-party extension policy, and DMCA/Copyright information, please visit our [Legal & Disclaimer Page](https://nuvioapp.space/legal).
 

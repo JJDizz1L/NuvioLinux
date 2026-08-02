@@ -11,7 +11,6 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.TaskAction
 import org.gradle.jvm.tasks.Jar
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 import java.io.File
@@ -61,11 +60,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
         localPropertiesFile.asFile.orNull?.takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
 
         val outDir = outputDir.get().asFile
-        outDir.resolve("com/nuvio/app/core/network").apply {
+        outDir.resolve("com/nuviolinux/app/core/network").apply {
             mkdirs()
             resolve("SupabaseConfig.kt").writeText(
                 """
-                |package com.nuvio.app.core.network
+                |package com.nuviolinux.app.core.network
                 |
                 |object SupabaseConfig {
                 |    const val URL = "${supabaseUrl.get()}"
@@ -76,11 +75,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/core/diagnostics").apply {
+        outDir.resolve("com/nuviolinux/app/core/diagnostics").apply {
             mkdirs()
             resolve("SentryConfig.kt").writeText(
                 """
-                |package com.nuvio.app.core.diagnostics
+                |package com.nuviolinux.app.core.diagnostics
                 |
                 |object SentryConfig {
                 |    const val DSN = "${sentryDsn.get()}"
@@ -90,11 +89,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/core/sync").apply {
+        outDir.resolve("com/nuviolinux/app/core/sync").apply {
             mkdirs()
             resolve("RealtimeSyncConfig.kt").writeText(
                 """
-                |package com.nuvio.app.core.sync
+                |package com.nuviolinux.app.core.sync
                 |
                 |object RealtimeSyncConfig {
                 |    const val ENABLED = ${realtimeSyncEnabled.get()}
@@ -103,13 +102,13 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/features/tmdb/TmdbConfig.kt").delete()
+        outDir.resolve("com/nuviolinux/app/features/tmdb/TmdbConfig.kt").delete()
 
-        outDir.resolve("com/nuvio/app/features/trakt").apply {
+        outDir.resolve("com/nuviolinux/app/features/trakt").apply {
             mkdirs()
             resolve("TraktConfig.kt").writeText(
                 """
-                |package com.nuvio.app.features.trakt
+                |package com.nuviolinux.app.features.trakt
                 |
                 |object TraktConfig {
                 |    const val CLIENT_ID = "${props.getProperty("TRAKT_CLIENT_ID", "")}" 
@@ -120,11 +119,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/features/player/skip").apply {
+        outDir.resolve("com/nuviolinux/app/features/player/skip").apply {
             mkdirs()
             resolve("IntroDbConfig.kt").writeText(
                 """
-                |package com.nuvio.app.features.player.skip
+                |package com.nuviolinux.app.features.player.skip
                 |
                 |object IntroDbConfig {
                 |    const val URL = "${props.getProperty("INTRODB_API_URL", "")}" 
@@ -133,11 +132,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/features/details").apply {
+        outDir.resolve("com/nuviolinux/app/features/details").apply {
             mkdirs()
             resolve("ImdbEpisodeRatingsConfig.kt").writeText(
                 """
-                |package com.nuvio.app.features.details
+                |package com.nuviolinux.app.features.details
                 |
                 |object ImdbEpisodeRatingsConfig {
                 |    const val IMDB_RATINGS_API_BASE_URL = "${props.getProperty("IMDB_RATINGS_API_BASE_URL", "")}" 
@@ -147,11 +146,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/features/debrid").apply {
+        outDir.resolve("com/nuviolinux/app/features/debrid").apply {
             mkdirs()
             resolve("PremiumizeConfig.kt").writeText(
                 """
-                |package com.nuvio.app.features.debrid
+                |package com.nuviolinux.app.features.debrid
                 |
                 |object PremiumizeConfig {
                 |    const val CLIENT_ID = "${props.getProperty("PREMIUMIZE_CLIENT_ID", "")}"
@@ -160,11 +159,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/core/build").apply {
+        outDir.resolve("com/nuviolinux/app/core/build").apply {
             mkdirs()
             resolve("AppVersionConfig.kt").writeText(
                 """
-                |package com.nuvio.app.core.build
+                |package com.nuviolinux.app.core.build
                 |
                 |object AppVersionConfig {
                 |    const val VERSION_NAME = "${appVersionName.get()}"
@@ -176,11 +175,11 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
-        outDir.resolve("com/nuvio/app/features/settings").apply {
+        outDir.resolve("com/nuviolinux/app/features/settings").apply {
             mkdirs()
             resolve("CommunityConfig.kt").writeText(
                 """
-                |package com.nuvio.app.features.settings
+                |package com.nuviolinux.app.features.settings
                 |
                 |object CommunityConfig {
                 |    const val CONTRIBUTIONS_URL = "${props.getProperty("CONTRIBUTIONS_URL", "")}" 
@@ -364,32 +363,131 @@ if (isLinuxHost) {
 }
 
 if (isLinuxHost) {
+    val desktopAssetsDir = rootProject.file("dist/desktop")
+    val appImageDir = layout.buildDirectory.dir("compose/binaries/main-release/app/nuvio-linux")
+
+    fun assembleDesktopPayload(stagingRoot: File) {
+        val appImage = appImageDir.get().asFile
+        val payloadOpt = stagingRoot.resolve("opt/nuvio-linux")
+        payloadOpt.mkdirs()
+        appImage.copyRecursively(payloadOpt)
+        val payloadUsr = stagingRoot.resolve("usr")
+        val applicationsDir = payloadUsr.resolve("share/applications")
+        val metainfoDir = payloadUsr.resolve("share/metainfo")
+        val iconsDir = payloadUsr.resolve("share/icons/hicolor")
+        applicationsDir.mkdirs()
+        metainfoDir.mkdirs()
+        desktopAssetsDir.resolve("nuvio-linux.desktop").copyTo(applicationsDir.resolve("nuvio-linux.desktop"))
+        desktopAssetsDir.resolve("io.github.jjdizz1l.NuvioLinux.metainfo.xml").copyTo(metainfoDir.resolve("io.github.jjdizz1l.NuvioLinux.metainfo.xml"))
+        desktopAssetsDir.resolve("icons/hicolor").copyRecursively(iconsDir)
+    }
+
     val rpmOutputDir = layout.buildDirectory.dir("compose/binaries/main-release/rpm")
     val packageReleaseRpm = tasks.register<Exec>("packageReleaseRpm") {
         group = "distribution"
-        description = "Builds a Fedora RPM with a Requires: mpv dependency."
-        notCompatibleWithConfigurationCache("Invokes jpackage for RPM packaging.")
+        description = "Builds a Fedora RPM (Requires: mpv) with desktop integration."
+        notCompatibleWithConfigurationCache("Invokes rpmbuild for RPM packaging.")
         dependsOn("createReleaseDistributable", buildLinuxPlayerBridge)
         inputs.dir(layout.buildDirectory.dir("compose/binaries/main-release/app"))
+        inputs.dir(desktopAssetsDir)
+        inputs.file(rootProject.file("dist/rpm/nuvio-linux.spec"))
         outputs.dir(rpmOutputDir)
-        val jpackageBin = File(System.getProperty("java.home"), "bin/jpackage")
-        val appImageDir = layout.buildDirectory.dir("compose/binaries/main-release/app/Nuvio")
+        val stagingDir = layout.buildDirectory.dir("native/rpm-staging").get().asFile
+        val topDir = layout.buildDirectory.dir("native/rpmbuild").get().asFile
         val outDir = rpmOutputDir.get().asFile
+        doFirst {
+            stagingDir.deleteRecursively()
+            topDir.deleteRecursively()
+            assembleDesktopPayload(stagingDir)
+            listOf(
+                topDir.resolve("BUILD"),
+                topDir.resolve("BUILDROOT"),
+                topDir.resolve("RPMS/x86_64"),
+                topDir.resolve("SOURCES"),
+                topDir.resolve("SPECS"),
+                topDir.resolve("SRPMS"),
+            ).forEach { it.mkdirs() }
+            stagingDir.resolve("opt/nuvio-linux/bin/nuvio-linux").setExecutable(true)
+            val sourceTar = topDir.resolve("SOURCES/nuvio-linux-app-image.tar.gz")
+            runCommand(
+                listOf(
+                    "tar", "-czf", sourceTar.absolutePath,
+                    "-C", stagingDir.absolutePath,
+                    "opt", "usr",
+                ),
+                projectDir,
+            )
+            outDir.mkdirs()
+        }
         commandLine(
-            jpackageBin.absolutePath,
-            "--type", "rpm",
-            "--app-image", appImageDir.get().asFile.absolutePath,
-            "--name", "nuvio-linux",
-            "--linux-package-name", "nuvio-linux",
-            "--app-version", desktopReleasePackageVersion,
-            "--vendor", "Nuvio Media",
-            "--linux-package-deps", "mpv",
-            "--linux-rpm-license-type", "Commercial",
-            "--linux-app-release", "1",
-            "--linux-app-category", "AudioVideo",
-            "--dest", outDir.absolutePath,
+            "rpmbuild",
+            "-bb",
+            "--define", "_topdir ${topDir.absolutePath}",
+            "--define", "_sourcedir ${topDir.absolutePath}/SOURCES",
+            "--define", "_specdir ${topDir.absolutePath}/SPECS",
+            "--define", "_builddir ${topDir.absolutePath}/BUILD",
+            "--define", "_buildrootdir ${topDir.absolutePath}/BUILDROOT",
+            "--define", "_rpmdir ${topDir.absolutePath}/RPMS",
+            "--define", "_srcrpmdir ${topDir.absolutePath}/SRPMS",
+            "--define", "appversion ${desktopReleasePackageVersion}",
+            "--define", "apprelease 1",
+            rootProject.file("dist/rpm/nuvio-linux.spec").absolutePath,
         )
-        doFirst { outDir.mkdirs() }
+        doLast {
+            val rpmFile = topDir.resolve("RPMS/x86_64")
+                .listFiles { file -> file.name.startsWith("nuvio-linux-") && file.name.endsWith(".rpm") }
+                ?.firstOrNull()
+                ?: error("Expected RPM was not produced under ${topDir.resolve("RPMS/x86_64")}")
+            rpmFile.copyTo(outDir.resolve(rpmFile.name), overwrite = true)
+        }
+    }
+
+    val debOutputDir = layout.buildDirectory.dir("compose/binaries/main-release/deb")
+    val packageReleaseDeb = tasks.register<Exec>("packageReleaseDeb") {
+        group = "distribution"
+        description = "Builds a Debian .deb (Depends: mpv) with desktop integration."
+        notCompatibleWithConfigurationCache("Invokes dpkg-deb for Debian packaging.")
+        dependsOn("createReleaseDistributable", buildLinuxPlayerBridge)
+        inputs.dir(layout.buildDirectory.dir("compose/binaries/main-release/app"))
+        inputs.dir(desktopAssetsDir)
+        inputs.dir(rootProject.file("dist/deb"))
+        outputs.dir(debOutputDir)
+        val stagingDir = layout.buildDirectory.dir("native/deb-staging").get().asFile
+        val outDir = debOutputDir.get().asFile
+        doFirst {
+            stagingDir.deleteRecursively()
+            assembleDesktopPayload(stagingDir)
+            val controlDir = stagingDir.resolve("DEBIAN")
+            controlDir.mkdirs()
+            rootProject.file("dist/deb/control.in").readText()
+                .replace("__VERSION__", desktopReleasePackageVersion)
+                .let { controlDir.resolve("control").writeText(it) }
+            rootProject.file("dist/deb/postinst").copyTo(controlDir.resolve("postinst"))
+            rootProject.file("dist/deb/postrm").copyTo(controlDir.resolve("postrm"))
+            controlDir.resolve("postinst").setExecutable(true, false)
+            controlDir.resolve("postrm").setExecutable(true, false)
+            stagingDir.resolve("opt/nuvio-linux/bin/nuvio-linux").setExecutable(true)
+            outDir.mkdirs()
+        }
+        commandLine(
+            "dpkg-deb",
+            "--build",
+            "--root-owner-group",
+            stagingDir.absolutePath,
+            outDir.resolve("nuvio-linux_${desktopReleasePackageVersion}_amd64.deb").absolutePath,
+        )
+    }
+}
+
+fun runCommand(command: List<String>, workingDir: File) {
+    val process = ProcessBuilder(command)
+        .directory(workingDir)
+        .redirectErrorStream(true)
+        .start()
+    val output = process.inputStream.bufferedReader().readText()
+    val exitCode = process.waitFor()
+    if (exitCode != 0) {
+        error("Command failed (exit $exitCode): ${command.joinToString(" ")}\n$output")
     }
 }
 
@@ -457,7 +555,7 @@ kotlin {
 
 compose.desktop {
     application {
-        mainClass = "com.nuvio.app.MainKt"
+        mainClass = "com.nuviolinux.app.MainKt"
         val smokePlayerUrl = providers.gradleProperty("nuvio.desktop.smokePlayerUrl").orNull
             ?: System.getenv("NUVIO_DESKTOP_SMOKE_PLAYER_URL")
         jvmArgs += listOfNotNull(
@@ -468,10 +566,9 @@ compose.desktop {
         )
 
         nativeDistributions {
-            targetFormats(TargetFormat.Deb)
-            packageName = "Nuvio"
+            packageName = "nuvio-linux"
             packageVersion = desktopReleasePackageVersion
-            vendor = "Nuvio Media"
+            vendor = "JJDizz1L"
             modules(
                 "java.instrument",
                 "java.management",

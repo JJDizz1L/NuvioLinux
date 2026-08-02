@@ -17,9 +17,9 @@ command -v rpmbuild >/dev/null || {
   exit 1
 }
 
-echo "[nuvio-rpm] using JAVA_HOME=${JAVA_HOME}"
+echo "[nuvio-linux-rpm] using JAVA_HOME=${JAVA_HOME}"
 ./gradlew :composeApp:packageReleaseRpm
 
 RPM_DIR="composeApp/build/compose/binaries/main-release/rpm"
 ls -la "${RPM_DIR}"/*.rpm
-echo "[nuvio-rpm] done."
+echo "[nuvio-linux-rpm] done."

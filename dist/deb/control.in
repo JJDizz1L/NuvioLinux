@@ -1,0 +1,14 @@
+Package: nuvio-linux
+Version: __VERSION__
+Section: video
+Priority: optional
+Architecture: amd64
+Depends: mpv
+Maintainer: JJDizz1L <jjdizz1l@users.noreply.github.com>
+Homepage: https://github.com/JJDizz1L/NuvioLinux
+Description: Nuvio Linux desktop media player
+ Nuvio Linux is a desktop media client for browsing metadata, managing
+ collections and watch progress, downloading media, and playing streams from
+ user-installed extensions or user-provided sources. It is a hard fork of
+ Nuvio Desktop with a native Linux playback stack powered by mpv
+ (hardware-accelerated decoding via VAAPI/NVDEC).

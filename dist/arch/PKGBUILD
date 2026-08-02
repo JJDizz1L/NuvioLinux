@@ -1,18 +1,18 @@
-# Maintainer: Nuvio Media <dev@nuvio.tv>
-# Contributor: JJDizz1L
+# Maintainer: JJDizz1L
 #
 # Build from local source: run `makepkg -si` from this directory.
 # The repo root is expected at ${startdir}/../.. (referred to as $REPO_ROOT).
 
 pkgname=nuvio-linux
 pkgver=0.1.0
-pkgrel=2
-pkgdesc="Nuvio desktop media player — Linux native mpv playback"
+pkgrel=3
+pkgdesc="Nuvio Linux desktop media player — Linux native mpv playback"
 arch=('x86_64')
-url="https://github.com/JJDizz1L/NuvioDesktop"
+url="https://github.com/JJDizz1L/NuvioLinux"
 license=('custom:commercial')
 depends=('mpv' 'glibc' 'gcc-libs' 'libstdc++' 'libx11' 'libxext' 'libxrender' 'libxi' 'libxtst')
 makedepends=('jdk21-openjdk' 'gcc')
+install=nuvio-linux.install
 provides=("${pkgname}")
 conflicts=("${pkgname}")
 source=()
@@ -24,12 +24,12 @@ export GRADLE_OPTS="-Dorg.gradle.parallel=false"
 # portable. Distro JDKs built with -march=native/-march=x86-64-v3/v4 (e.g.
 # CachyOS) produce a runtime that only runs on those CPUs.
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
-echo "[nuvio-pkg] Using JAVA_HOME=${JAVA_HOME}"
+echo "[nuvio-linux-pkg] Using JAVA_HOME=${JAVA_HOME}"
 
 build() {
   local REPO_ROOT="${startdir}/../.."
   cd "${REPO_ROOT}"
-  echo "[nuvio-pkg] Building from ${REPO_ROOT}"
+  echo "[nuvio-linux-pkg] Building from ${REPO_ROOT}"
   ./gradlew :composeApp:createDistributable
 }
 
@@ -41,13 +41,19 @@ package() {
 
   # Self-contained app bundle from jpackage
   install -d "${APP_DIR}"
-  cp -r composeApp/build/compose/binaries/main/app/Nuvio/* "${APP_DIR}/"
+  cp -r composeApp/build/compose/binaries/main/app/nuvio-linux/* "${APP_DIR}/"
 
   # Symlink launcher
   install -d "${pkgdir}/usr/bin"
-  ln -s /opt/nuvio-linux/bin/Nuvio "${pkgdir}/usr/bin/nuvio-linux"
+  ln -s /opt/nuvio-linux/bin/nuvio-linux "${pkgdir}/usr/bin/nuvio-linux"
 
-  # Desktop entry
-  install -Dm644 "${startdir}/nuvio-linux.desktop" \
+  # Desktop entry, icons and AppStream metadata
+  install -Dm644 dist/desktop/nuvio-linux.desktop \
     "${pkgdir}/usr/share/applications/nuvio-linux.desktop"
+  install -Dm644 dist/desktop/io.github.jjdizz1l.NuvioLinux.metainfo.xml \
+    "${pkgdir}/usr/share/metainfo/io.github.jjdizz1l.NuvioLinux.metainfo.xml"
+  for size in 16 32 48 64 128 256 512; do
+    install -Dm644 "dist/desktop/icons/hicolor/${size}x${size}/apps/nuvio-linux.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/nuvio-linux.png"
+  done
 }

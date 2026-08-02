@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Nuvio Linux
+Comment=Nuvio Linux desktop media player
+Exec=/opt/nuvio-linux/bin/nuvio-linux %u
+Icon=nuvio-linux
+Categories=AudioVideo;Player;
+Terminal=false
+StartupNotify=true
+StartupWMClass=nuvio-linux
+MimeType=x-scheme-handler/nuvio;x-scheme-handler/stremio;

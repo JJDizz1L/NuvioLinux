@@ -12,9 +12,9 @@ cd "${ROOT_DIR}"
 
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
 
-APP_IMAGE="composeApp/build/compose/binaries/main/app/Nuvio"
+APP_IMAGE="composeApp/build/compose/binaries/main/app/nuvio-linux"
 VERSION="$(grep -E '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties | cut -d= -f2)"
-OUTPUT="Nuvio-${VERSION}-x86_64.AppImage"
+OUTPUT="nuvio-linux-${VERSION}-x86_64.AppImage"
 
 APPIMAGETOOL="${APPDIR_APPIMAGETOOL:-appimagetool}"
 command -v "${APPIMAGETOOL}" >/dev/null || {
@@ -22,41 +22,36 @@ command -v "${APPIMAGETOOL}" >/dev/null || {
   exit 1
 }
 
-echo "[nuvio-appimage] building app image (version ${VERSION})..."
+echo "[nuvio-linux-appimage] building app image (version ${VERSION})..."
 ./gradlew :composeApp:createDistributable
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/nuvio-appimage.XXXXXX")"
 trap 'rm -rf "${TMP}"' EXIT
 APPDIR="${TMP}/AppDir"
 
-install -d "${APPDIR}/usr/lib/nuvio"
-cp -a "${APP_IMAGE}/." "${APPDIR}/usr/lib/nuvio/"
+install -d "${APPDIR}/usr/lib/nuvio-linux"
+cp -a "${APP_IMAGE}/." "${APPDIR}/usr/lib/nuvio-linux/"
 
 cat > "${APPDIR}/AppRun" <<'EOF'
 #!/bin/sh
-exec "$APPDIR/usr/lib/nuvio/bin/Nuvio" "$@"
+exec "$APPDIR/usr/lib/nuvio-linux/bin/nuvio-linux" "$@"
 EOF
 chmod +x "${APPDIR}/AppRun"
 
-cat > "${APPDIR}/nuvio-linux.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Nuvio
-Comment=Nuvio desktop media player
-Exec=AppRun
-Icon=nuvio-linux
-Categories=AudioVideo;Player;
-Terminal=false
-StartupNotify=true
-MimeType=x-scheme-handler/nuvio;x-scheme-handler/stremio;
-EOF
+sed \
+  -e 's/^Name=Nuvio Linux$/Name=Nuvio Linux AppImage/' \
+  -e 's|^Exec=.*|Exec=AppRun %u|' \
+  dist/desktop/nuvio-linux.desktop > "${APPDIR}/nuvio-linux.desktop"
 
-install -Dm644 composeApp/src/desktopMain/resources/icons/nuvio-app-icon.png \
-  "${APPDIR}/nuvio-linux.png"
+for size in 16 32 48 64 128 256 512; do
+  install -Dm644 "dist/desktop/icons/hicolor/${size}x${size}/apps/nuvio-linux.png" \
+    "${APPDIR}/usr/share/icons/hicolor/${size}x${size}/apps/nuvio-linux.png"
+done
+install -Dm644 dist/desktop/icons/hicolor/512x512/apps/nuvio-linux.png "${APPDIR}/nuvio-linux.png"
 
-echo "[nuvio-appimage] building ${OUTPUT}..."
+echo "[nuvio-linux-appimage] building ${OUTPUT}..."
 APPIMAGE_EXTRACT_AND_RUN=1 "${APPIMAGETOOL}" --appimage-extract-and-run "${APPDIR}" "${OUTPUT}" 2>/dev/null \
   || APPIMAGE_EXTRACT_AND_RUN=1 "${APPIMAGETOOL}" "${APPDIR}" "${OUTPUT}"
 
 ls -la "${OUTPUT}"
-echo "[nuvio-appimage] done."
+echo "[nuvio-linux-appimage] done."

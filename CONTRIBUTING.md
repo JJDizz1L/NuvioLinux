@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Nuvio Desktop.
+Thanks for helping improve Nuvio Linux.
 
 ## Strict rules - read before opening anything
 

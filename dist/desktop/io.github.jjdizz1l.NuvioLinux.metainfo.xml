@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.jjdizz1l.NuvioLinux</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>Nuvio Linux</name>
+  <summary>Linux native media player for browsing, downloading and streaming content</summary>
+  <description>
+    <p>Nuvio Linux is a desktop media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.</p>
+    <p>This is a hard fork of Nuvio Desktop with a native Linux playback stack powered by mpv (hardware-accelerated decoding via VAAPI/NVDEC).</p>
+  </description>
+  <launchable type="desktop-id">nuvio-linux.desktop</launchable>
+  <url type="homepage">https://github.com/JJDizz1L/NuvioLinux</url>
+  <url type="vcs-browser">https://github.com/JJDizz1L/NuvioLinux</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Player</category>
+  </categories>
+  <provides>
+    <binary>nuvio-linux</binary>
+  </provides>
+  <releases>
+    <release version="0.1.15-alpha" date="2026-08-01"/>
+  </releases>
+</component>

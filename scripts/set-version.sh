@@ -74,7 +74,7 @@ write_key() {
 
   mkdir -p "$(dirname "$file")"
   local tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/nuvio-version.XXXXXX")"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/nuvio-linux-version.XXXXXX")"
 
   if [[ -f "$file" ]]; then
     awk -v key="$key" -v value="$value" '
