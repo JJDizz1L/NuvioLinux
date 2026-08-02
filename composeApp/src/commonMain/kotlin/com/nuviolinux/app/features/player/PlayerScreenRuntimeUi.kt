@@ -384,6 +384,19 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 clearLiveGestureFeedbackState = gestureCallbacks.clearLiveGestureFeedback,
                 revealLockedOverlayState = gestureCallbacks.revealLockedOverlay,
                 commitHorizontalSeekState = gestureCallbacks.commitHorizontalSeek,
+            )
+            .playerSurfaceVolumeWheel(
+                percentPerNotch = 5f,
+                isEnabled = {
+                    !showAudioModal && !showSubtitleModal && !showSourcesPanel &&
+                        !showEpisodesPanel && !episodeStreamsPanelState.showStreams &&
+                        !showSubmitIntroModal && !showParentalGuide
+                },
+                onVolumeDeltaPercent = { deltaPercent ->
+                    if (playerController != null) {
+                        adjustPlayerVolumeBy(deltaPercent)
+                    }
+                },
             ),
     ) {
         DiscordPlaybackPresenceEffect(
@@ -543,6 +556,8 @@ private fun PlayerScreenRuntime.RenderPlayerControls(displayedPositionMs: Long, 
                 refreshTracks()
                 showAudioModal = true
             },
+            onVolumeChange = ::applyPlayerVolume,
+            onMuteToggle = ::togglePlayerMuted,
             onVideoSettingsClick = null,
             onSourcesClick = if (activeVideoId != null) { { openSourcesPanel() } } else null,
             onEpisodesClick = if (isSeries) { { openEpisodesPanel() } } else null,

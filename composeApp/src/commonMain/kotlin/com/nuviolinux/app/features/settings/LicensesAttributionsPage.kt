@@ -45,7 +45,7 @@ private const val PremiumizeUrl = "https://www.premiumize.me"
 private const val TorboxUrl = "https://torbox.app"
 private const val MdbListUrl = "https://mdblist.com"
 private const val IntroDbUrl = "https://introdb.app/"
-private const val NuvioRepositoryUrl = "https://github.com/NuvioMedia/NuvioMobile"
+private const val NuvioRepositoryUrl = "https://github.com/JJDizz1L/NuvioLinux"
 private const val ApacheLicenseUrl = "https://www.apache.org/licenses/LICENSE-2.0"
 
 private data class AttributionItem(

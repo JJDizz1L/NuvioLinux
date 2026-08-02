@@ -148,6 +148,22 @@ internal fun PlayerScreenRuntime.showVolumeFeedback(level: PlayerAudioLevel) {
     )
 }
 
+internal fun PlayerScreenRuntime.applyPlayerVolume(level: Float) {
+    val next = level.coerceIn(0f, 1f)
+    playerController?.setVolume(next)
+    showVolumeFeedback(PlayerAudioLevel(fraction = next, isMuted = next <= 0f))
+}
+
+internal fun PlayerScreenRuntime.adjustPlayerVolumeBy(deltaPercent: Float) {
+    val current = playerController?.currentVolume() ?: playbackSnapshot.volumeLevel ?: 1f
+    applyPlayerVolume(current + deltaPercent / 100f)
+}
+
+internal fun PlayerScreenRuntime.togglePlayerMuted() {
+    val current = playerController?.currentVolume() ?: playbackSnapshot.volumeLevel ?: 1f
+    applyPlayerVolume(if (current > 0f) 0f else 1f)
+}
+
 internal fun PlayerScreenRuntime.togglePlayback() {
     if (playbackSnapshot.isPlaying) {
         shouldPlay = false

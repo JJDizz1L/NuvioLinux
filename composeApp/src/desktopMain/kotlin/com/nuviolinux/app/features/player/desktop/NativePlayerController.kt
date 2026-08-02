@@ -372,8 +372,20 @@ internal class NativePlayerController(
                 positionMs = NativePlayerBridge.positionMs(current),
                 bufferedPositionMs = NativePlayerBridge.bufferedPositionMs(current),
                 playbackSpeed = NativePlayerBridge.speed(current),
+                volumeLevel = NativePlayerBridge.volume(current).coerceIn(0f, 1f),
             )
         }.getOrDefault(PlayerPlaybackSnapshot(isLoading = true))
+    }
+
+    override fun currentVolume(): Float? =
+        handle.takeIf { it != 0L }?.let { NativePlayerBridge.volume(it).coerceIn(0f, 1f) }
+
+    override fun setVolume(level: Float) {
+        setFallbackVolume(level)
+    }
+
+    override fun setMuted(muted: Boolean) {
+        setFallbackVolume(if (muted) 0f else (rememberedVolumeLevel.takeIf { it > 0f } ?: 1f))
     }
 
     /** Renders the latest video frame into [buffer] (RGB0, stride = width * 4). */

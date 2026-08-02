@@ -22,6 +22,8 @@ interface PlayerEngineController {
     fun setSubtitleDelayMs(delayMs: Int) {}
     fun updateNowPlayingMetadata(info: PlayerNowPlayingInfo) {}
     fun clearNowPlayingInfo() {}
+    fun currentVolume(): Float? = null
+    fun setVolume(level: Float) {}
 }
 
 enum class PlayerControlsAction {

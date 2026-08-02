@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContent
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +35,9 @@ import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material.icons.rounded.VolumeDown
+import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.VolumeUp
 import com.nuviolinux.app.core.ui.NuvioLoadingIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -56,11 +60,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nuviolinux.app.core.ui.AppIconResource
+import com.nuviolinux.app.core.ui.FullscreenActionButton
 import com.nuviolinux.app.core.ui.NuvioBackButton
 import com.nuviolinux.app.core.ui.appIconPainter
 import com.nuviolinux.app.core.ui.nuvioTypeScale
 import nuviolinux.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
+import kotlin.math.roundToInt
 
 @Composable
 internal fun PlayerControlsShell(
@@ -85,6 +91,8 @@ internal fun PlayerControlsShell(
     onSpeedClick: () -> Unit,
     onSubtitleClick: () -> Unit,
     onAudioClick: () -> Unit,
+    onVolumeChange: (Float) -> Unit = {},
+    onMuteToggle: () -> Unit = {},
     onVideoSettingsClick: (() -> Unit)? = null,
     onSourcesClick: (() -> Unit)? = null,
     onEpisodesClick: (() -> Unit)? = null,
@@ -188,6 +196,8 @@ internal fun PlayerControlsShell(
                     onSpeedClick = onSpeedClick,
                     onSubtitleClick = onSubtitleClick,
                     onAudioClick = onAudioClick,
+                    onVolumeChange = onVolumeChange,
+                    onMuteToggle = onMuteToggle,
                     onSourcesClick = onSourcesClick,
                     onEpisodesClick = onEpisodesClick,
                     modifier = Modifier
@@ -347,6 +357,12 @@ private fun PlayerHeader(
                             onClick = onVideoSettingsClick,
                         )
                     }
+                    FullscreenActionButton(
+                        buttonSize = metrics.headerIconSize + 16.dp,
+                        iconSize = metrics.headerIconSize,
+                        containerColor = Color.Black.copy(alpha = 0.35f),
+                        contentColor = Color.White,
+                    )
                     NuvioBackButton(
                         onClick = onBack,
                         containerColor = Color.Black.copy(alpha = 0.35f),
@@ -494,6 +510,8 @@ private fun ProgressControls(
     onSpeedClick: () -> Unit,
     onSubtitleClick: () -> Unit,
     onAudioClick: () -> Unit,
+    onVolumeChange: (Float) -> Unit = {},
+    onMuteToggle: () -> Unit = {},
     onSourcesClick: (() -> Unit)? = null,
     onEpisodesClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -562,6 +580,11 @@ private fun ProgressControls(
                         label = stringResource(Res.string.compose_player_audio),
                         painter = audioPainter,
                         onClick = onAudioClick,
+                    )
+                    VolumeControlPill(
+                        volumeLevel = playbackSnapshot.volumeLevel,
+                        onVolumeChange = onVolumeChange,
+                        onMuteToggle = onMuteToggle,
                     )
                     if (onSourcesClick != null) {
                         PlayerActionPillButton(
@@ -746,3 +769,45 @@ private fun PlayerActionPillButton(
         )
     }
 }
+
+@Composable
+private fun VolumeControlPill(
+    volumeLevel: Float?,
+    onVolumeChange: (Float) -> Unit,
+    onMuteToggle: () -> Unit,
+) {
+    val level = (volumeLevel ?: 1f).coerceIn(0f, 1f)
+    val volumeIcon = when {
+        level <= 0f -> Icons.Rounded.VolumeOff
+        level < 0.5f -> Icons.Rounded.VolumeDown
+        else -> Icons.Rounded.VolumeUp
+    }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(22.dp))
+            .clickable(onClick = onMuteToggle)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = volumeIcon,
+            contentDescription = stringResource(Res.string.compose_player_volume_level, percentageLabel(level)),
+            tint = Color.White,
+            modifier = Modifier.size(18.dp),
+        )
+        Slider(
+            modifier = Modifier.width(88.dp),
+            value = level,
+            onValueChange = onVolumeChange,
+            valueRange = 0f..1f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color.White.copy(alpha = 0.28f),
+            ),
+        )
+    }
+}
+
+private fun percentageLabel(level: Float): String = "${(level.coerceIn(0f, 1f) * 100f).roundToInt()}%"
