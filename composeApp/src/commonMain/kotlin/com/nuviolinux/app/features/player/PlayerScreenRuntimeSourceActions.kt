@@ -186,8 +186,13 @@ internal fun PlayerScreenRuntime.switchToP2pSourceStream(stream: StreamItem) {
     activeProviderName = stream.addonName
     activeProviderAddonId = stream.addonId
     currentStreamBingeGroup = stream.behaviorHints.bingeGroup
-    activeInitialPositionMs = currentPositionMs
-    activeInitialProgressFraction = null
+    val resume = if (currentPositionMs > 0L) {
+        EpisodeResume(positionMs = currentPositionMs, fraction = null)
+    } else {
+        resolveSourceSwitchResume()
+    }
+    activeInitialPositionMs = resume.positionMs
+    activeInitialProgressFraction = resume.fraction
     showSourcesPanel = false
     controlsVisible = true
 }
@@ -276,8 +281,13 @@ internal fun PlayerScreenRuntime.switchToSource(stream: StreamItem) {
     activeProviderName = stream.addonName
     activeProviderAddonId = stream.addonId
     currentStreamBingeGroup = stream.behaviorHints.bingeGroup
-    activeInitialPositionMs = currentPositionMs
-    activeInitialProgressFraction = null
+    val resume = if (currentPositionMs > 0L) {
+        EpisodeResume(positionMs = currentPositionMs, fraction = null)
+    } else {
+        resolveSourceSwitchResume()
+    }
+    activeInitialPositionMs = resume.positionMs
+    activeInitialProgressFraction = resume.fraction
     showSourcesPanel = false
     controlsVisible = true
 }
@@ -454,6 +464,21 @@ private fun PlayerScreenRuntime.resolveEpisodeResume(epVideoId: String, episode:
         ?.let { (it / 100f).coerceIn(0f, 1f) }
     val epResumePositionMs = epEntry?.lastPositionMs?.takeIf { it > 0L } ?: 0L
     return EpisodeResume(positionMs = epResumePositionMs, fraction = epResumeFraction)
+}
+
+private fun PlayerScreenRuntime.resolveSourceSwitchResume(): EpisodeResume {
+    val videoId = activeVideoId ?: return EpisodeResume(positionMs = 0L, fraction = null)
+    val entry = WatchProgressRepository.progressForVideo(
+        videoId = videoId,
+        parentMetaId = parentMetaId,
+        seasonNumber = activeSeasonNumber,
+        episodeNumber = activeEpisodeNumber,
+    )?.takeIf { !it.isCompleted }
+    val fraction = entry?.progressPercent
+        ?.takeIf { it > 0f }
+        ?.let { (it / 100f).coerceIn(0f, 1f) }
+    val positionMs = entry?.lastPositionMs?.takeIf { it > 0L } ?: 0L
+    return EpisodeResume(positionMs = positionMs, fraction = fraction)
 }
 
 private fun PlayerScreenRuntime.applyEpisodeStreamMetadata(

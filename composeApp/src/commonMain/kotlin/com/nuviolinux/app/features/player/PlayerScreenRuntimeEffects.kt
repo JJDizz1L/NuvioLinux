@@ -16,7 +16,6 @@ import com.nuviolinux.app.features.streams.StreamLinkCacheRepository
 import com.nuviolinux.app.features.streams.StreamItem
 import com.nuviolinux.app.features.streams.hasLikelyExpiringPlaybackCredentials
 import com.nuviolinux.app.features.watchprogress.WatchProgressRepository
-import com.nuviolinux.app.isDesktop
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -252,10 +251,6 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
             else -> 0L
         }
         if (targetPositionMs <= 0L) {
-            initialSeekApplied = true
-            return@LaunchedEffect
-        }
-        if (isDesktop && activeInitialPositionMs > 0L) {
             initialSeekApplied = true
             return@LaunchedEffect
         }

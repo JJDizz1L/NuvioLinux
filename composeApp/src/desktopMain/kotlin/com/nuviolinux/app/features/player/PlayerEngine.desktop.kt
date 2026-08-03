@@ -155,8 +155,12 @@ private fun NativePlayerSurface(
             streamCacheOnDisk = streamCacheOnDisk,
             onError = { message -> latestOnError.value(message) },
         )
+        // Always report the initial position as unhandled so the runtime's
+        // post-load backstop seek runs on desktop. The native bridge applies
+        // the position on file-loaded, but a superseded/racing attach must not
+        // leave playback stuck at 0 with no correction.
         initialPositionRequestKey?.let { key ->
-            latestOnInitialPositionHandled.value(key, initialPositionMs > 0L)
+            latestOnInitialPositionHandled.value(key, false)
         }
         onControllerReady(controller)
     }

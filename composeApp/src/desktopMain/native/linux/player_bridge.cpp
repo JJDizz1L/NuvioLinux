@@ -813,11 +813,17 @@ struct MpvPlayer {
     std::string cachedAudioTracksJson;
     std::string cachedSubtitleTracksJson;
 
+    /* Initial seek applied deterministically on MPV_EVENT_FILE_LOADED. A seek
+     * issued immediately after loadfile can be dropped before the file is
+     * loaded, silently starting playback from 0. */
+    std::atomic<int64_t> pendingInitialPositionMs;
+
     MpvPlayer() : mpv(nullptr), jvm(nullptr), eventSink(nullptr), running(false),
                   renderCtx(nullptr), framePending(false),
                   cachedDuration(0), cachedPosition(0), cachedBufferedPosition(0),
                   cachedPaused(1), cachedEnded(0), cachedPausedForCache(0),
-                  cachedSpeed(1.0), cachedVolume(100.0) {}
+                  cachedSpeed(1.0), cachedVolume(100.0),
+                  pendingInitialPositionMs(0) {}
     ~MpvPlayer() { destroy(); }
 
     void enqueueCommand(std::function<void()> command) {
@@ -1166,7 +1172,10 @@ struct MpvPlayer {
         p_mpv_observe_property(mpv, 0, "hwdec-current", MPV_FORMAT_STRING);
         p_mpv_observe_property(mpv, 0, "hwdec-active", MPV_FORMAT_FLAG);
 
-        /* Load the file */
+        /* Load the file. The initial position (if any) is applied once
+         * MPV_EVENT_FILE_LOADED arrives — a seek issued immediately after
+         * loadfile can be dropped before the file is loaded. */
+        pendingInitialPositionMs = initialPositionMs;
         const char *cmd[] = {"loadfile", sourceUrl, nullptr};
         p_mpv_command(mpv, cmd);
 
@@ -1174,13 +1183,6 @@ struct MpvPlayer {
             p_mpv_set_property_string(mpv, "pause", "no");
         } else {
             p_mpv_set_property_string(mpv, "pause", "yes");
-        }
-
-        if (initialPositionMs > 0) {
-            char seekStr[32];
-            snprintf(seekStr, sizeof(seekStr), "%" PRId64, initialPositionMs / 1000);
-            const char *seekCmd[] = {"seek", seekStr, "absolute", nullptr};
-            p_mpv_command(mpv, seekCmd);
         }
 
         /* Start event thread */
@@ -1226,6 +1228,16 @@ struct MpvPlayer {
 
             if (evId == MPV_EVENT_FILE_LOADED) {
                 cachedEnded = 0;
+                int64_t pending = pendingInitialPositionMs.load();
+                if (pending > 0) {
+                    pendingInitialPositionMs.store(0);
+                    char seekStr[32];
+                    snprintf(seekStr, sizeof(seekStr), "%" PRId64, pending / 1000);
+                    const char *seekCmd[] = {"seek", seekStr, "absolute", nullptr};
+                    p_mpv_command(mpv, seekCmd);
+                    LOG("applied initial position %lld ms on file-loaded",
+                        (long long)pending);
+                }
             }
 
             if (evId == MPV_EVENT_LOG_MESSAGE && evData) {
