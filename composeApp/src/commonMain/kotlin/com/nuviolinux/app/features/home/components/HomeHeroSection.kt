@@ -1043,7 +1043,11 @@ private fun mobileHeroHeight(
         baseHeight
     }
 
-    return cappedHeight.coerceIn(MOBILE_HERO_MIN_HEIGHT_DP.dp, MOBILE_HERO_MAX_HEIGHT_DP.dp)
+    return if (viewportHeightDp != null && mobileBelowSectionHeightHintDp != null) {
+        cappedHeight.coerceIn(0.dp, MOBILE_HERO_MAX_HEIGHT_DP.dp)
+    } else {
+        cappedHeight.coerceIn(MOBILE_HERO_MIN_HEIGHT_DP.dp, MOBILE_HERO_MAX_HEIGHT_DP.dp)
+    }
 }
 
 @Composable

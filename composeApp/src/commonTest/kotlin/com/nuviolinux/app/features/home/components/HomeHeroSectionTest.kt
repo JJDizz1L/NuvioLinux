@@ -51,7 +51,7 @@ class HomeHeroSectionTest {
     }
 
     @Test
-    fun `mobile hero clamps to minimum height on short viewport`() {
+    fun `mobile hero can shrink below default minimum to fit short viewport`() {
         val layout = homeHeroLayout(
             maxWidthDp = 390f,
             viewportHeightDp = 568f,
@@ -59,6 +59,6 @@ class HomeHeroSectionTest {
         )
 
         assertEquals(false, layout.isTablet)
-        assertEquals(360f, layout.heroHeight.value, 0.001f)
+        assertEquals(268f, layout.heroHeight.value, 0.001f)
     }
 }

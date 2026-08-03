@@ -1,6 +1,7 @@
 package com.nuviolinux.app.core.deeplink
 
-import com.nuviolinux.app.features.trakt.handleTraktAuthCallbackUrl
+import com.nuviolinux.app.core.tracking.ensureTrackingProvidersRegistered
+import com.nuviolinux.app.features.tracking.TrackingProviderRegistry
 import io.ktor.http.Url
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,7 +42,8 @@ fun handleAppUrl(url: String) {
     val normalizedUrl = url.trim()
     if (normalizedUrl.isBlank()) return
 
-    handleTraktAuthCallbackUrl(normalizedUrl)
+    ensureTrackingProvidersRegistered()
+    TrackingProviderRegistry.handleAuthCallback(normalizedUrl)
     AppDeepLinkRepository.handleUrl(normalizedUrl)
 }
 

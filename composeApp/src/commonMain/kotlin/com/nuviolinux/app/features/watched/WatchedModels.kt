@@ -1,7 +1,8 @@
 package com.nuviolinux.app.features.watched
 
+import com.nuviolinux.app.core.time.parseZonedIsoDateTimeToEpochMs
 import com.nuviolinux.app.features.home.MetaPreview
-import com.nuviolinux.app.features.trakt.TraktPlatformClock
+import com.nuviolinux.app.features.tracking.TrackingAttributedItem
 import com.nuviolinux.app.features.watching.domain.WatchingContentRef
 import com.nuviolinux.app.features.watching.domain.watchedKey
 import kotlinx.serialization.Serializable
@@ -15,8 +16,15 @@ data class WatchedItem(
     val releaseInfo: String? = null,
     val season: Int? = null,
     val episode: Int? = null,
+    val videoId: String? = null,
+    override val trackingProviderId: String? = null,
+    override val trackingProviderItemId: String? = null,
+    override val trackingSourceUrl: String? = null,
     val markedAtEpochMs: Long,
-)
+) : TrackingAttributedItem {
+    override val trackingContentId: String
+        get() = id
+}
 
 data class WatchedUiState(
     val items: List<WatchedItem> = emptyList(),
@@ -72,7 +80,7 @@ internal fun normalizeWatchedMarkedAtEpochMs(value: Long): Long {
         append(second.toString().padStart(2, '0'))
         append('Z')
     }
-    return TraktPlatformClock.parseIsoDateTimeToEpochMs(iso) ?: value
+    return parseZonedIsoDateTimeToEpochMs(iso) ?: value
 }
 
 fun watchedItemKey(

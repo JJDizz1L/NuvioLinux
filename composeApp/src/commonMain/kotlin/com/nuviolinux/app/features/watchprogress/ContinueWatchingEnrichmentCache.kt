@@ -1,7 +1,7 @@
 package com.nuviolinux.app.features.watchprogress
 
 import com.nuviolinux.app.core.storage.ProfileScopedKey
-import com.nuviolinux.app.features.trakt.WatchProgressSource
+import com.nuviolinux.app.features.tracking.WatchProgressSource
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableStateFlow

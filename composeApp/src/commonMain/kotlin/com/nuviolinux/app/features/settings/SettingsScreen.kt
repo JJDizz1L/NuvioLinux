@@ -76,11 +76,13 @@ import com.nuviolinux.app.features.notifications.EpisodeReleaseNotificationsUiSt
 import com.nuviolinux.app.features.player.StreamCacheSize
 import com.nuviolinux.app.features.player.PlayerSettingsRepository
 import com.nuviolinux.app.features.profiles.ProfileRepository
+import com.nuviolinux.app.features.simkl.SimklAuthRepository
+import com.nuviolinux.app.features.simkl.SimklAuthUiState
 import com.nuviolinux.app.features.trakt.TraktAuthUiState
 import com.nuviolinux.app.features.trakt.TraktAuthRepository
 import com.nuviolinux.app.features.trakt.TraktCommentsSettings
-import com.nuviolinux.app.features.trakt.TraktSettingsRepository
-import com.nuviolinux.app.features.trakt.TraktSettingsUiState
+import com.nuviolinux.app.features.tracking.TrackingSettingsRepository
+import com.nuviolinux.app.features.tracking.TrackingSettingsUiState
 import com.nuviolinux.app.features.tmdb.TmdbSettings
 import com.nuviolinux.app.features.tmdb.TmdbSettingsRepository
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingPreferencesRepository
@@ -166,13 +168,17 @@ fun SettingsScreen(
             TraktAuthRepository.ensureLoaded()
             TraktAuthRepository.uiState
         }.collectAsStateWithLifecycle()
+        val simklAuthUiState by remember {
+            SimklAuthRepository.ensureLoaded()
+            SimklAuthRepository.uiState
+        }.collectAsStateWithLifecycle()
+        val trackingSettingsUiState by remember {
+            TrackingSettingsRepository.ensureLoaded()
+            TrackingSettingsRepository.uiState
+        }.collectAsStateWithLifecycle()
         val traktCommentsEnabled by remember {
             TraktCommentsSettings.ensureLoaded()
             TraktCommentsSettings.enabled
-        }.collectAsStateWithLifecycle()
-        val traktSettingsUiState by remember {
-            TraktSettingsRepository.ensureLoaded()
-            TraktSettingsRepository.uiState
         }.collectAsStateWithLifecycle()
         val addonsUiState by remember {
             AddonRepository.initialize()
@@ -315,8 +321,9 @@ fun SettingsScreen(
                 debridSettings = debridSettings,
                 discordSettings = discordSettings,
                 traktAuthUiState = traktAuthUiState,
+                simklAuthUiState = simklAuthUiState,
                 traktCommentsEnabled = traktCommentsEnabled,
-                traktSettingsUiState = traktSettingsUiState,
+                trackingSettingsUiState = trackingSettingsUiState,
                 homescreenHeroEnabled = homescreenSettingsUiState.heroEnabled,
                 homescreenShowCatalogType = homescreenSettingsUiState.showCatalogType,
                 homescreenHideUnreleasedContent = homescreenSettingsUiState.hideUnreleasedContent,
@@ -370,8 +377,9 @@ fun SettingsScreen(
                 debridSettings = debridSettings,
                 discordSettings = discordSettings,
                 traktAuthUiState = traktAuthUiState,
+                simklAuthUiState = simklAuthUiState,
                 traktCommentsEnabled = traktCommentsEnabled,
-                traktSettingsUiState = traktSettingsUiState,
+                trackingSettingsUiState = trackingSettingsUiState,
                 homescreenHeroEnabled = homescreenSettingsUiState.heroEnabled,
                 homescreenShowCatalogType = homescreenSettingsUiState.showCatalogType,
                 homescreenHideUnreleasedContent = homescreenSettingsUiState.hideUnreleasedContent,
@@ -435,8 +443,9 @@ private fun MobileSettingsScreen(
     debridSettings: DebridSettings,
     discordSettings: DiscordSettings,
     traktAuthUiState: TraktAuthUiState,
+    simklAuthUiState: SimklAuthUiState,
     traktCommentsEnabled: Boolean,
-    traktSettingsUiState: TraktSettingsUiState,
+    trackingSettingsUiState: TrackingSettingsUiState,
     homescreenHeroEnabled: Boolean,
     homescreenShowCatalogType: Boolean,
     homescreenHideUnreleasedContent: Boolean,
@@ -569,7 +578,7 @@ private fun MobileSettingsScreen(
                             onNotificationsClick = { onPageChange(SettingsPage.Notifications) },
                             onContentDiscoveryClick = { onPageChange(SettingsPage.ContentDiscovery) },
                             onIntegrationsClick = { onPageChange(SettingsPage.Integrations) },
-                            onTraktClick = { onPageChange(SettingsPage.TraktAuthentication) },
+                            onTrackingClick = { onPageChange(SettingsPage.TraktAuthentication) },
                             onSupportersContributorsClick = onSupportersContributorsClick,
                             onLicensesAttributionsClick = onLicensesAttributionsClick,
                             onCheckForUpdatesClick = onCheckForUpdatesClick,
@@ -702,10 +711,11 @@ private fun MobileSettingsScreen(
                     isTablet = false,
                     settings = discordSettings,
                 )
-                SettingsPage.TraktAuthentication -> traktSettingsContent(
+                SettingsPage.TraktAuthentication -> trackingSettingsContent(
                     isTablet = false,
-                    uiState = traktAuthUiState,
-                    settingsUiState = traktSettingsUiState,
+                    traktUiState = traktAuthUiState,
+                    simklUiState = simklAuthUiState,
+                    settingsUiState = trackingSettingsUiState,
                     commentsEnabled = traktCommentsEnabled,
                     onCommentsEnabledChange = TraktCommentsSettings::setEnabled,
                 )
@@ -794,8 +804,9 @@ private fun TabletSettingsScreen(
     debridSettings: DebridSettings,
     discordSettings: DiscordSettings,
     traktAuthUiState: TraktAuthUiState,
+    simklAuthUiState: SimklAuthUiState,
     traktCommentsEnabled: Boolean,
-    traktSettingsUiState: TraktSettingsUiState,
+    trackingSettingsUiState: TrackingSettingsUiState,
     homescreenHeroEnabled: Boolean,
     homescreenShowCatalogType: Boolean,
     homescreenHideUnreleasedContent: Boolean,
@@ -983,7 +994,7 @@ private fun TabletSettingsScreen(
                                     onNotificationsClick = { openInlinePage(SettingsPage.Notifications) },
                                     onContentDiscoveryClick = { openInlinePage(SettingsPage.ContentDiscovery) },
                                     onIntegrationsClick = { openInlinePage(SettingsPage.Integrations) },
-                                    onTraktClick = { openInlinePage(SettingsPage.TraktAuthentication) },
+                                    onTrackingClick = { openInlinePage(SettingsPage.TraktAuthentication) },
                                     onSupportersContributorsClick = { openInlinePage(SettingsPage.SupportersContributors) },
                                     onLicensesAttributionsClick = { openInlinePage(SettingsPage.LicensesAttributions) },
                                     onCheckForUpdatesClick = onCheckForUpdatesClick,
@@ -1120,10 +1131,11 @@ private fun TabletSettingsScreen(
                             isTablet = true,
                             settings = discordSettings,
                         )
-                        SettingsPage.TraktAuthentication -> traktSettingsContent(
+                        SettingsPage.TraktAuthentication -> trackingSettingsContent(
                             isTablet = true,
-                            uiState = traktAuthUiState,
-                            settingsUiState = traktSettingsUiState,
+                            traktUiState = traktAuthUiState,
+                            simklUiState = simklAuthUiState,
+                            settingsUiState = trackingSettingsUiState,
                             commentsEnabled = traktCommentsEnabled,
                             onCommentsEnabledChange = TraktCommentsSettings::setEnabled,
                         )

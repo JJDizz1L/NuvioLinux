@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CloudDownload
@@ -50,13 +51,13 @@ import nuviolinux.composeapp.generated.resources.compose_settings_root_notificat
 import nuviolinux.composeapp.generated.resources.compose_settings_root_privacy_policy_description
 import nuviolinux.composeapp.generated.resources.compose_settings_root_switch_profile_description
 import nuviolinux.composeapp.generated.resources.compose_settings_root_switch_profile_title
-import nuviolinux.composeapp.generated.resources.compose_settings_root_trakt_description
+import nuviolinux.composeapp.generated.resources.compose_settings_root_tracking_description
 import nuviolinux.composeapp.generated.resources.compose_settings_root_about_section
 import nuviolinux.composeapp.generated.resources.compose_settings_root_account_section
 import nuviolinux.composeapp.generated.resources.compose_settings_root_advanced_description
 import nuviolinux.composeapp.generated.resources.compose_settings_root_advanced_section
 import nuviolinux.composeapp.generated.resources.compose_settings_page_content_discovery
-import nuviolinux.composeapp.generated.resources.compose_settings_page_trakt
+import nuviolinux.composeapp.generated.resources.compose_settings_page_tracking
 import nuviolinux.composeapp.generated.resources.settings_playback_subtitle
 import nuviolinux.composeapp.generated.resources.updates_debug_test_description
 import nuviolinux.composeapp.generated.resources.updates_debug_test_title
@@ -74,7 +75,7 @@ internal fun LazyListScope.settingsRootContent(
     onNotificationsClick: () -> Unit,
     onContentDiscoveryClick: () -> Unit,
     onIntegrationsClick: () -> Unit,
-    onTraktClick: () -> Unit,
+    onTrackingClick: () -> Unit,
     onSupportersContributorsClick: () -> Unit,
     onLicensesAttributionsClick: () -> Unit,
     onCheckForUpdatesClick: (() -> Unit)? = null,
@@ -116,11 +117,11 @@ internal fun LazyListScope.settingsRootContent(
                     )
                     SettingsGroupDivider(isTablet = isTablet)
                     SettingsNavigationRow(
-                        title = stringResource(Res.string.compose_settings_page_trakt),
-                        description = stringResource(Res.string.compose_settings_root_trakt_description),
-                        iconPainter = integrationLogoPainter(IntegrationLogo.Trakt),
+                        title = stringResource(Res.string.compose_settings_page_tracking),
+                        description = stringResource(Res.string.compose_settings_root_tracking_description),
+                        icon = Icons.Default.Sync,
                         isTablet = isTablet,
-                        onClick = onTraktClick,
+                        onClick = onTrackingClick,
                     )
                 }
             }

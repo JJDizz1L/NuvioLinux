@@ -3,6 +3,7 @@ package com.nuviolinux.app.core.storage
 import com.nuviolinux.app.core.build.AppFeaturePolicy
 import com.nuviolinux.app.core.sync.SyncManager
 import com.nuviolinux.app.core.sync.ProfileSettingsSync
+import com.nuviolinux.app.core.tracking.ensureTrackingProvidersRegistered
 import com.nuviolinux.app.features.addons.AddonRepository
 import com.nuviolinux.app.features.catalog.CatalogRepository
 import com.nuviolinux.app.features.collection.CollectionMobileSettingsRepository
@@ -20,14 +21,15 @@ import com.nuviolinux.app.features.p2p.P2pSettingsRepository
 import com.nuviolinux.app.features.plugins.PluginRepository
 import com.nuviolinux.app.features.player.SubtitleRepository
 import com.nuviolinux.app.features.profiles.ProfileRepository
+import com.nuviolinux.app.features.profiles.MAX_PROFILES
 import com.nuviolinux.app.features.search.SearchRepository
 import com.nuviolinux.app.features.settings.ThemeSettingsRepository
 import com.nuviolinux.app.features.streams.StreamContextStore
 import com.nuviolinux.app.features.streams.StreamBadgeSettingsRepository
 import com.nuviolinux.app.features.streams.StreamLaunchStore
 import com.nuviolinux.app.features.streams.StreamsRepository
-import com.nuviolinux.app.features.trakt.TraktAuthRepository
-import com.nuviolinux.app.features.trakt.TraktSettingsRepository
+import com.nuviolinux.app.features.tracking.TrackingProviderRegistry
+import com.nuviolinux.app.features.tracking.TrackingSettingsRepository
 import com.nuviolinux.app.core.ui.CardDepthStyleRepository
 import com.nuviolinux.app.core.ui.PosterCardStyleRepository
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingPreferencesRepository
@@ -38,6 +40,8 @@ import com.nuviolinux.app.features.watched.WatchedRepository
 
 internal object LocalAccountDataCleaner {
     fun wipe() {
+        ensureTrackingProvidersRegistered()
+        TrackingProviderRegistry.removeStoredProfiles(1..MAX_PROFILES)
         SyncManager.cancelAccountSync()
         WatchProgressSourceCoordinator.clearLocalState()
         ProfileSettingsSync.clearAccountState()
@@ -65,8 +69,8 @@ internal object LocalAccountDataCleaner {
         ThemeSettingsRepository.clearLocalState()
         PosterCardStyleRepository.clearLocalState()
         CardDepthStyleRepository.clearLocalState()
-        TraktAuthRepository.clearLocalState()
-        TraktSettingsRepository.clearLocalState()
+        TrackingProviderRegistry.clearLocalState()
+        TrackingSettingsRepository.clearLocalState()
         PlayerSettingsRepository.clearLocalState()
         StreamBadgeSettingsRepository.clearLocalState()
         P2pSettingsRepository.clearLocalState()

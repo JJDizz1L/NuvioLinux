@@ -16,7 +16,7 @@ import com.nuviolinux.app.features.p2p.P2pStreamingState
 import com.nuviolinux.app.features.player.skip.NextEpisodeInfo
 import com.nuviolinux.app.features.player.skip.SkipInterval
 import com.nuviolinux.app.features.streams.StreamsUiState
-import com.nuviolinux.app.features.trakt.TraktScrobbleItem
+import com.nuviolinux.app.features.tracking.TrackingMediaReference
 import com.nuviolinux.app.features.watched.WatchedUiState
 import com.nuviolinux.app.features.watchprogress.WatchProgressUiState
 import kotlinx.coroutines.CoroutineScope
@@ -151,9 +151,9 @@ internal class PlayerScreenRuntime(
     var previousIsPlaying by mutableStateOf(false)
     var hasRequestedScrobbleStartForCurrentItem by mutableStateOf(false)
     var scrobbleStartRequestGeneration by mutableStateOf(0L)
-    var pendingScrobbleStartAfterSeek by mutableStateOf(false)
+    var pendingSeekScrobbleRestart by mutableStateOf(false)
     var hasSentCompletionScrobbleForCurrentItem by mutableStateOf(false)
-    var currentTraktScrobbleItem by mutableStateOf<TraktScrobbleItem?>(null)
+    var currentTrackingMedia by mutableStateOf<TrackingMediaReference?>(null)
 
     var showSourcesPanel by mutableStateOf(false)
     var showEpisodesPanel by mutableStateOf(false)

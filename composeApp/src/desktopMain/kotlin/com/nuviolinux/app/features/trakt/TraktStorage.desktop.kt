@@ -16,6 +16,10 @@ internal actual object TraktAuthStorage {
         store.putString(ProfileScopedKey.of(payloadKey, profileId), payload)
     }
 
+    actual fun removeProfile(profileId: Int) {
+        store.remove(ProfileScopedKey.of(payloadKey, profileId))
+    }
+
     private fun migrateLegacyPrimaryProfilePayload(profileId: Int): String? {
         if (profileId != 1) return null
         val payload = store.getString(legacyPayloadKey)?.takeIf { it.isNotBlank() } ?: return null

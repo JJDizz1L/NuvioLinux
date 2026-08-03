@@ -1,13 +1,40 @@
 package com.nuviolinux.app.features.watchprogress
 
 import com.nuviolinux.app.features.details.MetaDetails
+import com.nuviolinux.app.features.tracking.TrackingProgressSnapshot
+import com.nuviolinux.app.features.tracking.WatchProgressSource
 import com.nuviolinux.app.features.watching.sync.ProgressSyncRecord
 import com.nuviolinux.app.features.watching.sync.ProgressDeltaEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class WatchProgressIdentityTest {
+    @Test
+    fun `provider hidden content changes progress ui state without changing entries`() {
+        val entry = entry(
+            parentMetaId = "show",
+            videoId = "show:1:2",
+            progressKey = "show-episode",
+            lastUpdatedEpochMs = 10L,
+        )
+        val visible = projectWatchProgressUiState(
+            source = WatchProgressSource.SIMKL,
+            entries = listOf(entry),
+            providerSnapshot = TrackingProgressSnapshot(),
+            hasLoadedNuvioRemoteProgress = false,
+        )
+        val hidden = projectWatchProgressUiState(
+            source = WatchProgressSource.SIMKL,
+            entries = listOf(entry),
+            providerSnapshot = TrackingProgressSnapshot(hiddenContentIds = setOf("show")),
+            hasLoadedNuvioRemoteProgress = false,
+        )
+
+        assertEquals(visible.entries, hidden.entries)
+        assertNotEquals(visible, hidden)
+    }
 
     @Test
     fun `provider change during metadata batch schedules one follow up`() {

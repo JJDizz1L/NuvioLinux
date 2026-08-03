@@ -4,6 +4,8 @@ import co.touchlab.kermit.Logger
 import com.nuviolinux.app.features.addons.RawHttpResponse
 import com.nuviolinux.app.features.addons.httpRequestRaw
 import com.nuviolinux.app.features.tmdb.TmdbService
+import com.nuviolinux.app.features.tracking.TrackingProviderId
+import com.nuviolinux.app.features.tracking.TrackingWatchedProvider
 import com.nuviolinux.app.features.trakt.TraktAuthRepository
 import com.nuviolinux.app.features.trakt.TraktEpisodeMappingService
 import com.nuviolinux.app.features.trakt.TraktPlatformClock
@@ -23,7 +25,8 @@ private const val WATCHED_MAX_PAGES = 1_000
 private const val WATCHED_SHOWS_EXTENDED = "progress"
 
 
-object TraktWatchedSyncAdapter : WatchedSyncAdapter {
+object TraktWatchedSyncAdapter : TrackingWatchedProvider {
+    override val providerId: TrackingProviderId = TrackingProviderId.TRAKT
     private val log = Logger.withTag("TraktWatchedSync")
     private val json = Json {
         ignoreUnknownKeys = true

@@ -116,6 +116,21 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
+        outDir.resolve("com/nuviolinux/app/features/simkl").apply {
+            mkdirs()
+            resolve("SimklConfig.kt").writeText(
+                """
+                |package com.nuviolinux.app.features.simkl
+                |
+                |object SimklConfig {
+                |    const val CLIENT_ID = "${props.getProperty("SIMKL_CLIENT_ID", "")}"
+                |    const val REDIRECT_URI = "${props.getProperty("SIMKL_REDIRECT_URI", "nuvio://auth/simkl")}"
+                |    const val APP_NAME = "${props.getProperty("SIMKL_APP_NAME", "nuvio")}"
+                |}
+                """.trimMargin()
+            )
+        }
+
         outDir.resolve("com/nuviolinux/app/features/details").apply {
             mkdirs()
             resolve("ImdbEpisodeRatingsConfig.kt").writeText(

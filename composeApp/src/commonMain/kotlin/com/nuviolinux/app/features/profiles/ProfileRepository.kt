@@ -6,6 +6,7 @@ import com.nuviolinux.app.core.auth.AuthState
 import com.nuviolinux.app.core.auth.isAnonymous
 import com.nuviolinux.app.core.network.SupabaseProvider
 import com.nuviolinux.app.core.sync.putSyncOriginClientId
+import com.nuviolinux.app.core.tracking.ensureTrackingProvidersRegistered
 import com.nuviolinux.app.features.addons.AddonRepository
 import com.nuviolinux.app.features.collection.CollectionMobileSettingsRepository
 import com.nuviolinux.app.features.collection.CollectionRepository
@@ -26,8 +27,8 @@ import com.nuviolinux.app.features.plugins.PluginRepository
 import com.nuviolinux.app.features.search.SearchHistoryRepository
 import com.nuviolinux.app.features.settings.ThemeSettingsRepository
 import com.nuviolinux.app.features.streams.StreamBadgeSettingsRepository
-import com.nuviolinux.app.features.trakt.TraktAuthRepository
-import com.nuviolinux.app.features.trakt.TraktSettingsRepository
+import com.nuviolinux.app.features.tracking.TrackingProviderRegistry
+import com.nuviolinux.app.features.tracking.TrackingSettingsRepository
 import com.nuviolinux.app.features.tmdb.TmdbSettingsRepository
 import com.nuviolinux.app.features.watched.WatchedRepository
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingPreferencesRepository
@@ -167,8 +168,9 @@ object ProfileRepository {
         )
         persist()
         WatchedRepository.onProfileChanged(profileIndex)
-        TraktSettingsRepository.onProfileChanged()
-        TraktAuthRepository.onProfileChanged(profileIndex)
+        TrackingSettingsRepository.onProfileChanged()
+        ensureTrackingProvidersRegistered()
+        TrackingProviderRegistry.onProfileChanged()
         LibraryRepository.onProfileChanged(profileIndex)
         LibraryDisplaySettingsRepository.onProfileChanged()
         WatchProgressRepository.onProfileChanged(profileIndex)

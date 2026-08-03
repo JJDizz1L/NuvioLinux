@@ -86,6 +86,15 @@ fun ProfileSelectionScreen(
     val titleAlpha = remember { Animatable(0f) }
     val titleOffset = remember { Animatable(20f) }
     val manageAlpha = remember { Animatable(0f) }
+    val onProfileClick: (NuvioProfile) -> Unit = { profile ->
+        routeProfileSelection(
+            profile = profile,
+            isEditMode = isEditMode,
+            onEditProfile = onEditProfile,
+            onPinRequired = { pinDialogProfile = it },
+            onProfileSelected = onProfileSelected,
+        )
+    }
 
     LaunchedEffect(Unit) {
         AvatarRepository.fetchAvatars()
@@ -194,13 +203,7 @@ fun ProfileSelectionScreen(
                                     animDelay = currentIndex * 80,
                                     onHoverChange = { isHovered -> updateHoveredProfile(profile, isHovered) },
                                     onClick = {
-                                        if (isEditMode) {
-                                            onEditProfile(profile)
-                                        } else if (profile.pinEnabled) {
-                                            pinDialogProfile = profile
-                                        } else {
-                                            onProfileSelected(profile)
-                                        }
+                                        onProfileClick(profile)
                                     },
                                 )
                             } else {
@@ -235,13 +238,7 @@ fun ProfileSelectionScreen(
                                             animDelay = currentIndex * 80,
                                             onHoverChange = { isHovered -> updateHoveredProfile(profile, isHovered) },
                                             onClick = {
-                                                if (isEditMode) {
-                                                    onEditProfile(profile)
-                                                } else if (profile.pinEnabled) {
-                                                    pinDialogProfile = profile
-                                                } else {
-                                                    onProfileSelected(profile)
-                                                }
+                                                onProfileClick(profile)
                                             },
                                         )
                                     } else {

@@ -3,8 +3,9 @@ package com.nuviolinux.app.features.library
 import com.nuviolinux.app.features.details.MetaDetails
 import com.nuviolinux.app.features.home.PosterShape
 import com.nuviolinux.app.features.home.MetaPreview
-import com.nuviolinux.app.features.trakt.TraktListTab
-import com.nuviolinux.app.features.trakt.TraktListType
+import com.nuviolinux.app.features.tracking.TrackingLibraryTab
+import com.nuviolinux.app.features.tracking.TrackingLibraryTabKind
+import com.nuviolinux.app.features.tracking.TrackingProviderId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -71,10 +72,11 @@ class LibraryRepositoryTest {
 
     @Test
     fun `library tabs include local Nuvio library before Trakt tabs`() {
-        val traktTab = TraktListTab(
+        val traktTab = TrackingLibraryTab(
             key = "trakt:watchlist",
             title = "Watchlist",
-            type = TraktListType.WATCHLIST,
+            providerId = TrackingProviderId.TRAKT,
+            kind = TrackingLibraryTabKind.WATCHLIST,
         )
 
         val tabs = libraryTabsWithLocal(listOf(traktTab))
@@ -87,7 +89,7 @@ class LibraryRepositoryTest {
     fun `library membership always includes local state before Trakt membership`() {
         val membership = libraryMembershipWithLocal(
             inLocal = true,
-            traktMembership = mapOf("trakt:watchlist" to false),
+            providerMembership = mapOf("trakt:watchlist" to false),
         )
 
         assertEquals(
