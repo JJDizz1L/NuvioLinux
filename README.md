@@ -83,19 +83,27 @@ is disabled in the sandbox).
 
 Prebuilt packages are attached to each [release](https://github.com/JJDizz1L/NuvioLinux/releases). The package is self-contained (bundled JRE, no system Java required), installs to `/opt/nuvio-linux`, and is compiled for **generic x86-64** — it runs on any x86-64 CPU (no AVX2/AVX-512 requirement).
 
+Release packages are **signed**. Trust the release key once (fetches from a keyserver):
+
+```bash
+sudo pacman-key --recv-key 6702DBAB3E41EDE1 && sudo pacman-key --lsign-key 6702DBAB3E41EDE1
+```
+
+(Or download `nuvio-linux-gpg-key.asc` from the release and run
+`sudo pacman-key --add nuvio-linux-gpg-key.asc && sudo pacman-key --lsign-key 6702DBAB3E41EDE1`.)
+
 ### Install directly from the release URL
 
 ```bash
-sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.15.4/nuvio-linux-0.1.15alpha-3-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.16-alpha/nuvio-linux-0.1.16alpha-1-x86_64.pkg.tar.zst
 ```
 
 ### Install a manually downloaded package
 
-Download `nuvio-linux-0.1.15alpha-3-x86_64.pkg.tar.zst` from the latest
-[release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
+Download the `.pkg.tar.zst` from the latest [release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
 
 ```bash
-sudo pacman -U ./nuvio-linux-0.1.15alpha-3-x86_64.pkg.tar.zst
+sudo pacman -U ./nuvio-linux-0.1.16alpha-1-x86_64.pkg.tar.zst
 ```
 
 ### Build from source

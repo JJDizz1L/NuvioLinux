@@ -29,6 +29,7 @@ upstream-port.md
 # Arch package build artifacts
 dist/arch/pkg/
 dist/arch/*.pkg.tar.zst
+dist/arch/*.pkg.tar.zst.sig
 
 # JVM crash logs
 hs_err_pid*.log

@@ -1,6 +1,8 @@
 # Maintainer: JJDizz1L
 #
 # Build from local source: run `makepkg -si` from this directory.
+# Release builds (signed): `GPGKEY=6702DBAB3E41EDE1 makepkg -f --sign`.
+# The public key lives in nuvio-linux-gpg-key.asc in this directory.
 # The repo root is expected at ${startdir}/../.. (referred to as $REPO_ROOT).
 
 pkgname=nuvio-linux
@@ -20,6 +22,8 @@ noextract=()
 sha256sums=()
 
 export GRADLE_OPTS="-Dorg.gradle.parallel=false"
+# Release signing key (Omarchy). makepkg signs with --sign when GPGKEY is set.
+export GPGKEY="${GPGKEY:-6702DBAB3E41EDE1}"
 # Build with a baseline x86-64 JDK (e.g. Temurin) so the bundled JRE is
 # portable. Distro JDKs built with -march=native/-march=x86-64-v3/v4 (e.g.
 # CachyOS) produce a runtime that only runs on those CPUs.
