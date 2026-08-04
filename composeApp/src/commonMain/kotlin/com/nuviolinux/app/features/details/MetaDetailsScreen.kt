@@ -118,7 +118,7 @@ import com.nuviolinux.app.features.library.LibraryRepository
 import com.nuviolinux.app.features.library.PendingTrackingMembershipRemoval
 import com.nuviolinux.app.features.library.TrackingMembershipRemovalConfirmationHost
 import com.nuviolinux.app.features.library.executeTrackingMembershipOperation
-import com.nuviolinux.app.features.library.showTrackingMembershipRewriteFeedback
+import com.nuviolinux.app.features.library.showTrackingMembershipApplyFeedback
 import com.nuviolinux.app.features.library.toLibraryItem
 import com.nuviolinux.app.features.player.PlayerSettingsRepository
 import com.nuviolinux.app.features.streams.StreamAutoPlayPolicy
@@ -466,10 +466,21 @@ fun MetaDetailsScreen(
                 val meta = displayedMeta
                 val metaPreview = remember(meta) { meta.toMetaPreview() }
                 val todayIsoDate = CurrentDateProvider.todayIsoDate()
+                /* The saved state lives in the active provider's snapshot
+                 * (Simkl/Trakt), whose commits don't touch the local library
+                 * state — bump this version whenever it changes so isSaved
+                 * recomputes and the icon flips. */
+                var libraryProviderVersion by remember { mutableStateOf(0) }
+                LaunchedEffect(libraryUiState.sourceMode) {
+                    LibraryRepository.activeLibraryProvider()
+                        ?.changes
+                        ?.collect { libraryProviderVersion++ }
+                }
                 val isSaved = remember(
                     libraryUiState.items,
                     libraryUiState.sections,
                     libraryUiState.sourceMode,
+                    libraryProviderVersion,
                     meta.id,
                     meta.type,
                 ) {
@@ -525,7 +536,7 @@ fun MetaDetailsScreen(
                                             itemTitle = item.name,
                                             confirmations = result.requiredRemovalConfirmations,
                                             retry = toggleMembership,
-                                            onApplied = ::showTrackingMembershipRewriteFeedback,
+                                            onApplied = ::showTrackingMembershipApplyFeedback,
                                             onFailure = { error ->
                                                 NuvioToastController.show(
                                                     error.message ?: trackingListsUpdateFailedMessage,
@@ -533,7 +544,7 @@ fun MetaDetailsScreen(
                                             },
                                         )
                                     } else {
-                                        showTrackingMembershipRewriteFeedback(result)
+                                        showTrackingMembershipApplyFeedback(result)
                                     }
                                 },
                                 onFailure = { error ->
@@ -1533,7 +1544,7 @@ fun MetaDetailsScreen(
                                         )
                                     }
                                     val completeMembershipUpdate: suspend (TrackingMembershipApplyResult) -> Unit = { result ->
-                                        showTrackingMembershipRewriteFeedback(result)
+                                        showTrackingMembershipApplyFeedback(result)
                                         showLibraryListPicker = false
                                     }
                                     executeTrackingMembershipOperation(

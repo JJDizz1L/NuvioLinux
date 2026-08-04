@@ -1,5 +1,6 @@
 package com.nuviolinux.app.features.simkl
 
+import co.touchlab.kermit.Logger
 import com.nuviolinux.app.features.library.LibraryItem
 import com.nuviolinux.app.features.library.LibrarySection
 import com.nuviolinux.app.features.profiles.ProfileRepository
@@ -12,6 +13,7 @@ import com.nuviolinux.app.features.tracking.TrackingMembershipRemovalImpact
 import com.nuviolinux.app.features.tracking.TrackingMembershipResolution
 import com.nuviolinux.app.features.tracking.TrackingProviderId
 import com.nuviolinux.app.features.tracking.TrackingRefreshIntent
+import com.nuviolinux.app.features.tracking.parseTrackingExternalIds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +32,15 @@ data class SimklLibraryUiState(
     val hasLoaded: Boolean = false,
     val errorMessage: String? = null,
 )
+
+/** Maps addon-provided type variants to Simkl's canonical movie/series/anime. */
+private fun normalizeSimklContentType(type: String?): String? = type?.trim()?.lowercase()?.let {
+    when (it) {
+        "film" -> "movie"
+        "show", "shows", "tv", "tvshow" -> "series"
+        else -> it
+    }
+}
 
 object SimklLibraryRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -75,19 +86,32 @@ object SimklLibraryRepository {
         desiredMembership: Map<String, Boolean>,
         destructiveRemovalConfirmed: Boolean = false,
     ): TrackingMembershipResolution? {
-        if (profileId != ProfileRepository.activeProfileId) return null
+        if (profileId != ProfileRepository.activeProfileId) {
+            log.w {
+                "Simkl membership apply skipped: profile $profileId is no longer active " +
+                    "(active=${ProfileRepository.activeProfileId}) item=${item.id}"
+            }
+            return null
+        }
         ensureLoaded()
+        val normalizedType = normalizeSimklContentType(item.type)
         val desiredStatuses = simklLibraryStatusDefinitions.filter { definition ->
             desiredMembership[definition.key] == true
         }
         require(desiredStatuses.size <= 1) { "A Simkl item can have only one list status" }
         val desiredStatus = desiredStatuses.singleOrNull()
         require(desiredStatus == null || desiredStatus.supportedContentTypes.any { supported ->
-            supported.equals(item.type, ignoreCase = true)
+            supported.equals(normalizedType, ignoreCase = true)
         }) { "${desiredStatus?.title} does not support ${item.type}" }
         val currentStatus = findItem(item.id, item.type)?.listKeys.orEmpty()
             .firstNotNullOfOrNull(::simklLibraryStatusDefinition)
-        if (desiredStatus == currentStatus) return null
+        if (desiredStatus == currentStatus) {
+            log.i {
+                "Simkl membership already at status=${desiredStatus?.title} item=${item.id} " +
+                    "type=${item.type} — no write needed"
+            }
+            return null
+        }
 
         val snapshot = SimklSyncRepository.state.value.snapshot
         val media = snapshot.mediaReference(
@@ -114,7 +138,18 @@ object SimklLibraryRepository {
                 SimklMutationRepository.removeFromList(profileId = profileId, items = listOf(media))
             }
 
-            else -> return null
+            else -> {
+                log.w { "Simkl membership apply: no desired status and no current status item=${item.id}" }
+                return null
+            }
+        }
+        log.i {
+            "Simkl mutation result item=${item.id} desired=${desiredStatus?.trackingStatus?.wireValue} " +
+                "attempted=${result.attemptedCount} notFound=${result.notFoundCount} " +
+                "resolved=${result.resolvedListStatuses.joinToString { it.wireValue }}"
+        }
+        check(result.attemptedCount > 0) {
+            "Simkl mutation did not execute (profile switched mid-operation?) item=${item.id}"
         }
         check(result.isComplete) {
             "Simkl could not match ${result.notFoundCount} of ${result.attemptedCount} library items"
@@ -159,11 +194,22 @@ object SimklLibraryRepository {
         )
     }
 
-    private fun findItem(contentId: String, contentType: String?): LibraryItem? =
-        uiState.value.items.firstOrNull { item ->
-            item.id.equals(contentId, ignoreCase = true) &&
-                (contentType == null || item.type.equals(contentType, ignoreCase = true))
+    private fun findItem(contentId: String, contentType: String?): LibraryItem? {
+        val parsedIds = parseTrackingExternalIds(contentId)
+        return uiState.value.items.firstOrNull { item ->
+            val typeOk = contentType == null ||
+                item.type.equals(normalizeSimklContentType(contentType), ignoreCase = true)
+            typeOk && (
+                item.id.equals(contentId, ignoreCase = true) ||
+                    (parsedIds.imdb != null && item.imdbId?.equals(parsedIds.imdb, ignoreCase = true) == true) ||
+                    (parsedIds.tmdb != null && item.tmdbId?.equals(parsedIds.tmdb?.toInt()) == true) ||
+                    (parsedIds.simkl != null &&
+                        item.trackingProviderItemId?.equals("simkl:${parsedIds.simkl}", ignoreCase = true) == true)
+                )
         }
+    }
+
+    private val log = Logger.withTag("SimklLibrary")
 }
 
 object SimklTrackingLibraryProvider : TrackingLibraryProvider {

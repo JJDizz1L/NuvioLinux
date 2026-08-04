@@ -179,7 +179,7 @@ import com.nuviolinux.app.features.library.LibrarySourceMode
 import com.nuviolinux.app.features.library.PendingTrackingMembershipRemoval
 import com.nuviolinux.app.features.library.TrackingMembershipRemovalConfirmationHost
 import com.nuviolinux.app.features.library.executeTrackingMembershipOperation
-import com.nuviolinux.app.features.library.showTrackingMembershipRewriteFeedback
+import com.nuviolinux.app.features.library.showTrackingMembershipApplyFeedback
 import com.nuviolinux.app.features.library.LibraryScreen
 import com.nuviolinux.app.features.library.toLibraryItem
 import com.nuviolinux.app.features.library.toMetaPreview
@@ -3680,7 +3680,7 @@ private fun MainAppContent(
                             )
                         }
                         val completeMembershipUpdate: suspend (TrackingMembershipApplyResult) -> Unit = { result ->
-                            showTrackingMembershipRewriteFeedback(result)
+                            showTrackingMembershipApplyFeedback(result)
                             showLibraryListPicker = false
                             pickerItem = null
                             pickerError = null

@@ -682,7 +682,7 @@ object LibraryRepository {
             },
         )
 
-    private fun activeLibraryProvider(
+    internal fun activeLibraryProvider(
         sourceMode: LibrarySourceMode = effectiveLibrarySourceMode(),
     ): TrackingLibraryProvider? =
         sourceMode.providerId?.let(TrackingProviderRegistry::libraryProvider)

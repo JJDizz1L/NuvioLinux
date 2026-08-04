@@ -1,5 +1,6 @@
 package com.nuviolinux.app.features.simkl
 
+import co.touchlab.kermit.Logger
 import com.nuviolinux.app.features.profiles.ProfileRepository
 import com.nuviolinux.app.features.tracking.TrackingEpisode
 import com.nuviolinux.app.features.tracking.TrackingExternalIds
@@ -29,6 +30,7 @@ internal class SimklMutationService(
     private val client: SimklApiClient,
     private val onMutationCommitted: suspend (SimklMutationReceipt) -> Unit = {},
 ) {
+    private val log = Logger.withTag("SimklMutation")
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = false
@@ -50,6 +52,12 @@ internal class SimklMutationService(
             ),
         )
         val receipt = response.toListMutationReceipt(candidates, json)
+        val resolved = (receipt.mutation as? SimklCommittedMutation.MoveToList)?.items?.size ?: 0
+        log.i {
+            "Simkl /sync/add-to-list destination=${destination.wireValue} " +
+                "attempted=${receipt.result.attemptedCount} notFound=${receipt.result.notFoundCount} " +
+                "accepted=$resolved requiresReconciliation=${receipt.requiresReconciliation}"
+        }
         onMutationCommitted(receipt)
         return receipt.result
     }
@@ -125,6 +133,8 @@ internal class SimklMutationService(
 object SimklMutationRepository : TrackingListWriter, TrackingHistoryWriter, TrackingScrobbler {
     override val providerId: TrackingProviderId = TrackingProviderId.SIMKL
 
+    private val log = Logger.withTag("SimklMutationRepository")
+
     private val service by lazy {
         SimklMutationService(
             client = SimklApi.client,
@@ -153,7 +163,10 @@ object SimklMutationRepository : TrackingListWriter, TrackingHistoryWriter, Trac
         items: Collection<TrackingMediaReference>,
         destination: TrackingListStatus,
     ): TrackingMutationResult {
-        if (!isActiveProfile(profileId)) return TrackingMutationResult(attemptedCount = 0)
+        if (!isActiveProfile(profileId)) {
+            log.w { "Simkl moveToList skipped: profile $profileId is not active (active=${ProfileRepository.activeProfileId})" }
+            return TrackingMutationResult(attemptedCount = 0)
+        }
         return service.moveToList(items, destination)
     }
 
@@ -161,7 +174,10 @@ object SimklMutationRepository : TrackingListWriter, TrackingHistoryWriter, Trac
         profileId: Int,
         items: Collection<TrackingMediaReference>,
     ): TrackingMutationResult {
-        if (!isActiveProfile(profileId)) return TrackingMutationResult(attemptedCount = 0)
+        if (!isActiveProfile(profileId)) {
+            log.w { "Simkl removeFromList skipped: profile $profileId is not active (active=${ProfileRepository.activeProfileId})" }
+            return TrackingMutationResult(attemptedCount = 0)
+        }
         return service.removeFromList(items)
     }
 

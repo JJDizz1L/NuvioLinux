@@ -1,5 +1,6 @@
 package com.nuviolinux.app.features.details.components
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -256,11 +257,17 @@ private fun DetailIconAction(
                 .secondaryClick(onLongClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                modifier = Modifier.size(21.dp),
-            )
+            Crossfade(
+                targetState = icon,
+                animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                label = "detail_secondary_action_icon",
+            ) { currentIcon ->
+                Icon(
+                    imageVector = currentIcon,
+                    contentDescription = label,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
         }
     }
 }

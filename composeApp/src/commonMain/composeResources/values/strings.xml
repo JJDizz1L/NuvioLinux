@@ -1532,6 +1532,7 @@
     <string name="trakt_lists_update_failed">Failed to update Trakt lists</string>
     <string name="tracking_lists_update_failed">Failed to update tracking lists</string>
     <string name="tracking_list_status_rewritten">%1$s placed this title in %2$s instead of %3$s</string>
+    <string name="tracking_list_item_added">%1$s added this title to %2$s</string>
     <string name="tracking_remove_confirmation_title">Remove from %1$s?</string>
     <string name="tracking_remove_confirmation_message">Removing “%1$s” from %2$s will also clear its %3$s there. This can’t be undone.</string>
     <string name="tracking_removal_impact_history">watched history</string>
