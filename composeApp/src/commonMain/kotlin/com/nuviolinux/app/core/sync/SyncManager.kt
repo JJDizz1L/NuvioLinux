@@ -12,6 +12,8 @@ import com.nuviolinux.app.features.library.LibraryRepository
 import com.nuviolinux.app.features.plugins.PluginRepository
 import com.nuviolinux.app.features.profiles.ProfileRepository
 import com.nuviolinux.app.features.trakt.TraktAuthRepository
+import com.nuviolinux.app.features.trakt.TraktAutomaticRefresh
+import com.nuviolinux.app.features.trakt.TraktCredentialSync
 import com.nuviolinux.app.features.trakt.TraktPlatformClock
 import com.nuviolinux.app.features.trakt.TraktSettingsRepository
 import com.nuviolinux.app.features.trakt.effectiveLibrarySourceMode
@@ -312,6 +314,10 @@ object SyncManager {
         runCatching { ProfileRepository.pullProfiles() }
             .onFailure { log.e(it) { "Foreground profiles pull failed" } }
 
+        runCatching { TraktCredentialSync.pullFromRemote(profileId) }
+            .onSuccess { applied -> log.i { "Foreground Trakt credential pull completed applied=$applied" } }
+            .onFailure { log.e(it) { "Foreground Trakt credential pull failed" } }
+
         val syncResult = runOrderedProfileSync(
             profileId = profileId,
             pluginsEnabled = AppFeaturePolicy.pluginsEnabled,
@@ -353,9 +359,11 @@ object SyncManager {
             if (ProfileRepository.activeProfileId != profileId) return@launch
 
             log.i { "Full profile sync started profile=$profileId reason=$reason" }
+            runCatching { TraktCredentialSync.pullFromRemote(profileId) }
+                .onSuccess { applied -> log.i { "Full profile sync — Trakt credential pull completed applied=$applied" } }
+                .onFailure { log.e(it) { "Trakt credential pull failed" } }
             WatchProgressSourceCoordinator.pauseAutomaticTransitions()
-            val syncResult = try {
-                runOrderedProfileSync(
+            val syncResult = try {                runOrderedProfileSync(
                     profileId = profileId,
                     pluginsEnabled = AppFeaturePolicy.pluginsEnabled,
                     operations = profileSyncOperations,
@@ -428,8 +436,19 @@ object SyncManager {
                     isAuthenticated = traktAuthenticated,
                     source = settings.watchProgressSource,
                 )
+                /* When Trakt is the library/watch-progress source, the nuvio
+                 * pulls above are intentionally skipped; refresh the Trakt
+                 * providers periodically instead (15-min gate). */
+                val usesTraktAsSource = traktAuthenticated && (
+                    !shouldPullLibrary ||
+                        !shouldPullWatchProgress
+                    )
 
                 if (!shouldPullLibrary && !shouldPullWatchProgress) {
+                    if (usesTraktAsSource) {
+                        runCatching { TraktAutomaticRefresh.refreshIfDue() }
+                            .onFailure { log.e(it) { "Periodic Trakt refresh failed" } }
+                    }
                     continue
                 }
 
@@ -445,6 +464,10 @@ object SyncManager {
                     runCatching {
                         WatchProgressSourceCoordinator.refreshActiveSource(profileId = profileId, force = false)
                     }.onFailure { log.e(it) { "Periodic Nuvio Linux watch source pull failed" } }
+                }
+                if (usesTraktAsSource) {
+                    runCatching { TraktAutomaticRefresh.refreshIfDue() }
+                        .onFailure { log.e(it) { "Periodic Trakt refresh failed" } }
                 }
             }
         }

@@ -28,8 +28,10 @@ import com.nuviolinux.app.features.streams.StreamBadgeSettingsRepository
 import com.nuviolinux.app.features.streams.StreamBadgeSettingsStorage
 import com.nuviolinux.app.features.tmdb.TmdbSettingsStorage
 import com.nuviolinux.app.features.tmdb.TmdbSettingsRepository
+import com.nuviolinux.app.features.trakt.ProfileSettingsWatchSourceOutbox
 import com.nuviolinux.app.features.trakt.TraktCommentsStorage
 import com.nuviolinux.app.features.trakt.TraktCommentsSettings
+import com.nuviolinux.app.features.trakt.TraktSettingsRepository
 import com.nuviolinux.app.features.trakt.TraktSettingsStorage
 import com.nuviolinux.app.features.tracking.TrackingSettingsRepository
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingPreferencesStorage
@@ -141,6 +143,13 @@ object ProfileSettingsSync {
                     if (ProfileRepository.activeProfileId != profileId) return@withLock false
                     applyRemoteBlob(remoteBlob)
                     skipNextPushSignature = currentObservedStateSignature()
+                    /* A watch-progress-source change recorded locally while the
+                     * pull was in flight may have been clobbered by the remote
+                     * blob; re-apply it. The signature is set above so this
+                     * re-application is what triggers the push that propagates
+                     * the pending source to the remote (upstream 6d5281cd
+                     * pattern, adapted to the per-profile blob sync). */
+                    restorePendingWatchProgressSource(profileId)
                 } finally {
                     isApplyingRemoteBlob = false
                 }
@@ -210,6 +219,18 @@ object ProfileSettingsSync {
                     pushCurrentProfileToRemote()
                 }
         }
+    }
+
+    /** Re-applies a watch-progress-source change recorded locally while a pull
+     * was in flight, so the remote blob cannot silently clobber it. */
+    private fun restorePendingWatchProgressSource(profileId: Int) {
+        val authState = AuthRepository.state.value
+        if (authState !is AuthState.Authenticated || authState.isAnonymous) return
+        val pending = ProfileSettingsWatchSourceOutbox.pendingFor(authState.userId, profileId) ?: return
+        if (TraktSettingsRepository.uiState.value.watchProgressSource != pending.source) {
+            TraktSettingsRepository.setWatchProgressSource(pending.source, profileId)
+        }
+        ProfileSettingsWatchSourceOutbox.clearIfMatches(pending)
     }
 
     private suspend fun pushToRemoteLocked(profileId: Int, blob: MobileProfileSettingsBlob) {

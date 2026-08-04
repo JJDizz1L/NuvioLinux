@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.ui.NuvioLoadingIndicator
 import com.nuviolinux.app.core.ui.NuvioTokens
 import com.nuviolinux.app.core.ui.nuvio
@@ -71,6 +72,8 @@ import com.nuviolinux.app.features.trakt.TraktAuthRepository
 import com.nuviolinux.app.features.trakt.TraktAuthUiState
 import com.nuviolinux.app.features.trakt.TraktBrandAsset
 import com.nuviolinux.app.features.trakt.TraktConnectionMode
+import com.nuviolinux.app.features.trakt.TraktLibraryRepository
+import com.nuviolinux.app.features.trakt.TraktProgressRepository
 import com.nuviolinux.app.features.trakt.traktBrandPainter
 import com.nuviolinux.app.features.watchprogress.WatchProgressSourceCoordinator
 import kotlinx.coroutines.launch
@@ -117,6 +120,8 @@ import nuviolinux.composeapp.generated.resources.settings_trakt_device_instructi
 import nuviolinux.composeapp.generated.resources.settings_trakt_save_actions_description
 import nuviolinux.composeapp.generated.resources.settings_trakt_sign_in_description
 import org.jetbrains.compose.resources.stringResource
+
+private val log = Logger.withTag("TrackingProviderCards")
 
 internal enum class TrackingBrand(val displayName: String) {
     NUVIO("Nuvio"),
@@ -167,6 +172,7 @@ internal fun TrackingProviderCards(
     }.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var showSyncInfo by rememberSaveable { mutableStateOf(false) }
+    var traktSyncInProgress by remember { mutableStateOf(false) }
     val onSimklSyncRequested: () -> Unit = {
         scope.launch {
             WatchProgressSourceCoordinator.refreshProviderAndActiveSource(
@@ -178,6 +184,26 @@ internal fun TrackingProviderCards(
             )
         }
     }
+    val onTraktSyncRequested: () -> Unit = {
+        scope.launch {
+            traktSyncInProgress = true
+            try {
+                WatchProgressSourceCoordinator.refreshProviderAndActiveSource(
+                    profileId = ProfileRepository.activeProfileId,
+                    providerId = TrackingProviderId.TRAKT,
+                    refreshProvider = {
+                        runCatching { TraktLibraryRepository.refreshNow() }
+                            .onFailure { log.w { "Trakt sync library refresh failed: ${it.message}" } }
+                        runCatching { TraktProgressRepository.invalidateAndRefresh() }
+                            .onFailure { log.w { "Trakt sync progress refresh failed: ${it.message}" } }
+                        true
+                    },
+                )
+            } finally {
+                traktSyncInProgress = false
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -185,6 +211,8 @@ internal fun TrackingProviderCards(
     ) {
         TraktProviderCard(
             uiState = traktUiState,
+            isSyncing = traktSyncInProgress,
+            onSyncRequested = onTraktSyncRequested,
             modifier = Modifier.fillMaxWidth(),
         )
         SimklProviderCard(
@@ -205,6 +233,8 @@ internal fun TrackingProviderCards(
 @Composable
 private fun TraktProviderCard(
     uiState: TraktAuthUiState,
+    isSyncing: Boolean = false,
+    onSyncRequested: (() -> Unit)? = null,
     modifier: Modifier,
 ) {
     val usesDeviceCodeFlow = uiState.usesDeviceCodeFlow
@@ -242,6 +272,8 @@ private fun TraktProviderCard(
             },
         ),
         disconnectLabel = stringResource(Res.string.settings_trakt_disconnect),
+        syncLabel = stringResource(Res.string.settings_simkl_sync_now),
+        isSyncing = isSyncing,
         missingCredentialsMessage = stringResource(Res.string.settings_trakt_missing_credentials),
         approvalCode = uiState.pendingDeviceUserCode,
         approvalUrl = uiState.pendingDeviceVerificationUrl,
@@ -256,6 +288,7 @@ private fun TraktProviderCard(
                 ?: TraktAuthRepository.onConnectRequested()
         },
         onCancelAuthorization = TraktAuthRepository::onCancelAuthorization,
+        onSyncRequested = onSyncRequested,
         onDisconnect = TraktAuthRepository::onDisconnectRequested,
         modifier = modifier,
     )
