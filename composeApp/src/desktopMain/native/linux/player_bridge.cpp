@@ -345,6 +345,7 @@ static int load_libmpv() {
 #define GL_TEXTURE_WRAP_S             0x2802
 #define GL_TEXTURE_WRAP_T             0x2803
 #define GL_COLOR_BUFFER_BIT           0x4000
+#define GL_VENDOR                     0x1F00
 
 typedef void* (*egl_get_proc_address_t)(const char*);
 typedef void* (*egl_get_platform_display_t)(unsigned int, void*, const int*);
@@ -370,6 +371,7 @@ typedef int  (*gl_check_framebuffer_t)(unsigned int);
 typedef void (*gl_read_pixels_t)(int, int, int, int, unsigned int, unsigned int, void*);
 typedef void (*gl_clear_color_t)(float, float, float, float);
 typedef void (*gl_clear_t)(unsigned int);
+typedef const unsigned char* (*gl_get_string_t)(unsigned int);
 
 struct GlRenderer {
     void *eglLib = nullptr;
@@ -401,6 +403,11 @@ struct GlRenderer {
     gl_read_pixels_t glReadPixels = nullptr;
     gl_clear_color_t glClearColor = nullptr;
     gl_clear_t glClear = nullptr;
+    gl_get_string_t glGetString = nullptr;
+    /* True when GL_VENDOR is NVIDIA: the DRM render node is then withheld
+     * from mpv (see render context creation) so the drmprime-overlay hwdec,
+     * which requires a DRM atomic/modeset context, can never be probed. */
+    bool nvidiaVendor = false;
 };
 
 static void *gl_resolve(GlRenderer *gl, const char *name) {
@@ -564,6 +571,7 @@ static bool gl_init(GlRenderer *gl) {
     gl->glReadPixels = (gl_read_pixels_t)gl_resolve(gl, "glReadPixels");
     gl->glClearColor = (gl_clear_color_t)gl_resolve(gl, "glClearColor");
     gl->glClear = (gl_clear_t)gl_resolve(gl, "glClear");
+    gl->glGetString = (gl_get_string_t)gl_resolve(gl, "glGetString");
     if (!gl->glGenFramebuffers || !gl->glBindFramebuffer || !gl->glFramebufferTexture2D ||
         !gl->glGenTextures || !gl->glBindTexture || !gl->glTexImage2D || !gl->glTexParameteri ||
         !gl->glCheckFramebufferStatus || !gl->glReadPixels || !gl->glClear || !gl->glClearColor) {
@@ -586,6 +594,14 @@ static bool gl_init(GlRenderer *gl) {
         LOG("GL renderer unavailable: FBO incomplete, falling back to SW renderer");
         gl_destroy(gl);
         return false;
+    }
+
+    if (gl->glGetString) {
+        const unsigned char *vendor = gl->glGetString(GL_VENDOR);
+        if (vendor) {
+            gl->nvidiaVendor = strstr((const char*)vendor, "NVIDIA") != nullptr;
+            DBG("GL vendor: %s (nvidia=%d)", (const char*)vendor, gl->nvidiaVendor ? 1 : 0);
+        }
     }
 
     gl->ready = true;
@@ -896,23 +912,33 @@ struct MpvPlayer {
             /* Expose a DRM render node to mpv so the vaapi hwdec interop can
              * open a VA display and import decoded surfaces as EGL dma-buf
              * images (zero-copy decode under vo=libmpv). Without it the
-             * vaapi interop can't init and hwdec falls back to copy modes. */
+             * vaapi interop can't init and hwdec falls back to copy modes.
+             * NVIDIA is excluded on purpose: its render node would also make
+             * mpv probe the drmprime-overlay hwdec, which needs a DRM
+             * atomic/modeset context that does not exist in a desktop
+             * session (nvdec needs no native resource, so nothing is lost). */
             mpv_opengl_drm_params_v2 drmParams = {};
             drmParams.fd = -1;
             drmParams.render_fd = -1;
-            drmRenderFd = openDrmRenderNode();
-            if (drmRenderFd >= 0) {
-                drmParams.render_fd = drmRenderFd;
-                DBG("DRM render node fd=%d available for vaapi interop", drmRenderFd);
+            if (!gl.nvidiaVendor) {
+                drmRenderFd = openDrmRenderNode();
+                if (drmRenderFd >= 0) {
+                    drmParams.render_fd = drmRenderFd;
+                    DBG("DRM render node fd=%d available for vaapi interop", drmRenderFd);
+                } else {
+                    DBG("No DRM render node accessible; vaapi zero-copy interop disabled");
+                }
             } else {
-                DBG("No DRM render node accessible; vaapi zero-copy interop disabled");
+                DBG("NVIDIA GPU detected; DRM render node withheld (drmprime-overlay is unusable in a desktop session)");
             }
-            mpv_render_param createParams[] = {
-                { MPV_RENDER_PARAM_API_TYPE, (void*)MPV_RENDER_API_TYPE_OPENGL },
-                { MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &initParams },
-                { MPV_RENDER_PARAM_DRM_DISPLAY_V2, &drmParams },
-                { MPV_RENDER_PARAM_INVALID, nullptr }
-            };
+            mpv_render_param createParams[4];
+            int createParamCount = 0;
+            createParams[createParamCount++] = { MPV_RENDER_PARAM_API_TYPE, (void*)MPV_RENDER_API_TYPE_OPENGL };
+            createParams[createParamCount++] = { MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &initParams };
+            if (drmParams.render_fd >= 0) {
+                createParams[createParamCount++] = { MPV_RENDER_PARAM_DRM_DISPLAY_V2, &drmParams };
+            }
+            createParams[createParamCount] = { MPV_RENDER_PARAM_INVALID, nullptr };
             int ret = p_mpv_render_context_create(&renderCtx, mpv, createParams);
             DBG("mpv_render_context_create(OPENGL) returned: %d", ret);
             if (ret < 0 || !renderCtx) {
@@ -1100,6 +1126,14 @@ struct MpvPlayer {
         p_mpv_set_option_string(mpv, "vo", "libmpv");
         p_mpv_set_option_string(mpv, "force-window", "no");
         const char *hwdecOpt = decoderPriority >= 2 ? "no" : "vaapi,nvdec,auto-copy";
+        /* Tester escape hatch: NUVIO_MPV_HWDEC overrides the computed value
+         * (e.g. NUVIO_MPV_HWDEC=auto-copy or =nvdec-copy) without a rebuild. */
+        if (const char *overrideHwdec = getenv("NUVIO_MPV_HWDEC")) {
+            if (overrideHwdec[0] != '\0') {
+                hwdecOpt = overrideHwdec;
+                LOG("hwdec overridden by NUVIO_MPV_HWDEC = %s", hwdecOpt);
+            }
+        }
         p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
         DBG("hwdec option = %s", hwdecOpt);
 
