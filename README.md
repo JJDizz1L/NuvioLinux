@@ -43,6 +43,7 @@ This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMe
 - **Hardware acceleration.** Zero-copy decode via **VA-API (Mesa/AMD/Intel)** and **NVDEC (NVIDIA)**, chosen automatically by the app's decoder setting, with a software fallback.
 - **HDR support.** The embedded player loads your `mpv.conf` wholesale, so HDR/color configuration — tone-mapping, `target-peak`, inverse-tone-mapping, profiles — applies as-is.
 - **Discord Rich Presence.** Show what you're watching or browsing on your Discord profile. Configurable under **Settings → Integrations → Discord Rich Presence**.
+- **Trakt & Simkl tracking.** Connect your Trakt or Simkl account under **Settings → Integrations → Tracking** — library, watch progress, watched history and scrobbling sync across your devices, with a "Sync now" button and automatic refresh.
 - **Arch Linux distribution.** A first-class Arch package with a bundled JRE (no system Java required), including a launcher and desktop entry.
 - **Fedora/RPM, AppImage, and Flatpak packages.** Release artifacts for Fedora/RHEL (`dnf`), a portable AppImage, and a sandboxed Flatpak — all compiled for **generic x86-64**.
 
@@ -95,7 +96,7 @@ sudo pacman-key --recv-key 6702DBAB3E41EDE1 && sudo pacman-key --lsign-key 6702D
 ### Install directly from the release URL
 
 ```bash
-sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.16-alpha/nuvio-linux-0.1.16alpha-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.16.1/nuvio-linux-0.1.16alpha-2-x86_64.pkg.tar.zst
 ```
 
 ### Install a manually downloaded package
@@ -103,7 +104,7 @@ sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.16-
 Download the `.pkg.tar.zst` from the latest [release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
 
 ```bash
-sudo pacman -U ./nuvio-linux-0.1.16alpha-1-x86_64.pkg.tar.zst
+sudo pacman -U ./nuvio-linux-0.1.16alpha-2-x86_64.pkg.tar.zst
 ```
 
 ### Build from source
