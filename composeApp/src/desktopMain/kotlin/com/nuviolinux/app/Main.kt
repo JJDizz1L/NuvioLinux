@@ -14,7 +14,10 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.unit.dp
+import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.build.AppIdentity
+import com.nuviolinux.app.core.display.DisplayServerDetector
+import com.nuviolinux.app.core.display.WindowDiagnostics
 import com.nuviolinux.app.core.ui.NuvioTheme
 import com.nuviolinux.app.core.deeplink.handleAppUrl
 import com.nuviolinux.app.features.p2p.P2pStreamingEngine
@@ -33,6 +36,7 @@ private val NuvioLinuxNativeBackground = AwtColor(0x0D, 0x0D, 0x0D)
 private const val NuvioLinuxIconPath = "icons/nuvio-app-icon.png"
 
 fun main(args: Array<String>) {
+    Logger.withTag("WindowEnvironment").i { "display server: ${DisplayServerDetector.detect()}" }
     installDesktopOpenUriHandler()
     handleDesktopLaunchArgs(args)
     preloadNativePlayerBridgeAsync()
@@ -117,10 +121,12 @@ fun main(args: Array<String>) {
                     },
                 )
                 val uninstallFullscreenShortcuts = installDesktopAppFullscreenShortcuts(window)
+                val uninstallWindowDiagnostics = WindowDiagnostics.install(window, windowState)
                 onDispose {
                     fullscreenController.dispose(window)
                     uninstallFullscreenShortcuts()
                     unregisterFullscreenToggle()
+                    uninstallWindowDiagnostics()
                 }
             }
 
