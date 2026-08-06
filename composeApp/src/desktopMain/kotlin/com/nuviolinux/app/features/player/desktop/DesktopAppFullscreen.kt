@@ -2,6 +2,7 @@ package com.nuviolinux.app.features.player.desktop
 
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
+import co.touchlab.kermit.Logger
 import java.awt.Frame
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
@@ -78,11 +79,24 @@ internal class DesktopAppFullscreenController {
      * reporting Maximized (or the fullscreen adapter desyncs) and a toggle
      * that reads it back never sees Fullscreen again — the window gets
      * stuck. All toggle decisions use this flag instead. */
+    private val log = Logger.withTag("NuvioFullscreen")
+    private val debugEnabled by lazy { System.getenv("NUVIO_FULLSCREEN_DEBUG") == "1" }
+
     private var userFullscreen = false
     private var previousPlacement = WindowPlacement.Floating
     private var wasMaximizedBeforeFullscreen = false
+    private var lastToggleAt = 0L
+    private var disposed = false
 
     fun toggle(window: Window, windowState: WindowState) {
+        if (disposed) return
+        // KDE can drop the exit transition when toggles overlap the previous
+        // fullscreen transition (issue #8: stuck fullscreen after rapid
+        // toggling / monitor switches). Debounce so each transition completes
+        // before the next is requested.
+        val now = System.currentTimeMillis()
+        if (now - lastToggleAt < 250L) return
+        lastToggleAt = now
         if (userFullscreen) {
             exitFullscreen(window, windowState)
         } else {
@@ -90,7 +104,9 @@ internal class DesktopAppFullscreenController {
         }
     }
 
-    fun dispose(window: Window) = Unit
+    fun dispose(window: Window) {
+        disposed = true
+    }
 
     /**
      * Applies a fullscreen state restored from a previous session, before the
@@ -105,6 +121,7 @@ internal class DesktopAppFullscreenController {
         wasMaximizedBeforeFullscreen = isMaximized(window)
         clearMaximized(window)
         userFullscreen = true
+        debug(window, windowState, "restore fullscreen")
         windowState.placement = WindowPlacement.Fullscreen
     }
 
@@ -122,7 +139,9 @@ internal class DesktopAppFullscreenController {
          * Clear it so the transition happens cleanly. */
         clearMaximized(window)
         userFullscreen = true
+        debug(window, windowState, "enter fullscreen")
         windowState.placement = WindowPlacement.Fullscreen
+        scheduleStateVerification(window, windowState)
     }
 
     private fun exitFullscreen(window: Window, windowState: WindowState) {
@@ -136,6 +155,49 @@ internal class DesktopAppFullscreenController {
             SwingUtilities.invokeLater {
                 if (!userFullscreen) setMaximized(window, true)
             }
+        }
+        debug(window, windowState, "exit fullscreen -> $previousPlacement")
+        scheduleStateVerification(window, windowState)
+    }
+
+    /* Compose applies `windowState.placement` on the frame clock (off-EDT),
+     * through GraphicsDevice.setFullScreenWindow, and never verifies the WM
+     * honored it. On KDE/XWayland a dropped transition leaves the window
+     * fullscreen while the app believes it is windowed (issue #8). After the
+     * transition settles, compare the real AWT state with our intent and
+     * force-correct it on the EDT. */
+    private fun scheduleStateVerification(window: Window, windowState: WindowState) {
+        java.util.Timer("nuvio-fullscreen-verify", true).schedule(object : java.util.TimerTask() {
+            override fun run() {
+                SwingUtilities.invokeLater { verifyWindowState(window, windowState) }
+            }
+        }, 150L)
+    }
+
+    private fun verifyWindowState(window: Window, windowState: WindowState) {
+        if (disposed) return
+        val device = window.graphicsConfiguration.device
+        val reallyFullscreen = device.fullScreenWindow === window
+        debug(
+            window, windowState,
+            "verify: userFullscreen=$userFullscreen reallyFullscreen=$reallyFullscreen device=$device",
+        )
+        if (!device.isFullScreenSupported) return
+        if (userFullscreen && !reallyFullscreen) {
+            device.setFullScreenWindow(window)
+            debug(window, windowState, "forced setFullScreenWindow(window)")
+        } else if (!userFullscreen && reallyFullscreen) {
+            device.setFullScreenWindow(null)
+            debug(window, windowState, "forced setFullScreenWindow(null)")
+        }
+    }
+
+    private fun debug(window: Window, windowState: WindowState, message: String) {
+        if (!debugEnabled) return
+        val frame = window as? Frame
+        log.i {
+            "fs=$userFullscreen placement=${windowState.placement} " +
+                "extendedState=${frame?.extendedState} [${Thread.currentThread().name}] $message"
         }
     }
 
