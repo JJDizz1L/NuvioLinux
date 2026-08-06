@@ -7,6 +7,9 @@ import java.awt.Component
 import java.awt.event.ComponentEvent
 import java.awt.event.ComponentListener
 import java.awt.Window
+import java.util.Timer
+import java.util.TimerTask
+import javax.swing.SwingUtilities
 
 /**
  * Window geometry diagnostics for the XWayland/X11 sizing investigation
@@ -46,7 +49,20 @@ internal object WindowDiagnostics {
             }
         }
         window.addComponentListener(listener)
-        return { window.removeComponentListener(listener) }
+        /* Periodic line so a stuck/undersized state is captured even when no
+         * resize events fire (the compositor can assign a size AWT never
+         * reports as a resize). */
+        val ticker = Timer("nuvio-window-diag", true).apply {
+            schedule(object : TimerTask() {
+                override fun run() {
+                    SwingUtilities.invokeLater { logBounds(window, windowState, "tick") }
+                }
+            }, 1_000L, 1_000L)
+        }
+        return {
+            ticker.cancel()
+            window.removeComponentListener(listener)
+        }
     }
 
     private fun logBounds(window: Window, windowState: WindowState, reason: String) {

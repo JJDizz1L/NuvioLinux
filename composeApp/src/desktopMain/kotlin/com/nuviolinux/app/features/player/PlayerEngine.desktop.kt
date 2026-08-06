@@ -27,6 +27,8 @@ import co.touchlab.kermit.Logger
 import com.nuviolinux.app.features.player.desktop.ComposeRenderSurfaceHost
 import com.nuviolinux.app.features.player.desktop.NativePlayerController
 import com.nuviolinux.app.features.player.desktop.desktopFullscreenChanges
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
@@ -117,6 +119,29 @@ private fun NativePlayerSurface(
     val streamCacheSize = playerSettings.streamCacheSize
     val streamCacheOnDisk = playerSettings.streamCacheOnDisk
 
+    val window = findPlayerWindow()
+    /* AWT-driven surface size (issue #7): Compose's own layout size lags one
+     * frame behind the compositor-assigned window bounds on XWayland (the
+     * `moved` event carries the new bounds while `compose size` still reports
+     * the old one until the next `resized` event). Drive the video render
+     * buffer straight from the AWT component resize so the frame always
+     * matches the actual window. */
+    var windowPixelSize by remember { mutableStateOf<IntSize?>(null) }
+    DisposableEffect(host, window) {
+        val sizeListener = object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent) {
+                val component = e.component
+                if (component.width > 0 && component.height > 0) {
+                    windowPixelSize = IntSize(component.width, component.height)
+                }
+            }
+        }
+        window?.addComponentListener(sizeListener)
+        onDispose {
+            window?.removeComponentListener(sizeListener)
+        }
+    }
+
     LaunchedEffect(controller, sourceUrl, playbackHeaders) {
         onControllerReady(controller)
     }
@@ -204,6 +229,7 @@ private fun NativePlayerSurface(
     ) {
         ComposeVideoSurface(
             controller = controller,
+            awtWindowSize = windowPixelSize,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -217,6 +243,7 @@ private fun NativePlayerSurface(
 @Composable
 private fun ComposeVideoSurface(
     controller: NativePlayerController,
+    awtWindowSize: IntSize?,
     modifier: Modifier,
 ) {
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
@@ -237,7 +264,7 @@ private fun ComposeVideoSurface(
 
         while (coroutineContext.isActive) {
             withFrameNanos { }
-            val size = surfaceSize
+            val size = awtWindowSize ?: surfaceSize
             if (size.width <= 0 || size.height <= 0) continue
             val needed = size.width * size.height * 4
             if (lastWidth != size.width || lastHeight != size.height) {
@@ -295,3 +322,10 @@ private fun ComposeVideoSurface(
         }
     }
 }
+
+/** Locates the app's top-level window (the only ownerless window). */
+private fun findPlayerWindow(): java.awt.Window? =
+    java.awt.Window.getOwnerlessWindows()
+        .firstOrNull { it.isVisible && it.isDisplayable && it.isShowing }
+        ?: java.awt.Window.getWindows()
+            .firstOrNull { it.isVisible && it.isDisplayable && it.isShowing }

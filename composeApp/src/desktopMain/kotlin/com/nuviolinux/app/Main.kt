@@ -13,6 +13,7 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.build.AppIdentity
@@ -30,6 +31,8 @@ import com.nuviolinux.app.features.player.desktop.preloadNativePlayerBridgeAsync
 import com.nuviolinux.app.features.player.desktop.registerDesktopAppFullscreenToggle
 import java.awt.Desktop
 import java.awt.Color as AwtColor
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import javax.swing.JComponent
 
 private val NuvioLinuxNativeBackground = AwtColor(0x0D, 0x0D, 0x0D)
@@ -122,7 +125,23 @@ fun main(args: Array<String>) {
                 )
                 val uninstallFullscreenShortcuts = installDesktopAppFullscreenShortcuts(window)
                 val uninstallWindowDiagnostics = WindowDiagnostics.install(window, windowState)
+                /* Issue #7: on XWayland the Compose layout size lags the
+                 * compositor-assigned window bounds (a `moved` event carries
+                 * the new bounds while `windowState.size` still reports the
+                 * old size until the next `resized` event). Re-assert the
+                 * AWT component size into the window state synchronously so
+                 * the layout is scheduled at the real size immediately. */
+                val windowSizeBridger = object : ComponentAdapter() {
+                    override fun componentResized(e: ComponentEvent) {
+                        val component = e.component
+                        if (component.width > 0 && component.height > 0) {
+                            windowState.size = DpSize(component.width.dp, component.height.dp)
+                        }
+                    }
+                }
+                window.addComponentListener(windowSizeBridger)
                 onDispose {
+                    window.removeComponentListener(windowSizeBridger)
                     fullscreenController.dispose(window)
                     uninstallFullscreenShortcuts()
                     unregisterFullscreenToggle()
