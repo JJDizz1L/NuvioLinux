@@ -263,6 +263,17 @@ val desktopReleasePackageVersion = jpackageCompatibleVersion(desktopReleaseVersi
 // number. RPM forbids hyphens in the version component (0.1.15-alpha ->
 // 0.1.15alpha); DEB accepts the raw form (0.1.15-alpha).
 val desktopRpmReleaseVersion = desktopReleaseVersionName.replace("-", "")
+// Package-only release counter shared by every format (Arch pkgrel, RPM
+// Release, and the DEB/AppImage/Flatpak filenames). Bumped for rebuilds of
+// the same app version; set via NUVIO_PACKAGE_RELEASE or
+// nuvio.desktop.packageRelease.
+val desktopPackageRelease = (
+    providers.gradleProperty("nuvio.desktop.packageRelease").orNull
+        ?: System.getenv("NUVIO_PACKAGE_RELEASE")
+    )?.trim()
+    ?.takeIf { it.isNotBlank() }
+    ?.toIntOrNull()
+    ?: 1
 val generatedRuntimeConfigDir = layout.buildDirectory.dir("generated/runtime-config/kotlin")
 val requestedGradleTasks = gradle.startParameter.taskNames.map { taskName ->
     taskName.substringAfterLast(':').lowercase()
@@ -442,7 +453,7 @@ if (isLinuxHost) {
             "--define", "_rpmdir ${topDir.absolutePath}/RPMS",
             "--define", "_srcrpmdir ${topDir.absolutePath}/SRPMS",
              "--define", "appversion ${desktopRpmReleaseVersion}",
-             "--define", "apprelease 2",
+             "--define", "apprelease ${desktopPackageRelease}",
             rootProject.file("dist/rpm/nuvio-linux.spec").absolutePath,
         )
         doLast {
@@ -486,7 +497,7 @@ if (isLinuxHost) {
             "--build",
             "--root-owner-group",
             stagingDir.absolutePath,
-            outDir.resolve("nuvio-linux_${desktopReleaseVersionName}_amd64.deb").absolutePath,
+            outDir.resolve("nuvio-linux_${desktopReleaseVersionName}-${desktopPackageRelease}_amd64.deb").absolutePath,
         )
     }
 }

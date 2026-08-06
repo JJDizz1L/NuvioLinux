@@ -16,7 +16,8 @@ MANIFEST="dist/flatpak/io.github.jjdizz1l.NuvioLinux.yml"
 BUILD_DIR="dist/flatpak/build"
 REPO_DIR="dist/flatpak/repo"
 VERSION="$(grep -E '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties | cut -d= -f2)"
-BUNDLE="dist/flatpak/nuvio-linux-${VERSION}.flatpak"
+PACKAGE_RELEASE="${NUVIO_PACKAGE_RELEASE:-1}"
+BUNDLE="dist/flatpak/nuvio-linux-${VERSION}-${PACKAGE_RELEASE}.flatpak"
 
 echo "[nuvio-linux-flatpak] building app image (version ${VERSION})..."
 ./gradlew :composeApp:createDistributable

@@ -14,7 +14,8 @@ export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
 
 APP_IMAGE="composeApp/build/compose/binaries/main/app/nuvio-linux"
 VERSION="$(grep -E '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties | cut -d= -f2)"
-OUTPUT="nuvio-linux-${VERSION}-x86_64.AppImage"
+PACKAGE_RELEASE="${NUVIO_PACKAGE_RELEASE:-1}"
+OUTPUT="nuvio-linux-${VERSION}-${PACKAGE_RELEASE}-x86_64.AppImage"
 
 APPIMAGETOOL="${APPDIR_APPIMAGETOOL:-appimagetool}"
 command -v "${APPIMAGETOOL}" >/dev/null || {
