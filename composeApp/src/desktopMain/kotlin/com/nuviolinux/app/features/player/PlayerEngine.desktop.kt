@@ -29,6 +29,8 @@ import com.nuviolinux.app.features.player.desktop.NativePlayerController
 import com.nuviolinux.app.features.player.desktop.desktopFullscreenChanges
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
+import java.awt.event.WindowEvent
+import java.awt.event.WindowFocusListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
@@ -128,6 +130,7 @@ private fun NativePlayerSurface(
      * matches the actual window. */
     var windowPixelSize by remember { mutableStateOf<IntSize?>(null) }
     DisposableEffect(host, window) {
+        if (window != null) host.attachWindow(window)
         val sizeListener = object : ComponentAdapter() {
             override fun componentResized(e: ComponentEvent) {
                 val component = e.component
@@ -136,9 +139,16 @@ private fun NativePlayerSurface(
                 }
             }
         }
+        val focusListener = object : WindowFocusListener {
+            override fun windowGainedFocus(e: WindowEvent) = host.onWindowFocusChanged(true)
+            override fun windowLostFocus(e: WindowEvent) = host.onWindowFocusChanged(false)
+        }
         window?.addComponentListener(sizeListener)
+        window?.addWindowFocusListener(focusListener)
         onDispose {
             window?.removeComponentListener(sizeListener)
+            window?.removeWindowFocusListener(focusListener)
+            host.onWindowFocusChanged(false)
         }
     }
 
