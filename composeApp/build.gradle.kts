@@ -373,6 +373,16 @@ if (isLinuxHost) {
         val payloadOpt = stagingRoot.resolve("opt/nuvio-linux")
         payloadOpt.mkdirs()
         appImage.copyRecursively(payloadOpt)
+        // copyRecursively resets file permissions to the default (0644), which
+        // would strip the executable bit from the launcher and JRE binaries
+        // (issue #11: RPM/deb installed the launcher 0744 — owner-exec only, so
+        // non-root users could not start the app). Re-apply executable bits
+        // from the source app image.
+        appImage.walkTopDown().forEach { src ->
+            if (src.isFile && src.canExecute()) {
+                payloadOpt.resolve(src.relativeTo(appImage).path).setExecutable(true, false)
+            }
+        }
         val payloadUsr = stagingRoot.resolve("usr")
         val applicationsDir = payloadUsr.resolve("share/applications")
         val metainfoDir = payloadUsr.resolve("share/metainfo")
@@ -409,7 +419,7 @@ if (isLinuxHost) {
                 topDir.resolve("SPECS"),
                 topDir.resolve("SRPMS"),
             ).forEach { it.mkdirs() }
-            stagingDir.resolve("opt/nuvio-linux/bin/nuvio-linux").setExecutable(true)
+            stagingDir.resolve("opt/nuvio-linux/bin/nuvio-linux").setExecutable(true, false)
             val sourceTar = topDir.resolve("SOURCES/nuvio-linux-app-image.tar.gz")
             runCommand(
                 listOf(
@@ -468,7 +478,7 @@ if (isLinuxHost) {
             rootProject.file("dist/deb/postrm").copyTo(controlDir.resolve("postrm"))
             controlDir.resolve("postinst").setExecutable(true, false)
             controlDir.resolve("postrm").setExecutable(true, false)
-            stagingDir.resolve("opt/nuvio-linux/bin/nuvio-linux").setExecutable(true)
+            stagingDir.resolve("opt/nuvio-linux/bin/nuvio-linux").setExecutable(true, false)
             outDir.mkdirs()
         }
         commandLine(
