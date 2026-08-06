@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import co.touchlab.kermit.Logger
+import com.nuviolinux.app.core.power.ScreensaverInhibit
 import com.nuviolinux.app.features.player.desktop.ComposeRenderSurfaceHost
 import com.nuviolinux.app.features.player.desktop.NativePlayerController
 import com.nuviolinux.app.features.player.desktop.desktopFullscreenChanges
@@ -228,8 +229,15 @@ private fun NativePlayerSurface(
         while (true) {
             val snapshot = withContext(Dispatchers.IO) { controller.snapshot() }
             onSnapshot(snapshot)
+            // Keep the desktop awake (screen blanking/suspend) while media
+            // plays; released on pause/EOF and when the player is disposed.
+            ScreensaverInhibit.setActive(snapshot.isPlaying)
             delay(500L)
         }
+    }
+
+    DisposableEffect(controller) {
+        onDispose { ScreensaverInhibit.release() }
     }
 
     Box(
