@@ -33,6 +33,7 @@ static int g_debug = -1; /* -1 = uninitialized */
 #include <future>
 #include <functional>
 #include <chrono>
+#include <cstdlib>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -1829,6 +1830,23 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
         snprintf(posStr, sizeof(posStr), "%d", subPos);
         p_mpv_set_property_string(player->mpv, "sub-pos", posStr);
     });
+}
+
+/* ------------------------------------------------------------------ */
+/*  AWT window-manager workaround                                      */
+/* ------------------------------------------------------------------ */
+
+/* Non-reparenting (tiling) window managers — niri, sway, i3, bspwm, … —
+ * don't wrap client windows in a WM-managed frame, so the X11 AWT toolkit
+ * misjudges the real window size and renders into a small corner box. The
+ * JDK reads _JAVA_AWT_WM_NONREPARENTING via native getenv(3) at first
+ * toolkit use (cached), so setting it from C before any AWT initialization
+ * enables the non-reparenting code path in-process — no launcher wrapper
+ * needed. Must be called before the first AWT/X11 toolkit access. */
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setAwtNonReparenting(
+    JNIEnv *env, jclass clazz)
+{
+    setenv("_JAVA_AWT_WM_NONREPARENTING", "1", 1);
 }
 
 } /* extern "C" */

@@ -184,6 +184,38 @@ from source inside the sandbox for baseline x86-64 portability):
 
 > Note: this fork's primary Linux distribution is the [Arch Linux package](#installation-arch-linux) (self-contained, bundled JRE). All Linux packages require a native `mpv` installation at runtime — except the Flatpak, which bundles libmpv built from source. All artifacts are attached to each [release](https://github.com/JJDizz1L/NuvioLinux/releases).
 
+## Troubleshooting
+
+### Tiling window managers (niri, sway, i3, bspwm, …)
+
+Tiling compositors don't wrap windows in a WM-managed frame the way AWT
+expects, which can make the app render into a small box in the corner of the
+window. The app detects non-reparenting window managers and enables the JDK's
+workaround (`_JAVA_AWT_WM_NONREPARENTING=1`) automatically — no action needed.
+
+If a tiling WM is not detected automatically (or you want to override the
+detection), set the variable yourself before launching:
+
+```bash
+_JAVA_AWT_WM_NONREPARENTING=1 nuvio-linux
+```
+
+### NixOS (AppImage via steam-run): playback stutter / software GL
+
+On NixOS the AppImage is typically run through `steam-run`, whose bundled
+graphics libraries can shadow your real GPU driver, silently falling back to
+software rendering (stutter). Point the loader at the system's actual OpenGL
+libraries first:
+
+```bash
+LD_LIBRARY_PATH=/run/opengl-driver/lib:$LD_LIBRARY_PATH ./nuvio-linux-<version>-x86_64.AppImage
+```
+
+(`/run/opengl-driver/lib` hosts the NixOS libGL/GLX driver environment; adjust
+the path if your setup differs.) This is an environment/library-loading issue,
+not an app bug — on standard distros the AppImage resolves the GPU driver
+normally.
+
 ## Project Structure
 
 - `composeApp/` contains the app code.

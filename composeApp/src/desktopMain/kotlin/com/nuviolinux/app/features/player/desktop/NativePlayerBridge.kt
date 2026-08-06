@@ -68,6 +68,10 @@ internal object NativePlayerBridge {
         subPos: Int,
     )
 
+    /** Enables the JDK's non-reparenting-WM code path via setenv(3). Must run
+     *  before the first AWT/X11 toolkit access (see AwtNonReparentingSupport). */
+    external fun setAwtNonReparenting()
+
     val controlsPageUrl: String by lazy { controlsPageAssets.url }
     private val controlsPageAssets: ControlsPageAssets by lazy { exportControlsPageAssets() }
 

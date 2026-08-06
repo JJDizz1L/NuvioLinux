@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.build.AppIdentity
+import com.nuviolinux.app.core.display.AwtNonReparentingSupport
 import com.nuviolinux.app.core.display.DisplayServerDetector
 import com.nuviolinux.app.core.display.WindowDiagnostics
 import com.nuviolinux.app.core.ui.NuvioTheme
@@ -39,6 +40,11 @@ private val NuvioLinuxNativeBackground = AwtColor(0x0D, 0x0D, 0x0D)
 private const val NuvioLinuxIconPath = "icons/nuvio-app-icon.png"
 
 fun main(args: Array<String>) {
+    // MUST run before any AWT/X11 toolkit access: the JDK reads
+    // _JAVA_AWT_WM_NONREPARENTING via native getenv(3) on first toolkit use
+    // and caches it, so the tiling-WM (niri/sway/i3/…) sizing fix has to be
+    // applied here, first.
+    AwtNonReparentingSupport.applyIfNeeded()
     Logger.withTag("WindowEnvironment").i { "display server: ${DisplayServerDetector.detect()}" }
     installDesktopOpenUriHandler()
     handleDesktopLaunchArgs(args)
