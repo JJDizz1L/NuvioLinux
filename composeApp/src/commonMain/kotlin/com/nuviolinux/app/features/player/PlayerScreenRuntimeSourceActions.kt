@@ -418,7 +418,6 @@ internal fun PlayerScreenRuntime.openSourcesPanel() {
     )
     showSourcesPanel = true
     showEpisodesPanel = false
-    controlsVisible = false
 }
 
 internal fun PlayerScreenRuntime.openEpisodesPanel() {
@@ -429,7 +428,6 @@ internal fun PlayerScreenRuntime.openEpisodesPanel() {
     }
     showEpisodesPanel = true
     showSourcesPanel = false
-    controlsVisible = false
 }
 
 private data class EpisodeResume(val positionMs: Long, val fraction: Float?)

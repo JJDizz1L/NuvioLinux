@@ -305,6 +305,13 @@ private fun PlayerScreenRuntime.BindPlayerUiVisibilityEffects() {
         playbackSnapshot.isPlaying,
         playbackSnapshot.isLoading,
         showParentalGuide,
+        showSourcesPanel,
+        showEpisodesPanel,
+        showAudioModal,
+        showSubtitleModal,
+        showSubmitIntroModal,
+        episodeStreamsPanelState.showStreams,
+        pendingP2pSwitch,
         errorMessage,
     ) {
         if (
@@ -313,6 +320,13 @@ private fun PlayerScreenRuntime.BindPlayerUiVisibilityEffects() {
             !playbackSnapshot.isPlaying ||
             playbackSnapshot.isLoading ||
             showParentalGuide ||
+            showSourcesPanel ||
+            showEpisodesPanel ||
+            showAudioModal ||
+            showSubtitleModal ||
+            showSubmitIntroModal ||
+            episodeStreamsPanelState.showStreams ||
+            pendingP2pSwitch != null ||
             errorMessage != null
         ) {
             return@LaunchedEffect
