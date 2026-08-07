@@ -23,6 +23,7 @@ import com.nuviolinux.app.core.display.WindowDiagnostics
 import com.nuviolinux.app.core.ui.NuvioTheme
 import com.nuviolinux.app.core.deeplink.handleAppUrl
 import com.nuviolinux.app.features.p2p.P2pStreamingEngine
+import com.nuviolinux.app.features.plugins.configureDesktopQuickJsLibrary
 import com.nuviolinux.app.features.player.PlatformPlayerSurface
 import com.nuviolinux.app.features.player.desktop.DesktopAppFullscreenController
 import com.nuviolinux.app.features.player.desktop.DesktopWindowGeometry
@@ -45,6 +46,7 @@ fun main(args: Array<String>) {
     // and caches it, so the tiling-WM (niri/sway/i3/…) sizing fix has to be
     // applied here, first.
     AwtNonReparentingSupport.applyIfNeeded()
+    configureDesktopQuickJsLibrary()
     Logger.withTag("WindowEnvironment").i { "display server: ${DisplayServerDetector.detect()}" }
     installDesktopOpenUriHandler()
     handleDesktopLaunchArgs(args)
