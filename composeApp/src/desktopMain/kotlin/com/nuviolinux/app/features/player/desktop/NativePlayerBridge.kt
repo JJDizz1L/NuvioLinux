@@ -66,6 +66,7 @@ internal object NativePlayerBridge {
         bold: Boolean,
         fontSize: Float,
         subPos: Int,
+        useLibass: Boolean,
     )
 
     /** Enables the JDK's non-reparenting-WM code path via setenv(3). Must run

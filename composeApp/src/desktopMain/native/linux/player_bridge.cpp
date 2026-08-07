@@ -1800,7 +1800,7 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_applySubtitleStyle(
     JNIEnv *env, jclass clazz, jlong handle,
     jstring textColor, jstring backgroundColor, jstring outlineColor,
-    jfloat outlineSize, jboolean bold, jfloat fontSize, jint subPos)
+    jfloat outlineSize, jboolean bold, jfloat fontSize, jint subPos, jboolean useLibass)
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
@@ -1815,15 +1815,20 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
     if (c_outlineColor) env->ReleaseStringUTFChars(outlineColor, c_outlineColor);
 
     player->enqueueCommand([player, textColorCopy, bgColorCopy, outlineColorCopy,
-                            outlineSize, bold, fontSize, subPos]() {
+                            outlineSize, bold, fontSize, subPos, useLibass]() {
         if (!player->mpv) return;
-        if (!textColorCopy.empty()) p_mpv_set_property_string(player->mpv, "sub-color", textColorCopy.c_str());
-        if (!bgColorCopy.empty()) p_mpv_set_property_string(player->mpv, "sub-back-color", bgColorCopy.c_str());
-        if (!outlineColorCopy.empty()) p_mpv_set_property_string(player->mpv, "sub-border-color", outlineColorCopy.c_str());
+        /* With libass, preserve the authored ASS/SSA styling: the style
+         * overrides below would otherwise re-style every authored subtitle. */
+        p_mpv_set_property_string(player->mpv, "sub-ass-override", useLibass ? "no" : "force");
+        if (!useLibass) {
+            if (!textColorCopy.empty()) p_mpv_set_property_string(player->mpv, "sub-color", textColorCopy.c_str());
+            if (!bgColorCopy.empty()) p_mpv_set_property_string(player->mpv, "sub-back-color", bgColorCopy.c_str());
+            if (!outlineColorCopy.empty()) p_mpv_set_property_string(player->mpv, "sub-border-color", outlineColorCopy.c_str());
+            p_mpv_set_property_string(player->mpv, "sub-bold", bold ? "yes" : "no");
+        }
         char floatStr[16];
         snprintf(floatStr, sizeof(floatStr), "%.1f", (double)outlineSize);
         p_mpv_set_property_string(player->mpv, "sub-border-size", floatStr);
-        p_mpv_set_property_string(player->mpv, "sub-bold", bold ? "yes" : "no");
         snprintf(floatStr, sizeof(floatStr), "%.0f", (double)fontSize);
         p_mpv_set_property_string(player->mpv, "sub-font-size", floatStr);
         char posStr[16];

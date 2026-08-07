@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import co.touchlab.kermit.Logger
+import com.nuviolinux.app.core.format.formatReleaseDateForDisplay
 import com.nuviolinux.app.core.ui.nuvio
 import com.nuviolinux.app.features.debrid.DebridSettingsRepository
 import com.nuviolinux.app.features.debrid.DirectDebridPlaybackResolver
@@ -159,6 +160,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     )
     val episodeStreamItems = buildPlayerControlEpisodeStreamItems()
     val playerControlAddonSubtitles = buildPlayerControlAddonSubtitleItems()
+    val playerControlSubtitleSelection = buildPlayerControlSubtitleSelection()
     val playerControlAutoSyncCues = buildPlayerControlSubtitleCueItems()
     val themeColors = MaterialTheme.nuvio.colors
     val selectedEpisodeLabel = episodeStreamsPanelState.selectedEpisode?.let { selected ->
@@ -242,10 +244,14 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         p2pConsentBody = stringResource(Res.string.p2p_consent_body),
         p2pConsentEnableLabel = stringResource(Res.string.p2p_consent_enable),
         p2pConsentCancelLabel = stringResource(Res.string.p2p_consent_cancel),
+        audioTracksPanelTitle = stringResource(Res.string.compose_player_audio_tracks),
+        noAudioTracksLabel = stringResource(Res.string.compose_player_no_audio_tracks_available),
         subtitlesPanelTitle = stringResource(Res.string.compose_player_subtitles),
+        subtitleLanguagesLabel = stringResource(Res.string.compose_player_languages),
         subtitleBuiltInTabLabel = stringResource(Res.string.compose_player_built_in),
         subtitleAddonsTabLabel = stringResource(Res.string.addon_title),
         subtitleStyleTabLabel = stringResource(Res.string.compose_player_style),
+        forcedLabel = stringResource(Res.string.settings_playback_option_forced),
         noneLabel = stringResource(Res.string.compose_player_none),
         fetchSubtitlesLabel = stringResource(Res.string.compose_player_fetch_subtitles),
         subtitleDelayLabel = stringResource(Res.string.compose_player_subtitle_delay),
@@ -262,6 +268,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         colorLabel = stringResource(Res.string.compose_player_color),
         textOpacityLabel = stringResource(Res.string.compose_player_text_opacity),
         outlineColorLabel = stringResource(Res.string.compose_player_outline_color),
+        noSubtitleLinesFoundLabel = stringResource(Res.string.compose_player_no_subtitle_lines_found),
         resetDefaultsLabel = stringResource(Res.string.compose_player_reset_defaults),
         onLabel = stringResource(Res.string.compose_action_on),
         offLabel = stringResource(Res.string.compose_action_off),
@@ -277,6 +284,13 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         themeBufferingColor = themeColors.playerBuffering.toCssColorString(),
         themeBufferingTrackColor = themeColors.playerBuffering.copy(alpha = 0.28f).toCssColorString(),
         themeControlForegroundColor = themeColors.playerControlsForeground.toCssColorString(),
+        themeSurfaceElevatedColor = themeColors.surfaceElevated.toCssColorString(),
+        themeSurfaceCardColor = themeColors.surfaceCard.toCssColorString(),
+        themeSurfacePopoverColor = themeColors.surfacePopover.toCssColorString(),
+        themeTextPrimaryColor = themeColors.textPrimary.toCssColorString(),
+        themeTextSecondaryColor = themeColors.textSecondary.toCssColorString(),
+        themeTextMutedColor = themeColors.textMuted.toCssColorString(),
+        themeBorderDefaultColor = themeColors.borderDefault.toCssColorString(),
         isPlaying = playbackSnapshot.isPlaying,
         isLoading = playbackSnapshot.isLoading,
         isLocked = playerControlsLocked,
@@ -304,6 +318,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         selectedEpisodeLabel = selectedEpisodeLabel,
         episodeStreamFilters = episodeStreamFilters,
         episodeStreamItems = episodeStreamItems,
+        blurUnwatchedEpisodes = metaScreenSettingsUiState.blurUnwatchedEpisodes,
         submitIntroSegmentType = submitIntroSegmentType,
         submitIntroStartTime = submitIntroStartTimeStr,
         submitIntroEndTime = submitIntroEndTimeStr,
@@ -311,6 +326,10 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         submitIntroStatusMessage = submitIntroStatusMessage.orEmpty(),
         showP2pConsent = playerControlsPendingP2pSwitch != null,
         subtitleActiveTab = activeSubtitleTab.name,
+        subtitleLanguageItems = playerControlSubtitleSelection.languages,
+        subtitleOptionItems = playerControlSubtitleSelection.options,
+        selectedSubtitleLanguageKey = playerControlSubtitleSelection.selectedLanguageKey,
+        selectedSubtitleOptionId = playerControlSubtitleSelection.selectedOptionId,
         addonSubtitleItems = playerControlAddonSubtitles,
         isLoadingAddonSubtitles = isLoadingAddonSubtitles,
         selectedAddonSubtitleId = selectedAddonSubtitleId.orEmpty(),
@@ -1182,11 +1201,105 @@ private fun PlayerScreenRuntime.buildPlayerControlAddonSubtitleItems(): List<Pla
             index = index,
             id = subtitle.id,
             display = subtitle.display,
+            language = subtitle.language,
             languageLabel = languageLabelForCode(subtitle.language),
             addonName = subtitle.addonName.orEmpty(),
             isSelected = subtitle.id == selectedAddonSubtitleId || subtitle.url == selectedAddonSubtitleId,
         )
     }
+
+private data class PlayerControlSubtitleSelection(
+    val languages: List<PlayerControlSubtitleLanguageItem>,
+    val options: List<PlayerControlSubtitleOptionItem>,
+    val selectedLanguageKey: String,
+    val selectedOptionId: String,
+)
+
+@Composable
+private fun PlayerScreenRuntime.buildPlayerControlSubtitleSelection(): PlayerControlSubtitleSelection {
+    val selectedAddon = selectedAddonSubtitle
+    val selectedLanguageKey = selectedSubtitleLanguageKey(
+        subtitleTracks = subtitleTracks,
+        selectedSubtitleIndex = selectedSubtitleIndex,
+        selectedAddonSubtitle = selectedAddon,
+    )
+    val selectedOptionId = selectedSubtitleOptionId(
+        subtitleTracks = subtitleTracks,
+        selectedSubtitleIndex = selectedSubtitleIndex,
+        selectedAddonSubtitle = selectedAddon,
+    ).orEmpty()
+    val languageItems = buildSubtitleLanguageItems(
+        subtitleTracks = subtitleTracks,
+        addonSubtitles = visibleAddonSubtitles,
+        preferredLanguage = playerSettingsUiState.preferredSubtitleLanguage,
+        secondaryPreferredLanguage = playerSettingsUiState.secondaryPreferredSubtitleLanguage,
+        showOnlyPreferredLanguages = subtitleStyle.showOnlyPreferredLanguages,
+        selectedLanguageKey = selectedLanguageKey,
+    )
+    val noneLabel = stringResource(Res.string.compose_player_none)
+    val unknownLabel = stringResource(Res.string.subtitle_language_unknown)
+    val builtInLabel = stringResource(Res.string.compose_player_built_in)
+    val addonLabel = stringResource(Res.string.addon_title)
+    val forcedLabel = stringResource(Res.string.settings_playback_option_forced)
+    val languages = languageItems.map { item ->
+        PlayerControlSubtitleLanguageItem(
+            key = item.key,
+            label = when (item.key) {
+                SubtitleOffLanguageKey -> noneLabel
+                SubtitleUnknownLanguageKey -> unknownLabel
+                else -> languageLabelForCode(item.key)
+            },
+            count = item.count,
+            isSelected = item.key == selectedLanguageKey,
+        )
+    }
+    val options = languageItems.flatMap { language ->
+        buildSubtitleSelectionOptions(
+            languageKey = language.key,
+            subtitleTracks = subtitleTracks,
+            addonSubtitles = visibleAddonSubtitles,
+        ).map { option ->
+            when (option) {
+                is SubtitleSelectionOption.BuiltIn -> PlayerControlSubtitleOptionItem(
+                    id = option.id,
+                    languageKey = language.key,
+                    kind = "builtIn",
+                    index = option.track.index,
+                    sourceLabel = builtInLabel,
+                    title = localizedTrackDisplayName(
+                        option.track.label,
+                        option.track.language,
+                        option.track.index,
+                    ),
+                    metadata = forcedLabel.takeIf { option.track.isForced }.orEmpty(),
+                    isSelected = option.id == selectedOptionId,
+                )
+
+                is SubtitleSelectionOption.Addon -> {
+                    val title = languageLabelForCode(option.subtitle.language)
+                    PlayerControlSubtitleOptionItem(
+                        id = option.id,
+                        languageKey = language.key,
+                        kind = "addon",
+                        index = visibleAddonSubtitles.indexOf(option.subtitle).coerceAtLeast(0),
+                        sourceLabel = option.subtitle.addonName ?: addonLabel,
+                        title = title,
+                        metadata = option.subtitle.display.takeIf {
+                            it.isNotBlank() && it != title
+                        }.orEmpty(),
+                        isSelected = option.id == selectedOptionId,
+                    )
+                }
+            }
+        }
+    }
+    return PlayerControlSubtitleSelection(
+        languages = languages,
+        options = options,
+        selectedLanguageKey = selectedLanguageKey,
+        selectedOptionId = selectedOptionId,
+    )
+}
 
 private fun PlayerScreenRuntime.buildPlayerControlSubtitleCueItems(): List<PlayerControlSubtitleCueItem> =
     playerControlsNearestSubtitleCues().mapIndexed { index, cue ->
@@ -1238,6 +1351,10 @@ private fun PlayerScreenRuntime.buildPlayerControlEpisodeItems(): List<PlayerCon
                 code = video.playerControlsEpisodeCode(),
                 overview = video.overview.orEmpty(),
                 thumbnail = video.thumbnail.orEmpty(),
+                released = video.released
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::formatReleaseDateForDisplay)
+                    .orEmpty(),
                 season = video.season?.coerceAtLeast(0) ?: 0,
                 episode = video.episode ?: 0,
                 isCurrent = video.season == activeSeasonNumber && video.episode == activeEpisodeNumber,

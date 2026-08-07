@@ -116,7 +116,6 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
 
         val timeoutSeconds = settings.streamAutoPlayTimeoutSeconds
         var autoSelectTriggered = false
-        var timeoutElapsed = false
         var selectedStream: StreamItem? = null
         val autoSelectSettled = CompletableDeferred<Unit>()
 
@@ -171,42 +170,23 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
             )
         }
 
+        val selectionCoordinator = NextEpisodeStreamSelectionCoordinator(
+            selectAfterDelay = ::trySelectStream,
+            selectPreferred = ::tryBingeGroupOnly,
+        )
+
+        fun applySelectionDecision(decision: NextEpisodeStreamSelectionDecision) {
+            if (autoSelectTriggered) return
+            when (decision) {
+                is NextEpisodeStreamSelectionDecision.Selected -> selectStream(decision.stream)
+                NextEpisodeStreamSelectionDecision.ManualSelection -> finishWithoutSelection()
+                NextEpisodeStreamSelectionDecision.Waiting -> Unit
+            }
+        }
+
         val innerJob = launch {
             PlayerStreamsRepository.episodeStreamsState.collectLatest { state ->
-                if (state.groups.isEmpty() && state.isAnyLoading) return@collectLatest
-
-                val allStreams = state.groups.flatMap { it.streams }
-
-                if (autoSelectTriggered) {
-                    // Already resolved.
-                } else if (timeoutElapsed) {
-                    if (allStreams.isNotEmpty()) {
-                        val candidate = trySelectStream(allStreams)
-                        if (candidate != null) {
-                            selectStream(candidate)
-                        }
-                    }
-                } else if (allStreams.isNotEmpty()) {
-                    val earlyMatch = tryBingeGroupOnly(allStreams)
-                    if (earlyMatch != null) {
-                        selectStream(earlyMatch)
-                    }
-                }
-
-                if (!autoSelectTriggered && !state.isAnyLoading) {
-                    if (allStreams.isNotEmpty()) {
-                        val candidate = trySelectStream(allStreams)
-                        if (candidate != null) {
-                            selectStream(candidate)
-                        }
-                    }
-                    if (!autoSelectTriggered) {
-                        finishWithoutSelection()
-                    }
-                    return@collectLatest
-                }
-
-                if (autoSelectTriggered) return@collectLatest
+                applySelectionDecision(selectionCoordinator.onStreamsChanged(state))
             }
         }
 
@@ -215,49 +195,15 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
 
         if (isBoundedTimeout) {
             delay(timeoutMs)
-            timeoutElapsed = true
-            if (!autoSelectTriggered) {
-                val allStreams = PlayerStreamsRepository.episodeStreamsState.value.groups.flatMap { it.streams }
-                if (allStreams.isNotEmpty()) {
-                    val candidate = trySelectStream(allStreams)
-                    if (candidate != null) {
-                        selectStream(candidate)
-                    }
-                }
-            }
-            if (selectedStream != null) {
-                innerJob.cancel()
-            } else if (PlayerStreamsRepository.episodeStreamsState.value.groups.flatMap { it.streams }.isNotEmpty()) {
-                innerJob.cancel()
-                finishWithoutSelection()
-            } else {
-                val completed = withTimeoutOrNull(timeoutMs) { autoSelectSettled.await() }
-                innerJob.cancel()
-                if (completed == null && !autoSelectTriggered) {
-                    val allStreams = PlayerStreamsRepository.episodeStreamsState.value.groups.flatMap { it.streams }
-                    if (allStreams.isNotEmpty()) {
-                        selectedStream = trySelectStream(allStreams)
-                    }
-                    finishWithoutSelection()
-                }
-            }
-        } else {
-            timeoutElapsed = true
-            if (!autoSelectTriggered) {
-                val allStreams = PlayerStreamsRepository.episodeStreamsState.value.groups.flatMap { it.streams }
-                if (allStreams.isNotEmpty()) {
-                    trySelectStream(allStreams)?.let(::selectStream)
-                }
-            }
-            val completed = withTimeoutOrNull(NEXT_EPISODE_HARD_TIMEOUT_MS) { autoSelectSettled.await() }
-            innerJob.cancel()
-            if (completed == null && !autoSelectTriggered) {
-                val allStreams = PlayerStreamsRepository.episodeStreamsState.value.groups.flatMap { it.streams }
-                if (allStreams.isNotEmpty()) {
-                    selectedStream = trySelectStream(allStreams)
-                }
-                finishWithoutSelection()
-            }
+        }
+        applySelectionDecision(
+            selectionCoordinator.onSelectionDelayElapsed(PlayerStreamsRepository.episodeStreamsState.value),
+        )
+        val completed = withTimeoutOrNull(NEXT_EPISODE_HARD_TIMEOUT_MS) { autoSelectSettled.await() }
+        innerJob.cancel()
+        if (completed == null && !autoSelectTriggered) {
+            val allStreams = PlayerStreamsRepository.episodeStreamsState.value.groups.flatMap { it.streams }
+            trySelectStream(allStreams)?.let(::selectStream) ?: finishWithoutSelection()
         }
 
         onSearchingChanged(false)
