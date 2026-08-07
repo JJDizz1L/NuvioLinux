@@ -22,6 +22,10 @@ internal object DesktopStorage {
         AppPaths.stateDir.also { Files.createDirectories(it) }
     }
 
+    val cacheDir: Path by lazy {
+        AppPaths.cacheDir.also { Files.createDirectories(it) }
+    }
+
     fun store(name: String): Store = synchronized(stores) {
         stores.getOrPut(name) { Store(rootDir.resolve("$name.properties")) }
     }
