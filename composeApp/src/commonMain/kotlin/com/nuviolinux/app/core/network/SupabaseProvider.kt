@@ -14,7 +14,7 @@ import io.ktor.http.takeFrom
 object SupabaseProvider {
     @OptIn(SupabaseInternal::class)
     val client by lazy {
-        val userAgent = "NuvioLinux/${AppVersionConfig.VERSION_NAME.ifBlank { "dev" }}"
+        val userAgent = "NuvioMobile/${AppVersionConfig.VERSION_NAME.ifBlank { "dev" }}"
         createSupabaseClient(
             supabaseUrl = SupabaseConfig.URL,
             supabaseKey = SupabaseConfig.ANON_KEY,

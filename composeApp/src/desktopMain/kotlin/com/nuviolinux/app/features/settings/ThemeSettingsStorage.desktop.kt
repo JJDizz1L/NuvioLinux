@@ -11,6 +11,15 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.Locale
 
+internal fun resolveDesktopAppLocale(
+    languageCode: String,
+    deviceLocale: Locale,
+): Locale = if (languageCode.equals(AppLanguage.DEVICE.code, ignoreCase = true)) {
+    deviceLocale
+} else {
+    Locale.forLanguageTag(languageCode)
+}
+
 internal actual object ThemeSettingsStorage {
     private const val selectedThemeKey = "selected_theme"
     private const val amoledEnabledKey = "amoled_enabled"
@@ -25,6 +34,7 @@ internal actual object ThemeSettingsStorage {
         desktopNavigationLayoutKey,
         navBarStyleKey,
     )
+    private val deviceLocale = Locale.getDefault()
     private val store = DesktopStorage.store("theme_settings")
 
     actual fun loadSelectedTheme(): String? =
@@ -64,7 +74,7 @@ internal actual object ThemeSettingsStorage {
     }
 
     actual fun applySelectedAppLanguage(languageCode: String) {
-        Locale.setDefault(Locale.forLanguageTag(languageCode))
+        Locale.setDefault(resolveDesktopAppLocale(languageCode, deviceLocale))
     }
 
     actual fun loadNavBarStyle(): String? =
