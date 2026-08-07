@@ -483,7 +483,7 @@ private fun formatCueTimestamp(timeMs: Long): String {
     return "$minutes:${seconds.toString().padStart(2, '0')}"
 }
 
-private val SubtitleOutlineColorSwatches = listOf(
+internal val SubtitleOutlineColorSwatches = listOf(
     Color.Black,
     Color.White,
     Color(0xFF00E5FF),
