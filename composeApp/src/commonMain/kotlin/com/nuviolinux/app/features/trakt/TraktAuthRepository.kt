@@ -11,8 +11,6 @@ import com.nuviolinux.app.features.tracking.TrackingCapability
 import com.nuviolinux.app.features.tracking.TrackingProviderDescriptor
 import com.nuviolinux.app.features.tracking.TrackingProviderId
 import com.nuviolinux.app.features.tracking.TrackingProviderRegistry
-import com.nuviolinux.app.features.trakt.TraktLibraryRepository
-import com.nuviolinux.app.features.trakt.TraktProgressRepository
 import io.ktor.http.Url
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
@@ -115,24 +113,6 @@ object TraktAuthRepository : TrackingAuthProvider {
 
     override fun removeStoredProfile(profileId: Int) {
         TraktAuthStorage.removeProfile(profileId)
-    }
-
-    internal fun currentStateForSync(): TraktAuthState {
-        ensureLoaded()
-        return authState
-    }
-
-    internal fun replaceStateFromSync(state: TraktAuthState): Boolean {
-        ensureLoaded()
-        val syncedState = state.copy(
-            pendingAuthorizationState = null,
-            pendingAuthorizationStartedAtMillis = null,
-        )
-        if (authState.syncSignature() == syncedState.syncSignature()) return false
-        authState = syncedState
-        persist()
-        publish(statusMessage = null, errorMessage = null)
-        return true
     }
 
     fun snapshot(profileId: Int = ProfileRepository.activeProfileId): TraktAuthUiState {
@@ -620,29 +600,11 @@ object TraktAuthRepository : TrackingAuthProvider {
         )
         persist(profileId)
         refreshUserSettings(profileId)
-        TraktCredentialSync.pushCurrentToRemote(profileId)
-        refreshAfterAuthorization()
         publish(
             isLoading = false,
             statusMessage = localizedString(Res.string.trakt_connected_status),
             errorMessage = null,
         )
-    }
-
-    /** Pulls library + progress immediately after a successful connect, so
-     * Trakt data appears without waiting for the next on-demand refresh
-     * (Simkl parity: SimklAuthRepository refreshes right after auth). */
-    private suspend fun refreshAfterAuthorization() {
-        runCatching { TraktLibraryRepository.refreshNow() }
-            .onFailure { error ->
-                if (error is CancellationException) throw error
-                log.w { "Post-auth Trakt library refresh failed: ${error.message}" }
-            }
-        runCatching { TraktProgressRepository.invalidateAndRefresh() }
-            .onFailure { error ->
-                if (error is CancellationException) throw error
-                log.w { "Post-auth Trakt progress refresh failed: ${error.message}" }
-            }
     }
 
     private suspend fun disconnect(profileId: Int = currentProfileId) {
@@ -670,7 +632,6 @@ object TraktAuthRepository : TrackingAuthProvider {
             }
         }
 
-        TraktCredentialSync.deleteRemote(profileId)
         authState = TraktAuthState()
         persist(profileId)
         publish(
@@ -717,7 +678,6 @@ object TraktAuthRepository : TrackingAuthProvider {
         }.getOrNull()
 
         if (response == null) {
-            if (recoverFromRemoteCredentials(refreshToken)) return@withLock true
             return@withLock false
         }
 
@@ -745,7 +705,6 @@ object TraktAuthRepository : TrackingAuthProvider {
         }.getOrNull()
 
         if (parsed == null) {
-            if (recoverFromRemoteCredentials(refreshToken)) return@withLock true
             return@withLock false
         }
 
@@ -757,7 +716,6 @@ object TraktAuthRepository : TrackingAuthProvider {
             expiresIn = parsed.expiresIn,
         )
         persist(profileId)
-        TraktCredentialSync.pushCurrentToRemote(profileId)
         publish()
         true
     }
@@ -770,7 +728,6 @@ object TraktAuthRepository : TrackingAuthProvider {
             statusMessage = null,
             errorMessage = localizedString(Res.string.trakt_authorization_expired_reconnect),
         )
-        TraktCredentialSync.deleteRemote(profileId)
     }
 
     private fun loadFromDisk(profileId: Int) {
@@ -866,25 +823,6 @@ object TraktAuthRepository : TrackingAuthProvider {
         val nowSeconds = TraktPlatformClock.nowEpochMs() / 1_000L
         return nowSeconds >= (expiresAtSeconds - 60)
     }
-
-    /** Recovers from a stale local refresh token by importing the credentials
-     * another client pushed via TraktCredentialSync. */
-    private suspend fun recoverFromRemoteCredentials(staleRefreshToken: String): Boolean {
-        val pulled = TraktCredentialSync.pullFromRemote()
-        if (!pulled) return false
-        return authState.isAuthenticated && authState.refreshToken != staleRefreshToken
-    }
-
-    private fun TraktAuthState.syncSignature(): String =
-        listOf(
-            accessToken.orEmpty(),
-            refreshToken.orEmpty(),
-            tokenType.orEmpty(),
-            createdAt?.toString().orEmpty(),
-            expiresIn?.toString().orEmpty(),
-            username.orEmpty(),
-            userSlug.orEmpty(),
-        ).joinToString("|")
 
     private fun isDeviceAuthorizationExpired(state: TraktAuthState): Boolean {
         val expiresAt = state.pendingDeviceExpiresAtMillis ?: return false
