@@ -21,8 +21,8 @@
 > ### ⚠️ Hard Fork — Linux Only
 >
 > This is a **hard fork** of [Nuvio Desktop](https://github.com/NuvioMedia/NuvioDesktop),
-> maintained separately and focused **exclusively on Linux development**.
-> The macOS and Windows code paths are being removed. If you need those
+> maintained as a standalone repository and focused **exclusively on Linux**.
+> The macOS and Windows code paths have been removed. If you need those
 > platforms, use the upstream project instead.
 
 ## ⚠️ Alpha Software — Testers Only
@@ -35,7 +35,7 @@ Expect breaking changes with every update. Features, settings, stored data, and 
 
 Nuvio Linux is a media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.
 
-This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop), diverged from the `feat/hwaccel-libmpv-linux` branch. It keeps the upstream client codebase while replacing the desktop playback stack with a native Linux player.
+This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop) (standalone repository, from the `feat/hwaccel-libmpv-linux` work). It keeps the upstream client codebase — including feature ports from newer upstream releases — while replacing the desktop playback stack with a native Linux player.
 
 ## What's Different From Upstream
 
@@ -96,7 +96,7 @@ sudo pacman-key --recv-key 6702DBAB3E41EDE1 && sudo pacman-key --lsign-key 6702D
 ### Install directly from the release URL
 
 ```bash
-sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.16.1/nuvio-linux-0.1.16alpha-2-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.17-alpha/nuvio-linux-0.1.17alpha-2-x86_64.pkg.tar.zst
 ```
 
 ### Install a manually downloaded package
@@ -104,13 +104,13 @@ sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.16.
 Download the `.pkg.tar.zst` from the latest [release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
 
 ```bash
-sudo pacman -U ./nuvio-linux-0.1.16alpha-2-x86_64.pkg.tar.zst
+sudo pacman -U ./nuvio-linux-0.1.17alpha-2-x86_64.pkg.tar.zst
 ```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/JJDizz1L/NuvioLinux.git
+git clone -b dev https://github.com/JJDizz1L/NuvioLinux.git
 cd NuvioLinux/dist/arch
 makepkg -si
 ```
@@ -133,7 +133,7 @@ This fork does not produce Windows or macOS builds.
 ## Development
 
 ```bash
-git clone https://github.com/JJDizz1L/NuvioLinux.git
+git clone -b dev https://github.com/JJDizz1L/NuvioLinux.git
 cd NuvioLinux
 ```
 
@@ -157,10 +157,10 @@ Build a Debian `.deb` package for **Debian-based** distros (Debian, Ubuntu, and 
 ./gradlew :composeApp:packageReleaseDeb
 ```
 
-The resulting `.deb` is written to `composeApp/build/compose/binaries/main/deb/`. Install it with:
+The resulting `.deb` is written to `composeApp/build/compose/binaries/main-release/deb/`. Install it with:
 
 ```bash
-sudo apt install ./composeApp/build/compose/binaries/main/deb/*.deb
+sudo apt install ./composeApp/build/compose/binaries/main-release/deb/*.deb
 ```
 
 Build a Fedora/RHEL `.rpm` (declares `Requires: mpv`; needs `rpmbuild`):
@@ -227,18 +227,28 @@ normally.
 
 ## Versioning
 
-Desktop versions are set in `composeApp/Configuration/DesktopVersion.properties`.
+Desktop versions are set in `composeApp/Configuration/DesktopVersion.properties` — the single source of truth every artifact version derives from. The version is kept **aligned with upstream's desktop version**; when upstream bumps, bump to match.
 
 ```properties
-VERSION_NAME=0.1.1-alpha
-VERSION_CODE=1
+VERSION_NAME=0.1.17-alpha
+VERSION_CODE=17
 ```
 
 Use the version helper when changing desktop release versions:
 
 ```bash
-./scripts/set-version.sh --desktop 0.1.2-alpha --desktop-code 2
+./scripts/set-version.sh --desktop 0.1.17-alpha --desktop-code 17
 ./scripts/set-version.sh --show
+```
+
+Per-format package names carry the same release counter (Arch `pkgrel` / RPM `Release` / the `-<release>` suffix in DEB, AppImage and Flatpak names), e.g. release 2 of `0.1.17-alpha`:
+
+```
+nuvio-linux-0.1.17alpha-2-x86_64.pkg.tar.zst
+nuvio-linux-0.1.17alpha-2.x86_64.rpm
+nuvio-linux_0.1.17-alpha-2_amd64.deb
+nuvio-linux-0.1.17-alpha-2-x86_64.AppImage
+nuvio-linux-0.1.17-alpha-2.flatpak
 ```
 
 ## Legal & DMCA
