@@ -152,6 +152,7 @@ private fun CollectionFolderCard(
                     !imageUrl.isNullOrBlank() -> {
                         CollectionCardRemoteImage(
                             imageUrl = imageUrl,
+                            staticImageUrl = firstNonBlank(folder.coverImageUrl),
                             contentDescription = folder.title,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,

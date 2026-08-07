@@ -5,6 +5,7 @@ import com.nuviolinux.app.features.home.MetaPreview
 import com.nuviolinux.app.features.watched.WatchedItem
 import com.nuviolinux.app.features.watched.normalizeWatchedMarkedAtEpochMs
 import com.nuviolinux.app.features.watched.watchedItemKey
+import com.nuviolinux.app.features.watched.watchedItemKeys
 import com.nuviolinux.app.features.watchprogress.WatchProgressEntry
 import com.nuviolinux.app.features.watchprogress.continueWatchingEntries
 import com.nuviolinux.app.features.watchprogress.shouldUseAsCompletedSeedForContinueWatching
@@ -20,9 +21,9 @@ object WatchingState {
         item: MetaPreview,
         fullyWatchedSeriesKeys: Set<String> = emptySet(),
     ): Boolean {
-        val posterKey = watchedItemKey(item.type, item.id)
-        if (watchedKeys.contains(posterKey)) return true
-        return item.type.isSeriesLikePosterType() && fullyWatchedSeriesKeys.contains(posterKey)
+        val posterKeys = watchedItemKeys(type = item.type, id = item.id)
+        if (posterKeys.any(watchedKeys::contains)) return true
+        return item.type.isSeriesLikePosterType() && posterKeys.any(fullyWatchedSeriesKeys::contains)
     }
 
     fun isEpisodeWatched(
@@ -31,13 +32,13 @@ object WatchingState {
         metaId: String,
         episode: MetaVideo,
     ): Boolean {
-        val key = watchedItemKey(
+        val keys = watchedItemKeys(
             type = metaType,
             id = metaId,
             season = episode.season,
             episode = episode.episode,
         )
-        if (watchedKeys.contains(key)) return true
+        if (keys.any(watchedKeys::contains)) return true
 
         // Fallback for franchise-parent anime: meta.id (e.g. "mal:49233") may differ
         // from the actual entry ID in Simkl. Check via video ID resolution in snapshot.
@@ -99,7 +100,7 @@ object WatchingState {
 }
 
 private fun String.isSeriesLikePosterType(): Boolean =
-    trim().lowercase() in setOf("series", "show", "tv", "tvshow")
+    trim().lowercase() in setOf("series", "show", "tv", "tvshow", "anime")
 
 private fun WatchProgressEntry.toDomainProgressRecord(): WatchingProgressRecord =
     normalizedCompletion().let { entry ->

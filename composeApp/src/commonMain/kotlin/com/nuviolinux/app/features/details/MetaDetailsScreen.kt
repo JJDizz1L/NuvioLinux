@@ -1345,15 +1345,16 @@ fun MetaDetailsScreen(
                             )
                         }
 
-                        DetailFloatingHeader(
-                            meta = meta,
-                            isSaved = isSaved,
-                            progressProvider = headerProgressProvider,
-                            interactive = headerInteractive,
-                            backgroundColor = dominantBackdropColor.takeIf { dominantColorEnabled },
-                            onBack = onBackFromDetails,
-                            onToggleSaved = toggleSaved,
-                        )
+                         DetailFloatingHeader(
+                             meta = meta,
+                             isSaved = isSaved,
+                             progressProvider = headerProgressProvider,
+                             interactive = headerInteractive,
+                             backgroundColor = dominantBackdropColor.takeIf { dominantColorEnabled },
+                             onBack = onBackFromDetails,
+                             onToggleSaved = toggleSaved,
+                             modifier = Modifier.zIndex(2f),
+                         )
 
                         selectedEpisodeForActions
                             ?.takeIf { selectedEpisodeZoomAnchor == null }
