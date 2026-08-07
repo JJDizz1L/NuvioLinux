@@ -59,16 +59,20 @@ fun main(args: Array<String>) {
             )
             ?.takeIf { it.isNotBlank() }
         val wasFullscreenOnLastExit = remember { DesktopWindowModeStorage.loadWasFullscreen() }
+        val wasMaximizedOnLastExit = remember { DesktopWindowModeStorage.loadWasMaximized() }
         val savedGeometry = remember { DesktopWindowModeStorage.loadWindowedGeometry() }
         val windowState = rememberWindowState(
             width = savedGeometry?.width?.dp ?: 1280.dp,
             height = savedGeometry?.height?.dp ?: 820.dp,
             position = savedGeometry?.let { WindowPosition.Absolute(x = it.x.dp, y = it.y.dp) }
                 ?: WindowPosition.PlatformDefault,
-            placement = if (wasFullscreenOnLastExit) {
-                WindowPlacement.Fullscreen
-            } else {
-                WindowPlacement.Floating
+            // Nuvio Linux is Linux-only, so fullscreen is always emulated
+            // natively (see DesktopAppFullscreenController) and restored
+            // separately below rather than driven by WindowPlacement.
+            placement = when {
+                wasFullscreenOnLastExit -> WindowPlacement.Fullscreen
+                wasMaximizedOnLastExit == false && savedGeometry != null -> WindowPlacement.Floating
+                else -> WindowPlacement.Maximized
             },
         )
         val fullscreenController = remember { DesktopAppFullscreenController() }
@@ -102,8 +106,11 @@ fun main(args: Array<String>) {
                 // aren't a meaningful "windowed position" to restore later.
                 snapshotFlow { Triple(windowState.placement, windowState.position, windowState.size) }
                     .collect { (placement, position, size) ->
-                        val isWindowed = placement == WindowPlacement.Floating &&
-                            !fullscreenController.isFullscreen(window, windowState)
+                        val isFullscreen = fullscreenController.isFullscreen(window, windowState)
+                        if (!isFullscreen) {
+                            DesktopWindowModeStorage.saveWasMaximized(placement == WindowPlacement.Maximized)
+                        }
+                        val isWindowed = placement == WindowPlacement.Floating && !isFullscreen
                         if (isWindowed && position.isSpecified) {
                             DesktopWindowModeStorage.saveWindowedGeometry(
                                 DesktopWindowGeometry(
