@@ -483,7 +483,7 @@ if (isLinuxHost) {
             val controlDir = stagingDir.resolve("DEBIAN")
             controlDir.mkdirs()
             rootProject.file("dist/deb/control.in").readText()
-                .replace("__VERSION__", desktopReleaseVersionName)
+                .replace("__VERSION__", "${desktopReleaseVersionName}-${desktopPackageRelease}")
                 .let { controlDir.resolve("control").writeText(it) }
             rootProject.file("dist/deb/postinst").copyTo(controlDir.resolve("postinst"))
             rootProject.file("dist/deb/postrm").copyTo(controlDir.resolve("postrm"))
