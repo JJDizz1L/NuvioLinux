@@ -24,5 +24,4 @@ actual object AppFeaturePolicy {
     // The updater code stays intact — re-enable with `!isFlatpakRuntime` above.
     actual val inAppUpdaterEnabled: Boolean = false
     actual val imdbRatingLogoEnabled: Boolean = true
-    actual val mediaPlaybackForegroundServiceEnabled: Boolean = false
 }
