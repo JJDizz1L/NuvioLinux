@@ -42,12 +42,10 @@ internal data class ProviderCredentialSnapshot(
         val remoteByProvider = rows.associateBy { it.provider.lowercase() }
         return copy(
             values = values.map { local ->
-                val remote = remoteByProvider[local.provider] ?: return@map local
-                val element = remote.credentialJson[local.field] as? JsonPrimitive
-                    ?: error("Invalid credential payload for ${local.provider}")
-                val value = element.contentOrNull
-                    ?: error("Invalid credential value for ${local.provider}")
-                local.copy(value = value.trim())
+                val remote = remoteByProvider[local.provider.lowercase()] ?: return@map local
+                val element = remote.credentialJson[local.field] as? JsonPrimitive ?: return@map local
+                val value = element.contentOrNull?.trim() ?: return@map local
+                local.copy(value = value)
             },
         )
     }

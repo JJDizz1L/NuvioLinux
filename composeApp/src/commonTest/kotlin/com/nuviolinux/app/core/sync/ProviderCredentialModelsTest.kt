@@ -47,4 +47,30 @@ class ProviderCredentialModelsTest {
 
         assertEquals("", local.mergeRemote(remote).values.single().value)
     }
+
+    @Test
+    fun `malformed remote rows are skipped instead of aborting the merge`() {
+        val local = ProviderCredentialSnapshot(
+            profileId = 1,
+            values = listOf(
+                ProviderCredentialValue("mdblist", "api_key", "local-mdblist"),
+                ProviderCredentialValue("tmdb", "api_key", "local-tmdb"),
+            ),
+        )
+        val remote = listOf(
+            SupabaseProviderCredential(
+                provider = "mdblist",
+                credentialJson = buildJsonObject { put("api_key", null) },
+            ),
+            SupabaseProviderCredential(
+                provider = "tmdb",
+                credentialJson = buildJsonObject { put("api_key", "remote-tmdb") },
+            ),
+        )
+
+        val merged = local.mergeRemote(remote)
+
+        assertEquals("local-mdblist", merged.values[0].value)
+        assertEquals("remote-tmdb", merged.values[1].value)
+    }
 }
