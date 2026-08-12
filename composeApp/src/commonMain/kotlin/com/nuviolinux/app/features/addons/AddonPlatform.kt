@@ -18,6 +18,9 @@ data class RawHttpResponse(
 /** Default safety limit for generic and plugin-provided HTTP responses. */
 internal const val DefaultRawHttpResponseMaxBytes = 1024 * 1024
 
+/** Default socket timeout for raw HTTP requests; probes override with a short one. */
+internal const val DefaultHttpRequestTimeoutMs: Long = 60_000
+
 expect suspend fun httpGetText(url: String): String
 
 expect suspend fun httpPostJson(url: String, body: String): String
@@ -40,4 +43,5 @@ expect suspend fun httpRequestRaw(
     body: String,
     followRedirects: Boolean = true,
     maxResponseBodyBytes: Int = DefaultRawHttpResponseMaxBytes,
+    timeoutMs: Long = DefaultHttpRequestTimeoutMs,
 ): RawHttpResponse

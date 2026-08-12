@@ -2,6 +2,7 @@ package com.nuviolinux.app.core.network
 
 import androidx.compose.runtime.Composable
 import com.nuviolinux.app.features.addons.httpRequestRaw
+import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -11,6 +12,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import nuviolinux.composeapp.generated.resources.Res
 import nuviolinux.composeapp.generated.resources.details_check_connection
@@ -66,15 +69,15 @@ object NetworkStatusRepository {
     private val _uiState = MutableStateFlow(NetworkStatusUiState())
     val uiState: StateFlow<NetworkStatusUiState> = _uiState.asStateFlow()
 
-    private var started = false
-    private var probeInFlight = false
-    private var pendingProbeAfterCurrent = false
+    private val started = atomic(false)
+    private val probeGate = Mutex()
+    private var probeRunning = false
+    private var repeatAfterCurrent = false
     private var pendingProbeConfirmFailures = false
     private var foregroundRefreshJob: Job? = null
 
     fun ensureStarted() {
-        if (started) return
-        started = true
+        if (!started.compareAndSet(false, true)) return
         requestRefresh(force = true)
     }
 
@@ -88,26 +91,30 @@ object NetworkStatusRepository {
     }
 
     fun requestRefresh(force: Boolean = false, confirmFailures: Boolean = false) {
-        if (!started) started = true
-        if (probeInFlight) {
-            if (force) {
-                pendingProbeAfterCurrent = true
-                pendingProbeConfirmFailures = pendingProbeConfirmFailures || confirmFailures
-            }
-            return
-        }
-
+        started.compareAndSet(false, true)
         scope.launch {
-            var nextConfirmFailures = confirmFailures
-            do {
-                val runConfirmFailures = nextConfirmFailures || pendingProbeConfirmFailures
-                nextConfirmFailures = false
-                pendingProbeAfterCurrent = false
-                pendingProbeConfirmFailures = false
-                probeInFlight = true
-                runProbe(confirmFailures = runConfirmFailures)
-                probeInFlight = false
-            } while (pendingProbeAfterCurrent)
+            probeGate.withLock {
+                if (probeRunning) {
+                    if (force) {
+                        repeatAfterCurrent = true
+                        if (confirmFailures) pendingProbeConfirmFailures = true
+                    }
+                    return@withLock
+                }
+                probeRunning = true
+                repeatAfterCurrent = false
+                pendingProbeConfirmFailures = confirmFailures
+                try {
+                    do {
+                        val runConfirmFailures = pendingProbeConfirmFailures
+                        pendingProbeConfirmFailures = false
+                        repeatAfterCurrent = false
+                        runProbe(confirmFailures = runConfirmFailures)
+                    } while (repeatAfterCurrent)
+                } finally {
+                    probeRunning = false
+                }
+            }
         }
     }
 
@@ -156,13 +163,14 @@ object NetworkStatusRepository {
         url: String,
         headers: Map<String, String> = emptyMap(),
     ): Boolean {
-        val response = withTimeoutOrNull(REQUEST_TIMEOUT_MS) {
+        val response = withTimeoutOrNull(REQUEST_TIMEOUT_MS + 1_000) {
             runCatching {
                 httpRequestRaw(
                     method = "GET",
                     url = url,
                     headers = headers,
                     body = "",
+                    timeoutMs = REQUEST_TIMEOUT_MS,
                 )
             }.getOrNull()
         } ?: return false

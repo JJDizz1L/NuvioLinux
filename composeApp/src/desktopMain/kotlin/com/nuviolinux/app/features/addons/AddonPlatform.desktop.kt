@@ -104,13 +104,20 @@ actual suspend fun httpRequestRaw(
     body: String,
     followRedirects: Boolean,
     maxResponseBodyBytes: Int,
+    timeoutMs: Long,
 ): RawHttpResponse = withContext(Dispatchers.IO) {
-    val client = if (followRedirects) {
-        desktopHttpClient
-    } else {
-        desktopHttpClient.newBuilder()
+    var client = desktopHttpClient
+    if (!followRedirects) {
+        client = client.newBuilder()
             .followRedirects(false)
             .followSslRedirects(false)
+            .build()
+    }
+    if (timeoutMs != desktopHttpClient.connectTimeoutMillis.toLong()) {
+        client = client.newBuilder()
+            .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
             .build()
     }
     val request = buildDesktopRequest(method, url, headers, body)
