@@ -67,7 +67,10 @@ if [[ ! "$current_version" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
 fi
 
 printf 'version=%s\n' "$current_version"
-printf 'tag=%s\n' "$current_version"
+# The fork's release tags carry a v prefix (v0.1.15-alpha … v0.1.16.2); the
+# bare 0.1.x tags in the history are upstream's. Emit the fork convention so
+# the workflow's tag-collision check and gh release create agree with it.
+printf 'tag=v%s\n' "$current_version"
 printf 'release_commit=%s\n' "$(git rev-parse "${target_ref}^{commit}")"
 printf 'current_bump=%s\n' "$current_bump"
 printf 'previous_version=%s\n' "$previous_version"
