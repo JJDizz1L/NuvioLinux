@@ -218,17 +218,13 @@ object AuthRepository {
     }
 
     private fun isInvalidRemoteSessionError(error: Throwable): Boolean {
-        val restError = error.findCause<RestException>()
-        if (restError?.statusCode == 401 || restError?.statusCode == 403) return true
+        val restError = error.findCause<RestException>() ?: return false
+        if (restError.statusCode == 401 || restError.statusCode == 403) return true
 
         val message = buildString {
-            append(error.message.orEmpty())
-            if (restError != null) {
-                append(' ')
-                append(restError.error)
-                append(' ')
-                append(restError.description)
-            }
+            append(restError.error.orEmpty())
+            append(' ')
+            append(restError.description.orEmpty())
         }.lowercase()
 
         return (
