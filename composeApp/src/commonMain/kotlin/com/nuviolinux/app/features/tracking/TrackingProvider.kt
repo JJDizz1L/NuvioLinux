@@ -82,12 +82,6 @@ object TrackingProviderRegistry {
     val connectedProviderIds: StateFlow<Set<TrackingProviderId>> = _connectedProviderIds.asStateFlow()
 
     fun register(provider: TrackingAuthProvider) {
-        val previousJob = synchronized(lock) {
-            authProviders[provider.descriptor.id] = provider
-            profileStores += provider
-            authObservationJobs.remove(provider.descriptor.id)
-        }
-        previousJob?.cancel()
         val observationJob = scope.launch {
             provider.isAuthenticated.collectLatest { isAuthenticated ->
                 _connectedProviderIds.update { connected ->
@@ -96,6 +90,9 @@ object TrackingProviderRegistry {
             }
         }
         synchronized(lock) {
+            authProviders[provider.descriptor.id] = provider
+            profileStores += provider
+            authObservationJobs.remove(provider.descriptor.id)?.cancel()
             authObservationJobs[provider.descriptor.id] = observationJob
         }
     }
