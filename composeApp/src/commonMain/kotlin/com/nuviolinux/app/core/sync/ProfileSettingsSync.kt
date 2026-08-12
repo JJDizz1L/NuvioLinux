@@ -30,7 +30,9 @@ import com.nuviolinux.app.features.tmdb.TmdbSettingsStorage
 import com.nuviolinux.app.features.tmdb.TmdbSettingsRepository
 import com.nuviolinux.app.features.trakt.TraktCommentsStorage
 import com.nuviolinux.app.features.trakt.TraktCommentsSettings
+import com.nuviolinux.app.features.trakt.TraktSettingsRepository
 import com.nuviolinux.app.features.trakt.TraktSettingsStorage
+import com.nuviolinux.app.features.trakt.ProfileSettingsWatchSourceOutbox
 import com.nuviolinux.app.features.tracking.TrackingSettingsRepository
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingPreferencesStorage
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingPreferencesRepository
@@ -143,6 +145,7 @@ object ProfileSettingsSync {
                     if (ProfileRepository.activeProfileId != profileId) return@withLock false
                     applyRemoteBlob(remoteBlob)
                     skipNextPushSignature = currentObservedStateSignature()
+                    restorePendingWatchProgressSource(profileId)
                 } finally {
                     isApplyingRemoteBlob = false
                 }
@@ -223,6 +226,25 @@ object ProfileSettingsSync {
         }
         SupabaseProvider.client.postgrest.rpc("sync_push_profile_settings_blob", params)
         log.d { "pushToRemoteLocked(profileId=$profileId) — success" }
+    }
+
+    /**
+     * A locally-pending watch-progress source change outlives the remote blob
+     * applied above: re-apply it so a foreground pull can't clobber it, and
+     * let the observer push propagate the restored source to the backend.
+     */
+    private fun restorePendingWatchProgressSource(profileId: Int) {
+        val authState = AuthRepository.state.value
+        if (authState !is AuthState.Authenticated || authState.isAnonymous) return
+        val pending = ProfileSettingsWatchSourceOutbox.pendingFor(
+            accountId = authState.userId,
+            profileId = profileId,
+        ) ?: return
+        TraktSettingsRepository.setWatchProgressSource(
+            source = pending.source,
+            profileId = profileId,
+        )
+        ProfileSettingsWatchSourceOutbox.clearIfMatches(pending)
     }
 
     private fun exportSettingsBlob(): MobileProfileSettingsBlob {
