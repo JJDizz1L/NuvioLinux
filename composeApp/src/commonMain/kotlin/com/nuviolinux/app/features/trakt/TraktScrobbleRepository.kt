@@ -12,6 +12,7 @@ import com.nuviolinux.app.features.tracking.TrackingScrobbleAction
 import com.nuviolinux.app.features.tracking.TrackingScrobbleEvent
 import com.nuviolinux.app.features.tracking.TrackingScrobbler
 import com.nuviolinux.app.features.tracking.TrackingSeekScrobblePolicy
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
@@ -94,6 +95,7 @@ internal object TraktScrobbleRepository : TrackingScrobbler {
         explicitNulls = false
     }
 
+    @Volatile
     private var lastScrobbleStamp: ScrobbleStamp? = null
     private val minSendIntervalMs = 8_000L
     private val progressWindow = 1.5f
