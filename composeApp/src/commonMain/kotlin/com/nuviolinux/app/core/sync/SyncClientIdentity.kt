@@ -2,6 +2,7 @@ package com.nuviolinux.app.core.sync
 
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.put
+import kotlin.concurrent.Volatile
 import kotlin.random.Random
 
 private const val CLIENT_ID_LENGTH = 32
@@ -10,6 +11,7 @@ private const val ORIGIN_CLIENT_ID_PARAM = "p_origin_client_id"
 private const val CLIENT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 object SyncClientIdentity {
+    @Volatile
     private var cachedClientId: String? = null
 
     fun currentClientId(): String {
