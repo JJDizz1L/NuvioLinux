@@ -13,6 +13,9 @@ import com.nuviolinux.app.features.tracking.TrackingProviderId
 import com.nuviolinux.app.features.tracking.TrackingProviderRegistry
 import io.ktor.http.Url
 import io.ktor.http.encodeURLParameter
+import kotlin.concurrent.Volatile
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +53,7 @@ object TraktAuthRepository : TrackingAuthProvider {
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val refreshMutex = Mutex()
+    private val stateLock = SynchronizedObject()
 
     private val _uiState = MutableStateFlow(TraktAuthUiState())
     val uiState: StateFlow<TraktAuthUiState> = _uiState.asStateFlow()
@@ -81,6 +85,7 @@ object TraktAuthRepository : TrackingAuthProvider {
     private var hasLoaded = false
     private var currentProfileId: Int = 1
     private var profileGeneration: Long = 0L
+    @Volatile
     private var authState = TraktAuthState()
     private var devicePollingJob: Job? = null
 
@@ -107,7 +112,9 @@ object TraktAuthRepository : TrackingAuthProvider {
         hasLoaded = false
         currentProfileId = 1
         profileGeneration += 1L
-        authState = TraktAuthState()
+        synchronized(stateLock) {
+            authState = TraktAuthState()
+        }
         publish()
     }
 
@@ -135,10 +142,12 @@ object TraktAuthRepository : TrackingAuthProvider {
         }
 
         val oauthState = generateOauthState()
-        authState = authState.copy(
-            pendingAuthorizationState = oauthState,
-            pendingAuthorizationStartedAtMillis = TraktPlatformClock.nowEpochMs(),
-        )
+        synchronized(stateLock) {
+            authState = authState.copy(
+                pendingAuthorizationState = oauthState,
+                pendingAuthorizationStartedAtMillis = TraktPlatformClock.nowEpochMs(),
+            )
+        }
         persist(profileId)
         publish(
             statusMessage = localizedString(Res.string.trakt_complete_sign_in_browser),
@@ -232,10 +241,12 @@ object TraktAuthRepository : TrackingAuthProvider {
             json.decodeFromString<TraktUserSettingsResponse>(response)
         }.getOrNull() ?: return null
 
-        authState = authState.copy(
-            username = parsed.user?.username,
-            userSlug = parsed.user?.ids?.slug,
-        )
+        synchronized(stateLock) {
+            authState = authState.copy(
+                username = parsed.user?.username,
+                userSlug = parsed.user?.ids?.slug,
+            )
+        }
         persist(profileId)
         publish()
         return authState.username
@@ -311,15 +322,17 @@ object TraktAuthRepository : TrackingAuthProvider {
 
         val now = TraktPlatformClock.nowEpochMs()
         val expiresInSeconds = parsed.expiresIn?.coerceAtLeast(1) ?: 600
-        authState = authState.copy(
-            pendingAuthorizationState = null,
-            pendingAuthorizationStartedAtMillis = now,
-            pendingDeviceCode = deviceCode,
-            pendingDeviceUserCode = userCode,
-            pendingDeviceVerificationUrl = verificationUrl,
-            pendingDeviceIntervalSeconds = parsed.interval?.coerceAtLeast(1) ?: 5,
-            pendingDeviceExpiresAtMillis = now + expiresInSeconds * 1_000L,
-        )
+        synchronized(stateLock) {
+            authState = authState.copy(
+                pendingAuthorizationState = null,
+                pendingAuthorizationStartedAtMillis = now,
+                pendingDeviceCode = deviceCode,
+                pendingDeviceUserCode = userCode,
+                pendingDeviceVerificationUrl = verificationUrl,
+                pendingDeviceIntervalSeconds = parsed.interval?.coerceAtLeast(1) ?: 5,
+                pendingDeviceExpiresAtMillis = now + expiresInSeconds * 1_000L,
+            )
+        }
         persist(profileId)
         publish(
             isLoading = false,
@@ -591,13 +604,15 @@ object TraktAuthRepository : TrackingAuthProvider {
     ) {
         if (currentProfileId != profileId) return
         clearPendingAuthorization()
-        authState = authState.copy(
-            accessToken = parsed.accessToken,
-            refreshToken = parsed.refreshToken,
-            tokenType = parsed.tokenType,
-            createdAt = parsed.createdAt,
-            expiresIn = parsed.expiresIn,
-        )
+        synchronized(stateLock) {
+            authState = authState.copy(
+                accessToken = parsed.accessToken,
+                refreshToken = parsed.refreshToken,
+                tokenType = parsed.tokenType,
+                createdAt = parsed.createdAt,
+                expiresIn = parsed.expiresIn,
+            )
+        }
         persist(profileId)
         refreshUserSettings(profileId)
         publish(
@@ -632,7 +647,9 @@ object TraktAuthRepository : TrackingAuthProvider {
             }
         }
 
-        authState = TraktAuthState()
+        synchronized(stateLock) {
+            authState = TraktAuthState()
+        }
         persist(profileId)
         publish(
             isLoading = false,
@@ -708,20 +725,24 @@ object TraktAuthRepository : TrackingAuthProvider {
             return@withLock false
         }
 
-        authState = authState.copy(
-            accessToken = parsed.accessToken,
-            refreshToken = parsed.refreshToken,
-            tokenType = parsed.tokenType,
-            createdAt = parsed.createdAt,
-            expiresIn = parsed.expiresIn,
-        )
+        synchronized(stateLock) {
+            authState = authState.copy(
+                accessToken = parsed.accessToken,
+                refreshToken = parsed.refreshToken,
+                tokenType = parsed.tokenType,
+                createdAt = parsed.createdAt,
+                expiresIn = parsed.expiresIn,
+            )
+        }
         persist(profileId)
         publish()
         true
     }
 
     private suspend fun invalidateCredentials(profileId: Int) {
-        authState = TraktAuthState()
+        synchronized(stateLock) {
+            authState = TraktAuthState()
+        }
         persist(profileId)
         publish(
             isLoading = false,
@@ -736,29 +757,33 @@ object TraktAuthRepository : TrackingAuthProvider {
         profileGeneration += 1L
         hasLoaded = true
         val payload = TraktAuthStorage.loadPayload(profileId).orEmpty().trim()
-        authState = if (payload.isBlank()) {
-            TraktAuthState()
-        } else {
-            runCatching { json.decodeFromString<TraktAuthState>(payload) }
-                .getOrElse {
-                    log.w { "Failed to parse Trakt auth payload: ${it.message}" }
-                    TraktAuthState()
-                }
+        synchronized(stateLock) {
+            authState = if (payload.isBlank()) {
+                TraktAuthState()
+            } else {
+                runCatching { json.decodeFromString<TraktAuthState>(payload) }
+                    .getOrElse {
+                        log.w { "Failed to parse Trakt auth payload: ${it.message}" }
+                        TraktAuthState()
+                    }
+            }
         }
         publish(statusMessage = null, errorMessage = null)
         startDevicePollingIfNeeded(profileId)
     }
 
     private fun clearPendingAuthorization() {
-        authState = authState.copy(
-            pendingAuthorizationState = null,
-            pendingAuthorizationStartedAtMillis = null,
-            pendingDeviceCode = null,
-            pendingDeviceUserCode = null,
-            pendingDeviceVerificationUrl = null,
-            pendingDeviceIntervalSeconds = null,
-            pendingDeviceExpiresAtMillis = null,
-        )
+        synchronized(stateLock) {
+            authState = authState.copy(
+                pendingAuthorizationState = null,
+                pendingAuthorizationStartedAtMillis = null,
+                pendingDeviceCode = null,
+                pendingDeviceUserCode = null,
+                pendingDeviceVerificationUrl = null,
+                pendingDeviceIntervalSeconds = null,
+                pendingDeviceExpiresAtMillis = null,
+            )
+        }
     }
 
     private fun publish(

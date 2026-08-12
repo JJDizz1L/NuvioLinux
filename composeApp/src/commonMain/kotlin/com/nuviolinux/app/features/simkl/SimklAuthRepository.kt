@@ -9,6 +9,9 @@ import com.nuviolinux.app.features.tracking.TrackingProviderId
 import com.nuviolinux.app.features.tracking.TrackingProviderRegistry
 import com.nuviolinux.app.features.tracking.TrackingRefreshIntent
 import io.ktor.http.encodeURLParameter
+import kotlin.concurrent.Volatile
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +39,7 @@ object SimklAuthRepository : TrackingAuthProvider {
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val authorizationMutex = Mutex()
+    private val stateLock = SynchronizedObject()
 
     private val _uiState = MutableStateFlow(SimklAuthUiState())
     val uiState: StateFlow<SimklAuthUiState> = _uiState.asStateFlow()
@@ -60,7 +64,9 @@ object SimklAuthRepository : TrackingAuthProvider {
 
     private var hasLoaded = false
     private var profileGeneration = 0L
+    @Volatile
     private var storedState = SimklStoredAuthState()
+    @Volatile
     private var accessToken: String? = null
     private var pinPollingJob: Job? = null
 
@@ -81,8 +87,10 @@ object SimklAuthRepository : TrackingAuthProvider {
         pinPollingJob?.cancel()
         hasLoaded = false
         profileGeneration += 1L
-        storedState = SimklStoredAuthState()
-        accessToken = null
+        synchronized(stateLock) {
+            storedState = SimklStoredAuthState()
+            accessToken = null
+        }
         publish()
     }
 
@@ -110,10 +118,12 @@ object SimklAuthRepository : TrackingAuthProvider {
 
         val material = generateSimklPkceMaterial()
         SimklAuthStorage.saveCodeVerifier(material.verifier)
-        storedState = storedState.copy(
-            pendingAuthorizationState = material.state,
-            pendingAuthorizationStartedAtEpochMs = SimklPlatformClock.nowEpochMs(),
-        )
+        synchronized(stateLock) {
+            storedState = storedState.copy(
+                pendingAuthorizationState = material.state,
+                pendingAuthorizationStartedAtEpochMs = SimklPlatformClock.nowEpochMs(),
+            )
+        }
         persistMetadata()
         publish(error = null)
         return authorizationUrl(material)
@@ -196,10 +206,12 @@ object SimklAuthRepository : TrackingAuthProvider {
         ensureLoaded()
         pinPollingJob?.cancel()
         profileGeneration += 1L
-        accessToken = null
+        synchronized(stateLock) {
+            accessToken = null
+            storedState = SimklStoredAuthState()
+        }
         SimklAuthStorage.saveAccessToken(null)
         clearPendingAuthorization()
-        storedState = SimklStoredAuthState()
         persistMetadata()
         SimklSyncRepository.clearLocalState()
         publish(error = null)
@@ -230,7 +242,9 @@ object SimklAuthRepository : TrackingAuthProvider {
         when (simklSettingsRefreshAction(storedState, activityWatermark)) {
             SimklSettingsRefreshAction.NONE -> Unit
             SimklSettingsRefreshAction.RECORD_WATERMARK -> {
-                storedState = storedState.copy(settingsActivityWatermark = activityWatermark)
+                synchronized(stateLock) {
+                    storedState = storedState.copy(settingsActivityWatermark = activityWatermark)
+                }
                 persistMetadata()
             }
             SimklSettingsRefreshAction.FETCH -> {
@@ -296,14 +310,16 @@ object SimklAuthRepository : TrackingAuthProvider {
         }
 
         SimklAuthStorage.saveCodeVerifier(null)
-        storedState = storedState.copy(
-            pendingAuthorizationState = null,
-            pendingAuthorizationStartedAtEpochMs = now,
-            pendingPinUserCode = pending.userCode,
-            pendingPinVerificationUrl = pending.verificationUrl,
-            pendingPinIntervalSeconds = pending.intervalSeconds,
-            pendingPinExpiresAtEpochMs = pending.expiresAtEpochMs,
-        )
+        synchronized(stateLock) {
+            storedState = storedState.copy(
+                pendingAuthorizationState = null,
+                pendingAuthorizationStartedAtEpochMs = now,
+                pendingPinUserCode = pending.userCode,
+                pendingPinVerificationUrl = pending.verificationUrl,
+                pendingPinIntervalSeconds = pending.intervalSeconds,
+                pendingPinExpiresAtEpochMs = pending.expiresAtEpochMs,
+            )
+        }
         persistMetadata()
         publish(isLoading = false, error = null)
         startPinPollingIfNeeded()
@@ -401,10 +417,12 @@ object SimklAuthRepository : TrackingAuthProvider {
     ) = authorizationMutex.withLock {
         if (profileGeneration != generation) return@withLock
         publish(isLoading = true, error = null)
-        accessToken = token
+        synchronized(stateLock) {
+            accessToken = token
+            clearPendingAuthorizationLocked()
+            storedState = storedState.copy(tokenExpiresAtEpochMs = null)
+        }
         SimklAuthStorage.saveAccessToken(token)
-        clearPendingAuthorization()
-        storedState = storedState.copy(tokenExpiresAtEpochMs = null)
         persistMetadata()
         publish(isLoading = false, error = null)
         fetchAndStoreUserSettings()
@@ -486,14 +504,16 @@ object SimklAuthRepository : TrackingAuthProvider {
                 return@withLock
             }
 
-            accessToken = token.accessToken
+            synchronized(stateLock) {
+                accessToken = token.accessToken
+                clearPendingAuthorizationLocked()
+                storedState = storedState.copy(
+                    tokenExpiresAtEpochMs = token.expiresIn
+                        ?.takeIf { seconds -> seconds > 0L }
+                        ?.let { seconds -> SimklPlatformClock.nowEpochMs() + seconds * 1_000L },
+                )
+            }
             SimklAuthStorage.saveAccessToken(token.accessToken)
-            clearPendingAuthorization()
-            storedState = storedState.copy(
-                tokenExpiresAtEpochMs = token.expiresIn
-                    ?.takeIf { seconds -> seconds > 0L }
-                    ?.let { seconds -> SimklPlatformClock.nowEpochMs() + seconds * 1_000L },
-            )
             persistMetadata()
             publish(isLoading = false, error = null)
             fetchAndStoreUserSettings()
@@ -519,12 +539,14 @@ object SimklAuthRepository : TrackingAuthProvider {
         }
         val settings = runCatching { json.decodeFromString<SimklUserSettingsResponse>(response.body) }
             .getOrNull() ?: return false
-        storedState = storedState.copy(
-            username = settings.user?.name,
-            accountId = settings.account?.id,
-            hasFetchedUserSettings = true,
-            settingsActivityWatermark = activityWatermark ?: storedState.settingsActivityWatermark,
-        )
+        synchronized(stateLock) {
+            storedState = storedState.copy(
+                username = settings.user?.name,
+                accountId = settings.account?.id,
+                hasFetchedUserSettings = true,
+                settingsActivityWatermark = activityWatermark ?: storedState.settingsActivityWatermark,
+            )
+        }
         persistMetadata()
         publish(error = null)
         return true
@@ -534,24 +556,26 @@ object SimklAuthRepository : TrackingAuthProvider {
         pinPollingJob?.cancel()
         profileGeneration += 1L
         hasLoaded = true
-        storedState = SimklAuthStorage.loadMetadataPayload()
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-            ?.let { payload ->
-                runCatching { json.decodeFromString<SimklStoredAuthState>(payload) }
-                    .onFailure { error -> log.w { "Failed to parse Simkl auth metadata: ${error.message}" } }
-                    .getOrNull()
+        synchronized(stateLock) {
+            storedState = SimklAuthStorage.loadMetadataPayload()
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?.let { payload ->
+                    runCatching { json.decodeFromString<SimklStoredAuthState>(payload) }
+                        .onFailure { error -> log.w { "Failed to parse Simkl auth metadata: ${error.message}" } }
+                        .getOrNull()
+                }
+                ?: SimklStoredAuthState()
+            accessToken = SimklAuthStorage.loadAccessToken()?.takeIf(String::isNotBlank)
+            if (accessToken != null && storedState.tokenExpiresAtEpochMs?.let { expiresAt ->
+                    SimklPlatformClock.nowEpochMs() >= expiresAt - TOKEN_EXPIRY_SKEW_MS
+                } == true
+            ) {
+                accessToken = null
+                SimklAuthStorage.saveAccessToken(null)
+                storedState = SimklStoredAuthState()
+                persistMetadata()
             }
-            ?: SimklStoredAuthState()
-        accessToken = SimklAuthStorage.loadAccessToken()?.takeIf(String::isNotBlank)
-        if (accessToken != null && storedState.tokenExpiresAtEpochMs?.let { expiresAt ->
-                SimklPlatformClock.nowEpochMs() >= expiresAt - TOKEN_EXPIRY_SKEW_MS
-            } == true
-        ) {
-            accessToken = null
-            SimklAuthStorage.saveAccessToken(null)
-            storedState = SimklStoredAuthState()
-            persistMetadata()
         }
         val hasWrongPlatformAuthorization = if (isDesktop) {
             !storedState.pendingAuthorizationState.isNullOrBlank()
@@ -580,10 +604,12 @@ object SimklAuthRepository : TrackingAuthProvider {
     private fun invalidateCredentials(error: SimklAuthError) {
         pinPollingJob?.cancel()
         profileGeneration += 1L
-        accessToken = null
+        synchronized(stateLock) {
+            accessToken = null
+            clearPendingAuthorizationLocked()
+            storedState = SimklStoredAuthState()
+        }
         SimklAuthStorage.saveAccessToken(null)
-        clearPendingAuthorization()
-        storedState = SimklStoredAuthState()
         persistMetadata()
         SimklSyncRepository.clearLocalState()
         publish(isLoading = false, error = error)
@@ -591,6 +617,12 @@ object SimklAuthRepository : TrackingAuthProvider {
 
     private fun clearPendingAuthorization() {
         SimklAuthStorage.saveCodeVerifier(null)
+        synchronized(stateLock) {
+            clearPendingAuthorizationLocked()
+        }
+    }
+
+    private fun clearPendingAuthorizationLocked() {
         storedState = storedState.copy(
             pendingAuthorizationState = null,
             pendingAuthorizationStartedAtEpochMs = null,
