@@ -52,7 +52,7 @@ object SimklSyncRepository : TrackingProfileStore {
     fun ensureLoaded() {
         if (hasLoaded) return
         hasLoaded = true
-        val snapshot = SimklSyncStorage.loadPayload()
+        val snapshot = SimklSyncStorage.loadPayload(ProfileRepository.activeProfileId)
             ?.trim()
             ?.takeIf(String::isNotEmpty)
             ?.let { payload ->
@@ -171,7 +171,7 @@ object SimklSyncRepository : TrackingProfileStore {
         if (generation != profileGeneration || profileId != ProfileRepository.activeProfileId) {
             return@withLock
         }
-        SimklSyncStorage.savePayload(json.encodeToString(result))
+        SimklSyncStorage.savePayload(profileId, json.encodeToString(result))
         _state.value = SimklSyncUiState(
             snapshot = result,
             hasLoaded = true,
@@ -187,7 +187,7 @@ object SimklSyncRepository : TrackingProfileStore {
             val updatedPlayback = current.snapshot.playback.filterNot { session -> session.id in sessionIds }
             if (updatedPlayback.size == current.snapshot.playback.size) return@withLock
             val updatedSnapshot = current.snapshot.copy(playback = updatedPlayback)
-            SimklSyncStorage.savePayload(json.encodeToString(updatedSnapshot))
+            SimklSyncStorage.savePayload(ProfileRepository.activeProfileId, json.encodeToString(updatedSnapshot))
             _state.value = current.copy(snapshot = updatedSnapshot)
             SimklWatchDiagnostics.logSnapshot(stage = "playback-removal", snapshot = updatedSnapshot)
         }
@@ -207,7 +207,7 @@ object SimklSyncRepository : TrackingProfileStore {
                 committedAtEpochMs = SimklPlatformClock.nowEpochMs(),
             )
             if (snapshot == current.snapshot) return@withLock
-            SimklSyncStorage.savePayload(json.encodeToString(snapshot))
+            SimklSyncStorage.savePayload(profileId, json.encodeToString(snapshot))
             if (generation == profileGeneration && profileId == ProfileRepository.activeProfileId) {
                 _state.value = current.copy(snapshot = snapshot)
                 SimklWatchDiagnostics.logSnapshot(stage = "scrobble-commit", snapshot = snapshot)
@@ -229,7 +229,7 @@ object SimklSyncRepository : TrackingProfileStore {
                 committedAtEpochMs = SimklPlatformClock.nowEpochMs(),
             )
             if (snapshot == current.snapshot) return@withLock
-            SimklSyncStorage.savePayload(json.encodeToString(snapshot))
+            SimklSyncStorage.savePayload(profileId, json.encodeToString(snapshot))
             if (generation == profileGeneration && profileId == ProfileRepository.activeProfileId) {
                 _state.value = current.copy(snapshot = snapshot)
                 SimklWatchDiagnostics.logSnapshot(stage = "mutation-commit", snapshot = snapshot)
@@ -248,7 +248,7 @@ object SimklSyncRepository : TrackingProfileStore {
         profileGeneration += 1L
         hasLoaded = false
         _state.value = SimklSyncUiState()
-        SimklSyncStorage.savePayload("")
+        SimklSyncStorage.savePayload(ProfileRepository.activeProfileId, "")
     }
 
     /**

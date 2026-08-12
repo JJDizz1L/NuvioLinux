@@ -2,6 +2,7 @@ package com.nuviolinux.app.features.simkl
 
 import co.touchlab.kermit.Logger
 import com.nuviolinux.app.isDesktop
+import com.nuviolinux.app.features.profiles.ProfileRepository
 import com.nuviolinux.app.features.tracking.TrackingAuthProvider
 import com.nuviolinux.app.features.tracking.TrackingCapability
 import com.nuviolinux.app.features.tracking.TrackingProviderDescriptor
@@ -63,6 +64,7 @@ object SimklAuthRepository : TrackingAuthProvider {
     )
 
     private var hasLoaded = false
+    private var currentProfileId: Int = 1
     private var profileGeneration = 0L
     @Volatile
     private var storedState = SimklStoredAuthState()
@@ -86,6 +88,7 @@ object SimklAuthRepository : TrackingAuthProvider {
     override fun clearLocalState() {
         pinPollingJob?.cancel()
         hasLoaded = false
+        currentProfileId = 1
         profileGeneration += 1L
         synchronized(stateLock) {
             storedState = SimklStoredAuthState()
@@ -117,7 +120,7 @@ object SimklAuthRepository : TrackingAuthProvider {
         }
 
         val material = generateSimklPkceMaterial()
-        SimklAuthStorage.saveCodeVerifier(material.verifier)
+        SimklAuthStorage.saveCodeVerifier(currentProfileId, material.verifier)
         synchronized(stateLock) {
             storedState = storedState.copy(
                 pendingAuthorizationState = material.state,
@@ -150,7 +153,7 @@ object SimklAuthRepository : TrackingAuthProvider {
             return verificationUrl
         }
         val state = storedState.pendingAuthorizationState?.takeIf(String::isNotBlank) ?: return null
-        val verifier = SimklAuthStorage.loadCodeVerifier()?.takeIf(String::isNotBlank) ?: run {
+        val verifier = SimklAuthStorage.loadCodeVerifier(currentProfileId)?.takeIf(String::isNotBlank) ?: run {
             clearPendingAuthorization()
             persistMetadata()
             publish(error = SimklAuthError.AUTHORIZATION_EXPIRED)
@@ -210,7 +213,7 @@ object SimklAuthRepository : TrackingAuthProvider {
             accessToken = null
             storedState = SimklStoredAuthState()
         }
-        SimklAuthStorage.saveAccessToken(null)
+        SimklAuthStorage.saveAccessToken(currentProfileId, null)
         clearPendingAuthorization()
         persistMetadata()
         SimklSyncRepository.clearLocalState()
@@ -309,7 +312,7 @@ object SimklAuthRepository : TrackingAuthProvider {
             return
         }
 
-        SimklAuthStorage.saveCodeVerifier(null)
+        SimklAuthStorage.saveCodeVerifier(currentProfileId, null)
         synchronized(stateLock) {
             storedState = storedState.copy(
                 pendingAuthorizationState = null,
@@ -422,7 +425,7 @@ object SimklAuthRepository : TrackingAuthProvider {
             clearPendingAuthorizationLocked()
             storedState = storedState.copy(tokenExpiresAtEpochMs = null)
         }
-        SimklAuthStorage.saveAccessToken(token)
+        SimklAuthStorage.saveAccessToken(currentProfileId, token)
         persistMetadata()
         publish(isLoading = false, error = null)
         fetchAndStoreUserSettings()
@@ -451,7 +454,7 @@ object SimklAuthRepository : TrackingAuthProvider {
         authorizationMutex.withLock {
             publish(isLoading = true, error = null)
             val expectedState = storedState.pendingAuthorizationState
-            val verifier = SimklAuthStorage.loadCodeVerifier()
+            val verifier = SimklAuthStorage.loadCodeVerifier(currentProfileId)
             val isExpired = isSimklAuthorizationExpired(
                 startedAtEpochMs = storedState.pendingAuthorizationStartedAtEpochMs,
                 nowEpochMs = SimklPlatformClock.nowEpochMs(),
@@ -513,7 +516,7 @@ object SimklAuthRepository : TrackingAuthProvider {
                         ?.let { seconds -> SimklPlatformClock.nowEpochMs() + seconds * 1_000L },
                 )
             }
-            SimklAuthStorage.saveAccessToken(token.accessToken)
+            SimklAuthStorage.saveAccessToken(currentProfileId, token.accessToken)
             persistMetadata()
             publish(isLoading = false, error = null)
             fetchAndStoreUserSettings()
@@ -555,9 +558,10 @@ object SimklAuthRepository : TrackingAuthProvider {
     private fun loadFromDisk() {
         pinPollingJob?.cancel()
         profileGeneration += 1L
+        currentProfileId = ProfileRepository.activeProfileId
         hasLoaded = true
         synchronized(stateLock) {
-            storedState = SimklAuthStorage.loadMetadataPayload()
+            storedState = SimklAuthStorage.loadMetadataPayload(currentProfileId)
                 ?.trim()
                 ?.takeIf(String::isNotEmpty)
                 ?.let { payload ->
@@ -566,13 +570,13 @@ object SimklAuthRepository : TrackingAuthProvider {
                         .getOrNull()
                 }
                 ?: SimklStoredAuthState()
-            accessToken = SimklAuthStorage.loadAccessToken()?.takeIf(String::isNotBlank)
+            accessToken = SimklAuthStorage.loadAccessToken(currentProfileId)?.takeIf(String::isNotBlank)
             if (accessToken != null && storedState.tokenExpiresAtEpochMs?.let { expiresAt ->
                     SimklPlatformClock.nowEpochMs() >= expiresAt - TOKEN_EXPIRY_SKEW_MS
                 } == true
             ) {
                 accessToken = null
-                SimklAuthStorage.saveAccessToken(null)
+                SimklAuthStorage.saveAccessToken(currentProfileId, null)
                 storedState = SimklStoredAuthState()
                 persistMetadata()
             }
@@ -609,14 +613,14 @@ object SimklAuthRepository : TrackingAuthProvider {
             clearPendingAuthorizationLocked()
             storedState = SimklStoredAuthState()
         }
-        SimklAuthStorage.saveAccessToken(null)
+        SimklAuthStorage.saveAccessToken(currentProfileId, null)
         persistMetadata()
         SimklSyncRepository.clearLocalState()
         publish(isLoading = false, error = error)
     }
 
     private fun clearPendingAuthorization() {
-        SimklAuthStorage.saveCodeVerifier(null)
+        SimklAuthStorage.saveCodeVerifier(currentProfileId, null)
         synchronized(stateLock) {
             clearPendingAuthorizationLocked()
         }
@@ -634,7 +638,7 @@ object SimklAuthRepository : TrackingAuthProvider {
     }
 
     private fun persistMetadata() {
-        SimklAuthStorage.saveMetadataPayload(json.encodeToString(storedState))
+        SimklAuthStorage.saveMetadataPayload(currentProfileId, json.encodeToString(storedState))
     }
 
     private fun publish(

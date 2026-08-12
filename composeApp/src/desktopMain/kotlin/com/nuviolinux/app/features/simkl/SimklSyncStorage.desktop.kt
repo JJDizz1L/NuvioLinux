@@ -7,11 +7,11 @@ internal actual object SimklSyncStorage {
     private const val payloadKey = "simkl_sync_snapshot"
     private val store = DesktopStorage.store("nuvio_simkl_sync")
 
-    actual fun loadPayload(): String? =
-        store.getString(ProfileScopedKey.of(payloadKey))
+    actual fun loadPayload(profileId: Int): String? =
+        store.getString(ProfileScopedKey.of(payloadKey, profileId))
 
-    actual fun savePayload(payload: String) {
-        store.putString(ProfileScopedKey.of(payloadKey), payload)
+    actual fun savePayload(profileId: Int, payload: String) {
+        store.putString(ProfileScopedKey.of(payloadKey, profileId), payload)
     }
 
     actual fun removeProfile(profileId: Int) {

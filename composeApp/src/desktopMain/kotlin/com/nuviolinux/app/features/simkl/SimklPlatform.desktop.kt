@@ -25,25 +25,25 @@ internal actual object SimklAuthStorage {
     private const val codeVerifierKey = "simkl_code_verifier"
     private val store = DesktopStorage.store("nuvio_simkl_auth")
 
-    actual fun loadMetadataPayload(): String? =
-        store.getString(ProfileScopedKey.of(metadataKey))
+    actual fun loadMetadataPayload(profileId: Int): String? =
+        store.getString(ProfileScopedKey.of(metadataKey, profileId))
 
-    actual fun saveMetadataPayload(payload: String) {
-        store.putString(ProfileScopedKey.of(metadataKey), payload)
+    actual fun saveMetadataPayload(profileId: Int, payload: String) {
+        store.putString(ProfileScopedKey.of(metadataKey, profileId), payload)
     }
 
-    actual fun loadAccessToken(): String? =
-        store.getString(ProfileScopedKey.of(accessTokenKey))
+    actual fun loadAccessToken(profileId: Int): String? =
+        store.getString(ProfileScopedKey.of(accessTokenKey, profileId))
 
-    actual fun saveAccessToken(value: String?) {
-        store.putString(ProfileScopedKey.of(accessTokenKey), value)
+    actual fun saveAccessToken(profileId: Int, value: String?) {
+        store.putString(ProfileScopedKey.of(accessTokenKey, profileId), value)
     }
 
-    actual fun loadCodeVerifier(): String? =
-        store.getString(ProfileScopedKey.of(codeVerifierKey))
+    actual fun loadCodeVerifier(profileId: Int): String? =
+        store.getString(ProfileScopedKey.of(codeVerifierKey, profileId))
 
-    actual fun saveCodeVerifier(value: String?) {
-        store.putString(ProfileScopedKey.of(codeVerifierKey), value)
+    actual fun saveCodeVerifier(profileId: Int, value: String?) {
+        store.putString(ProfileScopedKey.of(codeVerifierKey, profileId), value)
     }
 
     actual fun removeProfile(profileId: Int) {
