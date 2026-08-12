@@ -84,6 +84,6 @@ internal fun JsonObject.decodeSyncStringSet(key: String): Set<String>? =
         ?.takeIf { it[TYPE_KEY]?.jsonPrimitive?.contentOrNull == TYPE_STRING_SET }
         ?.get(VALUE_KEY)
         ?.jsonArray
-        ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
+        ?.mapNotNull { element -> (element as? JsonPrimitive)?.contentOrNull?.trim() }
         ?.filter(String::isNotBlank)
         ?.toSet()
