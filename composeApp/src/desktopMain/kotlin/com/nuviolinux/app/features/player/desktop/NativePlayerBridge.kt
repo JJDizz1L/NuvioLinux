@@ -3,11 +3,9 @@ package com.nuviolinux.app.features.player.desktop
 import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.storage.DesktopCache
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal object NativePlayerBridge {
     private val log = Logger.withTag("NativePlayerBridge")
-    private val preloadStarted = AtomicBoolean(false)
 
     init {
         loadNativeLibrary()
@@ -19,7 +17,6 @@ internal object NativePlayerBridge {
         headerLines: Array<String>,
         playWhenReady: Boolean,
         initialPositionMs: Long,
-        controlsPageUrl: String,
         decoderPriority: Int,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
@@ -67,20 +64,6 @@ internal object NativePlayerBridge {
     /** Enables the JDK's non-reparenting-WM code path via setenv(3). Must run
      *  before the first AWT/X11 toolkit access (see AwtNonReparentingSupport). */
     external fun setAwtNonReparenting()
-
-    val controlsPageUrl: String by lazy { controlsPageAssets.url }
-    private val controlsPageAssets: ControlsPageAssets by lazy { exportControlsPageAssets() }
-
-    fun preloadAsync() {
-        if (!preloadStarted.compareAndSet(false, true)) return
-        Thread {
-            runCatching { controlsPageAssets }
-        }.apply {
-            name = "nuvio-native-player-preload"
-            isDaemon = true
-            start()
-        }
-    }
 
     private fun loadNativeLibrary() {
         val platform = DesktopHostOs.current
@@ -158,70 +141,9 @@ internal object NativePlayerBridge {
         }
     }
 
-    private fun exportControlsPageAssets(): ControlsPageAssets {
-        val files = linkedMapOf(
-            "controls.html" to readResourceBytes("/player-ui/controls.html"),
-            "controls.css" to readTextResource("/player-ui/controls.css")
-                .replace("/* __NUVIO_PLAYER_FONT_FACES__ */", nativePlayerFontFaces())
-                .toByteArray(Charsets.UTF_8),
-            "controls.js" to readResourceBytes("/player-ui/controls.js"),
-            "fonts/jetbrains_sans_regular.ttf" to readResourceBytes(
-                "/composeResources/nuviolinux.composeapp.generated.resources/font/jetbrains_sans_regular.ttf",
-            ),
-            "fonts/jetbrains_sans_semibold.ttf" to readResourceBytes(
-                "/composeResources/nuviolinux.composeapp.generated.resources/font/jetbrains_sans_semibold.ttf",
-            ),
-            "fonts/jetbrains_sans_bold.ttf" to readResourceBytes(
-                "/composeResources/nuviolinux.composeapp.generated.resources/font/jetbrains_sans_bold.ttf",
-            ),
-        )
-        val root = DesktopCache.installVersionedFiles("player-ui", files).toFile()
-        return ControlsPageAssets(
-            url = root.resolve("controls.html").toURI().toASCIIString(),
-        )
-    }
-
-    private fun nativePlayerFontFaces(): String =
-        """
-            @font-face {
-              font-family: "Nuvio Linux JetBrains Sans";
-              src: url("fonts/jetbrains_sans_regular.ttf") format("truetype");
-              font-weight: 400;
-              font-style: normal;
-              font-display: block;
-            }
-            @font-face {
-              font-family: "Nuvio Linux JetBrains Sans";
-              src: url("fonts/jetbrains_sans_semibold.ttf") format("truetype");
-              font-weight: 600;
-              font-style: normal;
-              font-display: block;
-            }
-            @font-face {
-              font-family: "Nuvio Linux JetBrains Sans";
-              src: url("fonts/jetbrains_sans_bold.ttf") format("truetype");
-              font-weight: 700 900;
-              font-style: normal;
-              font-display: block;
-            }
-        """.trimIndent()
-
-    private fun readTextResource(resource: String): String =
-        readResourceBytes(resource).toString(Charsets.UTF_8)
-
     private fun readResourceBytes(resource: String): ByteArray =
         resourceBytesOrNull(resource) ?: error("Missing native player resource: $resource")
 
     private fun resourceBytesOrNull(resource: String): ByteArray? =
         NativePlayerBridge::class.java.getResourceAsStream(resource)?.use { it.readBytes() }
-
-    private data class ControlsPageAssets(
-        val url: String,
-    )
-}
-
-internal fun preloadNativePlayerBridgeAsync() {
-    runCatching {
-        NativePlayerBridge.preloadAsync()
-    }
 }

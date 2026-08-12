@@ -1339,7 +1339,6 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     jobjectArray headerLines,
     jboolean playWhenReady,
     jlong initialPositionMs,
-    jstring controlsPageUrl,
     jint decoderPriority,
     jlong streamCacheBytes,
     jboolean streamCacheOnDisk)

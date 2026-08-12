@@ -29,7 +29,6 @@ import com.nuviolinux.app.features.player.desktop.DesktopAppFullscreenController
 import com.nuviolinux.app.features.player.desktop.DesktopWindowGeometry
 import com.nuviolinux.app.features.player.desktop.DesktopWindowModeStorage
 import com.nuviolinux.app.features.player.desktop.installDesktopAppFullscreenShortcuts
-import com.nuviolinux.app.features.player.desktop.preloadNativePlayerBridgeAsync
 import com.nuviolinux.app.features.player.desktop.registerDesktopAppFullscreenToggle
 import java.awt.Desktop
 import java.awt.Color as AwtColor
@@ -50,7 +49,6 @@ fun main(args: Array<String>) {
     Logger.withTag("WindowEnvironment").i { "display server: ${DisplayServerDetector.detect()}" }
     installDesktopOpenUriHandler()
     handleDesktopLaunchArgs(args)
-    preloadNativePlayerBridgeAsync()
 
     application {
         val smokePlayerUrl = (
