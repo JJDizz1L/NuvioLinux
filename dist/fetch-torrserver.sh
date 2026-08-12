@@ -17,6 +17,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TAG="MatriX.142.2"
 SRC_URL="https://github.com/YouROK/TorrServer/archive/refs/tags/${TAG}.tar.gz"
+# Pinned upstream source: sha256 of the ${TAG} tag tarball.
+SRC_SHA256="83ad3df139c7ceedaabb4997bfa2625d5c4b5919171812e9b259be9116d2b155"
 OUTPUT="${ROOT_DIR}/composeApp/src/desktopMain/resources/torrserver/linux-amd64/TorrServer"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/nuvio-torrserver.XXXXXX")"
@@ -24,9 +26,11 @@ trap 'rm -rf "${TMP}"' EXIT
 
 command -v go >/dev/null || { echo "error: go is required (>= 1.25)" >&2; exit 1; }
 command -v yarn >/dev/null || { echo "error: yarn is required for the embedded web UI" >&2; exit 1; }
+command -v node >/dev/null || { echo "error: node is required for the embedded web UI" >&2; exit 1; }
 
 echo "[nuvio-torrserver] downloading source ${TAG}..."
-curl -sL -o "${TMP}/src.tar.gz" "${SRC_URL}"
+curl -fsSL -o "${TMP}/src.tar.gz" "${SRC_URL}"
+echo "${SRC_SHA256}  ${TMP}/src.tar.gz" | sha256sum -c - >/dev/null
 tar xzf "${TMP}/src.tar.gz" -C "${TMP}"
 SRC="${TMP}/TorrServer-${TAG}"
 
