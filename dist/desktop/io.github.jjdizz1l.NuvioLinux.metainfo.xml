@@ -20,6 +20,7 @@
     <binary>nuvio-linux</binary>
   </provides>
   <releases>
+    <release version="0.1.17-alpha" date="2026-08-07"/>
     <release version="0.1.15-alpha" date="2026-08-01"/>
   </releases>
 </component>
