@@ -16,6 +16,7 @@ import com.nuviolinux.app.features.tmdb.TmdbSettings
 import com.nuviolinux.app.features.tmdb.TmdbSettingsRepository
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
+import kotlin.concurrent.Volatile
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
@@ -51,6 +52,7 @@ object ProviderCredentialSync {
     private val baselineSnapshots = mutableMapOf<ProviderCredentialScope, ProviderCredentialSnapshot>()
     private val pendingScopes = mutableSetOf<ProviderCredentialScope>()
     private var observeJob: Job? = null
+    @Volatile
     private var isApplyingRemote = false
 
     @OptIn(FlowPreview::class)
