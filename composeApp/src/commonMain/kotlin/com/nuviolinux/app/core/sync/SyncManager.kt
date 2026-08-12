@@ -399,61 +399,70 @@ object SyncManager {
 
     fun startPeriodicNuvioSyncPull(profileId: Int) {
         val authState = AuthRepository.state.value
-        if (authState !is AuthState.Authenticated || authState.isAnonymous) {
-            stopPeriodicNuvioSyncPull()
-            return
-        }
-        if (periodicNuvioSyncPullJob?.isActive == true && periodicNuvioSyncProfileId == profileId) return
+        val scope = accountScopeSnapshot()
+        synchronized(pullStateLock) {
+            if (authState !is AuthState.Authenticated || authState.isAnonymous) {
+                stopPeriodicNuvioSyncPullLocked()
+                return
+            }
+            if (periodicNuvioSyncPullJob?.isActive == true && periodicNuvioSyncProfileId == profileId) return
 
-        stopPeriodicNuvioSyncPull()
-        periodicNuvioSyncProfileId = profileId
-        periodicNuvioSyncPullJob = accountScopeSnapshot().launch {
-            while (isActive) {
-                delay(PERIODIC_NUVIO_SYNC_PULL_INTERVAL_MS)
+            stopPeriodicNuvioSyncPullLocked()
+            periodicNuvioSyncProfileId = profileId
+            periodicNuvioSyncPullJob = scope.launch {
+                while (isActive) {
+                    delay(PERIODIC_NUVIO_SYNC_PULL_INTERVAL_MS)
 
-                val currentAuthState = AuthRepository.state.value
-                if (currentAuthState !is AuthState.Authenticated || currentAuthState.isAnonymous) {
-                    continue
-                }
-                if (ProfileRepository.activeProfileId != profileId) {
-                    continue
-                }
+                    val currentAuthState = AuthRepository.state.value
+                    if (currentAuthState !is AuthState.Authenticated || currentAuthState.isAnonymous) {
+                        continue
+                    }
+                    if (ProfileRepository.activeProfileId != profileId) {
+                        continue
+                    }
 
-                TrackingProviderRegistry.ensureLoaded()
-                TrackingSettingsRepository.ensureLoaded()
+                    TrackingProviderRegistry.ensureLoaded()
+                    TrackingSettingsRepository.ensureLoaded()
 
-                val settings = TrackingSettingsRepository.uiState.value
-                val shouldPullLibrary = effectiveLibrarySourceMode(
-                    requestedSource = settings.librarySourceMode,
-                    isProviderAuthenticated = TrackingProviderRegistry::isAuthenticated,
-                ) == LibrarySourceMode.LOCAL
-                val shouldPullWatchProgress = effectiveWatchProgressSource(
-                    requestedSource = settings.watchProgressSource,
-                    isProviderAuthenticated = TrackingProviderRegistry::isAuthenticated,
-                ) == WatchProgressSource.NUVIO_SYNC
+                    val settings = TrackingSettingsRepository.uiState.value
+                    val shouldPullLibrary = effectiveLibrarySourceMode(
+                        requestedSource = settings.librarySourceMode,
+                        isProviderAuthenticated = TrackingProviderRegistry::isAuthenticated,
+                    ) == LibrarySourceMode.LOCAL
+                    val shouldPullWatchProgress = effectiveWatchProgressSource(
+                        requestedSource = settings.watchProgressSource,
+                        isProviderAuthenticated = TrackingProviderRegistry::isAuthenticated,
+                    ) == WatchProgressSource.NUVIO_SYNC
 
-                if (!shouldPullLibrary && !shouldPullWatchProgress) {
-                    continue
-                }
+                    if (!shouldPullLibrary && !shouldPullWatchProgress) {
+                        continue
+                    }
 
-                log.i {
-                    "Periodic Nuvio sync pull profile=$profileId " +
-                        "library=$shouldPullLibrary watchProgress=$shouldPullWatchProgress"
-                }
-                if (shouldPullLibrary) {
-                    runCatching { LibraryRepository.pullFromServer(profileId) }
-                        .onFailure { log.e(it) { "Periodic Nuvio library pull failed" } }
-                }
-                if (shouldPullWatchProgress) {
-                    runCatching {
-                        WatchProgressSourceCoordinator.refreshActiveSource(profileId = profileId, force = false)
-                    }.onFailure { log.e(it) { "Periodic Nuvio watch source pull failed" } }
+                    log.i {
+                        "Periodic Nuvio sync pull profile=$profileId " +
+                            "library=$shouldPullLibrary watchProgress=$shouldPullWatchProgress"
+                    }
+                    if (shouldPullLibrary) {
+                        runCatching { LibraryRepository.pullFromServer(profileId) }
+                            .onFailure { log.e(it) { "Periodic Nuvio library pull failed" } }
+                    }
+                    if (shouldPullWatchProgress) {
+                        runCatching {
+                            WatchProgressSourceCoordinator.refreshActiveSource(profileId = profileId, force = false)
+                        }.onFailure { log.e(it) { "Periodic Nuvio watch source pull failed" } }
+                    }
                 }
             }
         }
     }
 
     fun stopPeriodicNuvioSyncPull() {
+        synchronized(pullStateLock) {
+            stopPeriodicNuvioSyncPullLocked()
+        }
+    }
+
+    private fun stopPeriodicNuvioSyncPullLocked() {
         periodicNuvioSyncPullJob?.cancel()
         periodicNuvioSyncPullJob = null
         periodicNuvioSyncProfileId = null
