@@ -4,6 +4,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermission
 import java.util.Comparator
 import java.util.Locale
 import java.util.Properties
@@ -14,12 +16,29 @@ internal object DesktopStorage {
     private val stores = mutableMapOf<String, Store>()
     private val stateStores = mutableMapOf<String, Store>()
 
+    private val privateFilePermissions: Set<PosixFilePermission> = setOf(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE,
+    )
+
+    private val privateDirectoryPermissions: Set<PosixFilePermission> = setOf(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE,
+        PosixFilePermission.OWNER_EXECUTE,
+    )
+
     val rootDir: Path by lazy {
-        AppPaths.configDir.also { Files.createDirectories(it) }
+        AppPaths.configDir.also { path ->
+            Files.createDirectories(path)
+            applyPrivateDirectoryPermissions(path)
+        }
     }
 
     val stateDir: Path by lazy {
-        AppPaths.stateDir.also { Files.createDirectories(it) }
+        AppPaths.stateDir.also { path ->
+            Files.createDirectories(path)
+            applyPrivateDirectoryPermissions(path)
+        }
     }
 
     val cacheDir: Path by lazy {
@@ -141,9 +160,35 @@ internal object DesktopStorage {
 
         private fun persist() {
             Files.createDirectories(file.parent)
-            Files.newOutputStream(file).use { output ->
-                properties.store(output, "Nuvio Linux desktop preferences")
+            applyPrivateDirectoryPermissions(file.parent)
+            val pending = Files.createTempFile(file.parent, file.fileName.toString(), ".part")
+            try {
+                applyPrivateFilePermissions(pending)
+                Files.newOutputStream(pending).use { output ->
+                    properties.store(output, "Nuvio Linux desktop preferences")
+                }
+                runCatching {
+                    Files.move(
+                        pending,
+                        file,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }.getOrElse {
+                    Files.move(pending, file, StandardCopyOption.REPLACE_EXISTING)
+                }
+                applyPrivateFilePermissions(file)
+            } finally {
+                Files.deleteIfExists(pending)
             }
         }
+    }
+
+    private fun applyPrivateFilePermissions(path: Path) {
+        runCatching { Files.setPosixFilePermissions(path, privateFilePermissions) }
+    }
+
+    private fun applyPrivateDirectoryPermissions(path: Path) {
+        runCatching { Files.setPosixFilePermissions(path, privateDirectoryPermissions) }
     }
 }
