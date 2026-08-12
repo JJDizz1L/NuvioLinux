@@ -329,6 +329,18 @@ jobs:
     name: Linux Flatpak
     if: inputs.mode != 'dry-run'
     needs: metadata
+    # SECURITY NOTE (accepted risk, documented): this job runs on a self-hosted
+    # runner because the ffmpeg/libplacebo/libmpv source builds time out on
+    # 2-core GitHub-hosted runners. Self-hosted runners are not ephemeral and
+    # their operator controls the machine, and the job decodes
+    # NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 (which contains TRAKT_CLIENT_SECRET,
+    # NUVIO_SUPABASE_ANON_KEY, SIMKL_CLIENT_ID, ...) into local.properties to
+    # compile the same binary every other job builds. Treat the runner host as
+    # a privileged trust boundary: only run flatpak jobs from repository
+    # collaborators, and audit the runner image regularly. (These values are
+    # client-side OAuth/anon credentials and end up extractable from every
+    # shipped binary anyway; the exposure being limited is the self-hosted
+    # machine itself, not the artifacts.)
     runs-on: [self-hosted, linux, x64]
     environment: desktop-release
     env:
