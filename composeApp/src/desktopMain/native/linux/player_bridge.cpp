@@ -780,8 +780,6 @@ static int openDrmRenderNode() {
 
 struct MpvPlayer {
     mpv_handle   *mpv;
-    JavaVM       *jvm;
-    jobject       eventSink;
     std::thread   eventThread;
     std::atomic<bool>  running;
     std::mutex    mutex;
@@ -835,7 +833,7 @@ struct MpvPlayer {
      * loaded, silently starting playback from 0. */
     std::atomic<int64_t> pendingInitialPositionMs;
 
-    MpvPlayer() : mpv(nullptr), jvm(nullptr), eventSink(nullptr), running(false),
+    MpvPlayer() : mpv(nullptr), running(false),
                   renderCtx(nullptr), framePending(false),
                   cachedDuration(0), cachedPosition(0), cachedBufferedPosition(0),
                   cachedPaused(1), cachedEnded(0), cachedPausedForCache(0),
@@ -889,13 +887,6 @@ struct MpvPlayer {
             std::lock_guard<std::mutex> lock(mutex);
             p_mpv_terminate_destroy(mpv);
             mpv = nullptr;
-        }
-        if (eventSink) {
-            JNIEnv *env = nullptr;
-            if (jvm && jvm->GetEnv((void**)&env, JNI_VERSION_1_6) == JNI_OK) {
-                env->DeleteGlobalRef(eventSink);
-            }
-            eventSink = nullptr;
         }
     }
 
@@ -1066,11 +1057,11 @@ struct MpvPlayer {
         return renderInitOk;
     }
 
-    int initialize(JNIEnv *env, int64_t windowId, const char *sourceUrl,
+    int initialize(int64_t windowId, const char *sourceUrl,
                    const char * const *headers, int numHeaders,
                    int playWhenReady, int64_t initialPositionMs,
                    int decoderPriority, int64_t streamCacheBytes,
-                   bool streamCacheOnDisk, jobject sink)
+                   bool streamCacheOnDisk)
     {
         LOG("initialize: url=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
             sourceUrl, numHeaders, playWhenReady,
@@ -1090,11 +1081,6 @@ struct MpvPlayer {
             return -1;
         }
         DBG("mpv_create OK");
-
-        /* Store JVM and event sink */
-        env->GetJavaVM(&jvm);
-        eventSink = env->NewGlobalRef(sink);
-        DBG("JVM/eventSink stored");
 
         /* Configure mpv. If the user has an mpv.conf, load it wholesale —
          * mpv itself ignores whatever it cannot use with the render API
@@ -1227,18 +1213,6 @@ struct MpvPlayer {
     }
 
     void eventLoop() {
-        JNIEnv *env = nullptr;
-        jint attachResult = jvm->AttachCurrentThread((void**)&env, nullptr);
-        if (attachResult != JNI_OK) {
-            LOG("Failed to attach event thread to JVM");
-            return;
-        }
-
-        jclass sinkClass = (jclass)env->NewGlobalRef(
-            env->FindClass("com/nuviolinux/app/features/player/desktop/NativePlayerEventSink"));
-        jmethodID onEventMethod = env->GetMethodID(
-            sinkClass, "onPlayerEvent", "(Ljava/lang/String;D)V");
-
         while (running) {
             drainCommands();
 
@@ -1332,22 +1306,12 @@ struct MpvPlayer {
                 }
             }
         }
-
-        env->DeleteGlobalRef(sinkClass);
-        jvm->DetachCurrentThread();
     }
 };
 
 /* ------------------------------------------------------------------ */
 /*  JNI Helpers                                                        */
 /* ------------------------------------------------------------------ */
-
-static JavaVM *gGlobalJvm = nullptr;
-
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
-    gGlobalJvm = vm;
-    return JNI_VERSION_1_6;
-}
 
 static MpvPlayer* get_player(jlong handle) {
     return reinterpret_cast<MpvPlayer*>(static_cast<uintptr_t>(handle));
@@ -1378,8 +1342,7 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     jstring controlsPageUrl,
     jint decoderPriority,
     jlong streamCacheBytes,
-    jboolean streamCacheOnDisk,
-    jobject eventSink)
+    jboolean streamCacheOnDisk)
 {
     LOG("create: hostViewPtr=0x%llx", (unsigned long long)hostViewPtr);
 
@@ -1408,14 +1371,13 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
 
     MpvPlayer *player = new MpvPlayer();
     LOG("create: calling player->initialize...");
-    int ret = player->initialize(env, static_cast<int64_t>(hostViewPtr),
+    int ret = player->initialize(static_cast<int64_t>(hostViewPtr),
                                   urlChars,
                                   headers.data(), (int)headers.size(),
                                   playWhenReady, static_cast<int64_t>(initialPositionMs),
                                   decoderPriority,
                                   static_cast<int64_t>(streamCacheBytes),
-                                  streamCacheOnDisk ? true : false,
-                                  eventSink);
+                                  streamCacheOnDisk ? true : false);
     LOG("create: player->initialize returned %d", ret);
 
     env->ReleaseStringUTFChars(sourceUrl, urlChars);

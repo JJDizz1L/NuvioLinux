@@ -10,7 +10,6 @@ import com.nuviolinux.app.features.player.PlayerControlSourceItem
 import com.nuviolinux.app.features.player.PlayerControlSubtitleCueItem
 import com.nuviolinux.app.features.player.AudioTrack
 import com.nuviolinux.app.features.player.ParentalWarning
-import com.nuviolinux.app.features.player.PlayerControlsAction
 import com.nuviolinux.app.features.player.PlayerControlsState
 import com.nuviolinux.app.features.player.PlayerEngineController
 import com.nuviolinux.app.features.player.PlayerPlaybackSnapshot
@@ -25,7 +24,6 @@ import com.nuviolinux.app.features.player.toStorageHexString
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import javax.swing.SwingUtilities
 import kotlin.concurrent.Volatile
 
 internal class NativePlayerController(
@@ -54,15 +52,7 @@ internal class NativePlayerController(
     private var pendingSubtitleStyle: SubtitleStyleState? = null
     private var pendingUseLibass: Boolean = false
     private var lastSentControlsStructureKey: NativeControlsStructureKey? = null
-    private var onAction: (PlayerControlsAction) -> Boolean = { false }
     private var onEvent: (String, Double) -> Boolean = { _, _ -> false }
-    private var onScrubChange: (Long) -> Boolean = { false }
-    private var onScrubFinished: (Long) -> Boolean = { false }
-    private val eventSink = NativePlayerEventSink { type, value ->
-        SwingUtilities.invokeLater {
-            handlePlayerEvent(type, value)
-        }
-    }
 
     fun attach(
         sourceUrl: String,
@@ -140,7 +130,6 @@ internal class NativePlayerController(
                     decoderPriority = pending.decoderPriority,
                     streamCacheBytes = pending.streamCacheBytes,
                     streamCacheOnDisk = pending.streamCacheOnDisk,
-                    eventSink = eventSink,
                 ).also { handle ->
                     log.d { "createPlayer — NativePlayerBridge.create returned handle=0x${handle.toString(16)}" }
                     if (handle == 0L) error("Native player did not return a handle.")
@@ -171,15 +160,9 @@ internal class NativePlayerController(
     }
 
     fun setControlCallbacks(
-        onAction: (PlayerControlsAction) -> Boolean,
         onEvent: (String, Double) -> Boolean,
-        onScrubChange: (Long) -> Boolean,
-        onScrubFinished: (Long) -> Boolean,
     ) {
-        this.onAction = onAction
         this.onEvent = onEvent
-        this.onScrubChange = onScrubChange
-        this.onScrubFinished = onScrubFinished
         log.d { "control callbacks attached handle=$handle" }
         host.onCursorActivity = {
             this.onEvent("cursorActivity", 0.0)
@@ -240,89 +223,6 @@ internal class NativePlayerController(
         }
     }
 
-    private fun handlePlayerEvent(type: String, value: Double) {
-        if (type.shouldLogNativeControlEvent()) {
-            log.d { "event received handle=$handle type=$type value=$value" }
-        }
-        when (type) {
-            "cursorActivity" -> host.noteCursorActivity()
-            "scrubChange" -> {
-                val handled = onScrubChange(value.toLong())
-                log.d { "scrubChange positionMs=${value.toLong()} handled=$handled handle=$handle" }
-                if (!handled) {
-                    updateLocalProgress(value.toLong())
-                }
-            }
-            "scrubFinish" -> {
-                val scrubHandled = onScrubFinished(value.toLong())
-                log.d { "scrubFinish positionMs=${value.toLong()} handled=$scrubHandled handle=$handle" }
-                if (!scrubHandled) {
-                    seekTo(value.toLong())
-                }
-            }
-            "toggleFullscreen" -> {
-                toggleDesktopAppFullscreen(host.windowAncestor())
-                onDesktopFullscreenChanged()
-            }
-            "volumeChange" -> setFallbackVolume(value.toFloat())
-            else -> {
-                val eventHandled = onEvent(type, value)
-                if (type.shouldLogNativeControlEvent()) {
-                    log.d { "event delegated type=$type handled=$eventHandled handle=$handle" }
-                }
-                if (eventHandled) return
-                val action = type.toPlayerControlsAction()
-                if (action == null) return
-                val actionHandled = onAction(action)
-                log.d { "action delegated action=$action handled=$actionHandled handle=$handle" }
-                if (!actionHandled) {
-                    handleFallbackAction(action)
-                }
-            }
-        }
-    }
-
-    private fun updateLocalProgress(positionMs: Long) {
-        controlsState = controlsState.copy(positionMs = positionMs)
-        updateControls(controlsState)
-    }
-
-    private fun handleFallbackAction(action: PlayerControlsAction) {
-        log.d { "fallback action=$action handle=$handle" }
-        when (action) {
-            PlayerControlsAction.TogglePlayback,
-            PlayerControlsAction.KeyboardTogglePlayback -> {
-                val current = handle
-                if (current == 0L) return
-                val isEnded = NativePlayerBridge.isEnded(current)
-                val isPaused = NativePlayerBridge.isPaused(current)
-                if (isEnded) {
-                    NativePlayerBridge.seekTo(current, 0L)
-                    NativePlayerBridge.setPaused(current, false)
-                } else {
-                    NativePlayerBridge.setPaused(current, !isPaused)
-                }
-            }
-            PlayerControlsAction.SeekBack,
-            PlayerControlsAction.KeyboardSeekBack -> fallbackSeekBy(-10_000L)
-            PlayerControlsAction.SeekForward,
-            PlayerControlsAction.KeyboardSeekForward -> fallbackSeekBy(10_000L)
-            PlayerControlsAction.KeyboardVolumeDown -> adjustFallbackVolume(-5f)
-            PlayerControlsAction.KeyboardVolumeUp -> adjustFallbackVolume(5f)
-            PlayerControlsAction.Speed -> cycleFallbackSpeed()
-            else -> Unit
-        }
-    }
-
-    private fun adjustFallbackVolume(delta: Float) {
-        val current = handle
-        if (current != 0L) {
-            val currentLevel = controlsState.volumeLevel ?: NativePlayerBridge.volume(current).coerceIn(0f, 1f)
-            val nextLevel = (currentLevel + (delta / 100f)).coerceIn(0f, 1f)
-            setFallbackVolume(nextLevel)
-        }
-    }
-
     private fun setFallbackVolume(level: Float) {
         val current = handle
         if (current != 0L) {
@@ -341,22 +241,6 @@ internal class NativePlayerController(
         NativePlayerBridge.setVolume(current, level)
         controlsState = controlsState.copy(volumeLevel = level)
         log.d { "applied remembered volume level=$level handle=$current" }
-    }
-
-    private fun fallbackSeekBy(offsetMs: Long) {
-        val current = handle
-        if (current != 0L) {
-            NativePlayerBridge.seekBy(current, offsetMs)
-        }
-    }
-
-    private fun cycleFallbackSpeed() {
-        val current = handle
-        if (current == 0L) return
-        val speeds = listOf(1f, 1.25f, 1.5f, 2f)
-        val currentSpeed = NativePlayerBridge.speed(current)
-        val next = speeds.firstOrNull { it > currentSpeed + 0.01f } ?: speeds.first()
-        NativePlayerBridge.setSpeed(current, next)
     }
 
     fun snapshot(): PlayerPlaybackSnapshot {
@@ -601,18 +485,6 @@ private fun String.toPlaybackLogKey(): String {
     return "scheme=$scheme length=$length hash=${hashCode()}"
 }
 
-private fun String.shouldLogNativeControlEvent(): Boolean {
-    val normalized = lowercase()
-    return normalized.contains("audio") ||
-        normalized.contains("subtitle") ||
-        normalized.contains("speed") ||
-        normalized.contains("scrub") ||
-        normalized.contains("seek") ||
-        normalized.contains("episode") ||
-        normalized == "resize" ||
-        normalized == "toggle"
-}
-
 @Serializable
 private data class NativeMpvTrack(
     val index: Int = 0,
@@ -689,32 +561,6 @@ private fun List<String>.toHeaderMap(): Map<String, String> =
         if (separator <= 0) return@mapNotNull null
         line.substring(0, separator).trim() to line.substring(separator + 1).trim()
     }.toMap()
-
-private fun String.toPlayerControlsAction(): PlayerControlsAction? =
-    when (this) {
-        "toggleChrome" -> PlayerControlsAction.ToggleChrome
-        "revealLockedOverlay" -> PlayerControlsAction.RevealLockedOverlay
-        "back" -> PlayerControlsAction.Back
-        "toggle" -> PlayerControlsAction.TogglePlayback
-        "keyboardToggle" -> PlayerControlsAction.KeyboardTogglePlayback
-        "seekBack" -> PlayerControlsAction.SeekBack
-        "keyboardSeekBack" -> PlayerControlsAction.KeyboardSeekBack
-        "seekForward" -> PlayerControlsAction.SeekForward
-        "keyboardSeekForward" -> PlayerControlsAction.KeyboardSeekForward
-        "keyboardVolumeDown" -> PlayerControlsAction.KeyboardVolumeDown
-        "keyboardVolumeUp" -> PlayerControlsAction.KeyboardVolumeUp
-        "resize" -> PlayerControlsAction.ResizeMode
-        "speed" -> PlayerControlsAction.Speed
-        "subtitles" -> PlayerControlsAction.Subtitles
-        "audio" -> PlayerControlsAction.Audio
-        "sources" -> PlayerControlsAction.Sources
-        "episodes" -> PlayerControlsAction.Episodes
-        "external" -> PlayerControlsAction.OpenExternalPlayer
-        "submitIntro" -> PlayerControlsAction.SubmitIntro
-        "lock" -> PlayerControlsAction.LockToggle
-        "videoSettings" -> PlayerControlsAction.VideoSettings
-        else -> null
-    }
 
 private data class NativeControlsStructureKey(
     val state: PlayerControlsState,

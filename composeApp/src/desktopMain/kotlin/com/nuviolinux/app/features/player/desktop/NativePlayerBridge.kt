@@ -5,10 +5,6 @@ import com.nuviolinux.app.core.storage.DesktopCache
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal fun interface NativePlayerEventSink {
-    fun onPlayerEvent(type: String, value: Double)
-}
-
 internal object NativePlayerBridge {
     private val log = Logger.withTag("NativePlayerBridge")
     private val preloadStarted = AtomicBoolean(false)
@@ -27,7 +23,6 @@ internal object NativePlayerBridge {
         decoderPriority: Int,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
-        eventSink: NativePlayerEventSink,
     ): Long
 
     external fun dispose(handle: Long)

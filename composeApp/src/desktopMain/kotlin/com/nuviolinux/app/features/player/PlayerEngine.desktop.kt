@@ -76,10 +76,7 @@ actual fun PlatformPlayerSurface(
         initialPositionMs = initialPositionMs ?: 0L,
         initialPositionRequestKey = initialPositionRequestKey,
         playerControlsState = playerControlsState,
-        onPlayerControlsAction = onPlayerControlsAction,
         onPlayerControlsEvent = onPlayerControlsEvent,
-        onPlayerControlsScrubChange = onPlayerControlsScrubChange,
-        onPlayerControlsScrubFinished = onPlayerControlsScrubFinished,
         onInitialPositionHandled = onInitialPositionHandled,
         onControllerReady = onControllerReady,
         onSnapshot = onSnapshot,
@@ -97,10 +94,7 @@ private fun NativePlayerSurface(
     initialPositionMs: Long,
     initialPositionRequestKey: String?,
     playerControlsState: PlayerControlsState,
-    onPlayerControlsAction: (PlayerControlsAction) -> Boolean,
     onPlayerControlsEvent: (String, Double) -> Boolean,
-    onPlayerControlsScrubChange: (Long) -> Boolean,
-    onPlayerControlsScrubFinished: (Long) -> Boolean,
     onInitialPositionHandled: (key: String, handled: Boolean) -> Unit,
     onControllerReady: (PlayerEngineController) -> Unit,
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
@@ -111,10 +105,7 @@ private fun NativePlayerSurface(
     val controller = remember(host) { NativePlayerController(host) }
     val playbackHeaders = remember(sourceHeaders) { sanitizePlaybackHeaders(sourceHeaders) }
     log.d { "composed — sourceUrl=${sourceUrl.take(80)}" }
-    val latestOnPlayerControlsAction = rememberUpdatedState(onPlayerControlsAction)
     val latestOnPlayerControlsEvent = rememberUpdatedState(onPlayerControlsEvent)
-    val latestOnPlayerControlsScrubChange = rememberUpdatedState(onPlayerControlsScrubChange)
-    val latestOnPlayerControlsScrubFinished = rememberUpdatedState(onPlayerControlsScrubFinished)
     val latestOnInitialPositionHandled = rememberUpdatedState(onInitialPositionHandled)
     val latestOnError = rememberUpdatedState(onError)
     val playerSettings by PlayerSettingsRepository.uiState.collectAsState()
@@ -159,10 +150,7 @@ private fun NativePlayerSurface(
 
     LaunchedEffect(controller) {
         controller.setControlCallbacks(
-            onAction = { action -> latestOnPlayerControlsAction.value(action) },
             onEvent = { type, value -> latestOnPlayerControlsEvent.value(type, value) },
-            onScrubChange = { positionMs -> latestOnPlayerControlsScrubChange.value(positionMs) },
-            onScrubFinished = { positionMs -> latestOnPlayerControlsScrubFinished.value(positionMs) },
         )
     }
 
