@@ -1,6 +1,7 @@
 package com.nuviolinux.app.core.network
 
 import com.nuviolinux.app.core.build.AppVersionConfig
+import com.nuviolinux.app.platformSessionManager
 import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
@@ -46,7 +47,9 @@ object SupabaseProvider {
                     headers.append(HttpHeaders.UserAgent, userAgent)
                 }
             }
-            install(Auth)
+            install(Auth) {
+                sessionManager = platformSessionManager()
+            }
             install(Postgrest)
             install(Functions)
         }
