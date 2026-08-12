@@ -29,6 +29,11 @@ object SyncClientIdentity {
         return generated
     }
 
+    fun reset() {
+        cachedClientId = null
+        SyncClientIdentityStorage.clearClientId()
+    }
+
     private fun generateClientId(): String =
         CLIENT_ID_PREFIX + buildString(CLIENT_ID_LENGTH) {
             repeat(CLIENT_ID_LENGTH) {
@@ -47,4 +52,5 @@ internal fun JsonObjectBuilder.putSyncOriginClientId() {
 internal expect object SyncClientIdentityStorage {
     fun loadClientId(): String?
     fun saveClientId(clientId: String)
+    fun clearClientId()
 }

@@ -11,4 +11,8 @@ internal actual object SyncClientIdentityStorage {
     actual fun saveClientId(clientId: String) {
         store.putString("client_instance_id", clientId)
     }
+
+    actual fun clearClientId() {
+        store.remove("client_instance_id")
+    }
 }

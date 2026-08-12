@@ -62,7 +62,7 @@ internal object DesktopStorage {
             stateStores.values.forEach(Store::clearInMemory)
             stateStores.clear()
         }
-        listOf(rootDir, stateDir).filter { it.exists() }.forEach { root ->
+        listOf(rootDir, stateDir, cacheDir).filter { it.exists() }.forEach { root ->
             Files.walk(root).use { stream ->
                 stream
                     .sorted(Comparator.reverseOrder())
