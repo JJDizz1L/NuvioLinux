@@ -20,13 +20,13 @@ PACKAGE_RELEASE="${NUVIO_PACKAGE_RELEASE:-1}"
 BUNDLE="dist/flatpak/nuvio-linux-${VERSION}-${PACKAGE_RELEASE}.flatpak"
 
 echo "[nuvio-linux-flatpak] building app image (version ${VERSION})..."
-./gradlew :composeApp:createDistributable
+./gradlew :composeApp:createReleaseDistributable
 
 echo "[nuvio-linux-flatpak] assembling flatpak sources..."
 SRC="dist/flatpak/flatpak-src"
 rm -rf "${SRC}"
 mkdir -p "${SRC}"
-cp -a composeApp/build/compose/binaries/main/app/nuvio-linux "${SRC}/nuvio-app"
+cp -a composeApp/build/compose/binaries/main-release/app/nuvio-linux "${SRC}/nuvio-app"
 
 cat > "${SRC}/nuvio-linux" <<EOF
 #!/bin/sh

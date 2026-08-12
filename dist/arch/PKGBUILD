@@ -34,7 +34,7 @@ build() {
   local REPO_ROOT="${startdir}/../.."
   cd "${REPO_ROOT}"
   echo "[nuvio-linux-pkg] Building from ${REPO_ROOT}"
-  ./gradlew :composeApp:createDistributable
+  ./gradlew :composeApp:createReleaseDistributable
 }
 
 package() {
@@ -43,9 +43,10 @@ package() {
 
   cd "${REPO_ROOT}"
 
-  # Self-contained app bundle from jpackage
+  # Self-contained app bundle from jpackage (release variant, matching the
+  # deb/rpm artifacts)
   install -d "${APP_DIR}"
-  cp -r composeApp/build/compose/binaries/main/app/nuvio-linux/* "${APP_DIR}/"
+  cp -r composeApp/build/compose/binaries/main-release/app/nuvio-linux/* "${APP_DIR}/"
 
   # Symlink launcher
   install -d "${pkgdir}/usr/bin"

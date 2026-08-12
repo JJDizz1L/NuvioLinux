@@ -12,7 +12,7 @@ cd "${ROOT_DIR}"
 
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
 
-APP_IMAGE="composeApp/build/compose/binaries/main/app/nuvio-linux"
+APP_IMAGE="composeApp/build/compose/binaries/main-release/app/nuvio-linux"
 VERSION="$(grep -E '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties | cut -d= -f2)"
 PACKAGE_RELEASE="${NUVIO_PACKAGE_RELEASE:-1}"
 OUTPUT="nuvio-linux-${VERSION}-${PACKAGE_RELEASE}-x86_64.AppImage"
@@ -24,7 +24,7 @@ command -v "${APPIMAGETOOL}" >/dev/null || {
 }
 
 echo "[nuvio-linux-appimage] building app image (version ${VERSION})..."
-./gradlew :composeApp:createDistributable
+./gradlew :composeApp:createReleaseDistributable
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/nuvio-appimage.XXXXXX")"
 trap 'rm -rf "${TMP}"' EXIT
