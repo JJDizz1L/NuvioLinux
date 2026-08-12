@@ -1,6 +1,7 @@
 package com.nuviolinux.app.core.network
 
 import com.nuviolinux.app.core.build.AppVersionConfig
+import com.nuviolinux.app.core.build.AppVersionPolicy
 import com.nuviolinux.app.platformSessionManager
 import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.auth.Auth
@@ -15,7 +16,7 @@ import io.ktor.http.takeFrom
 object SupabaseProvider {
     @OptIn(SupabaseInternal::class)
     val client by lazy {
-        val userAgent = "NuvioMobile/${AppVersionConfig.VERSION_NAME.ifBlank { "dev" }}"
+        val userAgent = "${AppVersionPolicy.userAgentAppName}/${AppVersionConfig.VERSION_NAME.ifBlank { "dev" }}"
         createSupabaseClient(
             supabaseUrl = SupabaseConfig.URL,
             supabaseKey = SupabaseConfig.ANON_KEY,
