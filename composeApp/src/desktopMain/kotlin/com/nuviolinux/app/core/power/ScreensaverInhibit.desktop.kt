@@ -13,14 +13,16 @@ import kotlin.concurrent.Volatile
  * lock as long as it lives.
  *
  * Flatpak / no-system-bus fallbacks, tried in order:
- *  1. KDE's native `org.kde.Solid.PowerManagement` suppress API
- *     (`beginSuppressingSleep` + `beginSuppressingScreenPowerManagement`) —
- *     the same calls `xdg-desktop-portal-kde` makes internally for the Inhibit
- *     portal. Cookie-free and not tied to the caller connection, so a one-shot
- *     `gdbus` call holds it until the matching `stop*` call. This is the only
- *     thing that actually blocks PowerDevil's screen blanking on Plasma 6:
- *     `org.freedesktop.ScreenSaver.Inhibit` (ksmserver) only guards the locker,
- *     and `org.freedesktop.PowerManagement` is no longer implemented.
+ *  1. KDE's `org.kde.Solid.PowerManagement.PolicyAgent` at
+ *     `/org/kde/Solid/PowerManagement/PolicyAgent` — `AddInhibition(types,
+ *     app_name, reason)` returns a cookie, released with `ReleaseInhibition`.
+ *     This is exactly what `xdg-desktop-portal-kde` calls internally for the
+ *     Inhibit portal, and powerdevil bridges it to logind on the host, so it
+ *     works from the sandbox. `types` is a bitmask: `1` = InterruptSession
+ *     (sleep), `4` = ChangeScreenSettings (screen blanking/idle) — `5` = both.
+ *     On Plasma 6 the older `org.freedesktop.ScreenSaver.Inhibit` is a compat
+ *     no-op and `beginSuppressing*` no longer exists, so this is the only
+ *     reliable session-bus inhibit on KDE.
  *  2. `org.freedesktop.PowerManagement.Inhibit` cookie (legacy powerdevil).
  *  3. `org.freedesktop.ScreenSaver.Inhibit` cookie (GNOME gnome-settings-daemon,
  *     which does block blanking there).
@@ -39,10 +41,7 @@ internal object ScreensaverInhibit {
     private var systemdProcess: Process? = null
 
     @Volatile
-    private var kdeSleepCookie: String? = null
-
-    @Volatile
-    private var kdeScreenCookie: String? = null
+    private var kdeCookie: String? = null
 
     @Volatile
     private var powerCookie: String? = null
@@ -73,15 +72,14 @@ internal object ScreensaverInhibit {
         if (holdingAnything()) return
         log.i { "acquiring screensaver inhibit" }
         if (acquireSystemdInhibit()) return
-        if (acquireKdeSuppress()) return
+        if (acquireKdePolicyAgentInhibit()) return
         if (acquireCookie("org.freedesktop.PowerManagement", "org.freedesktop.PowerManagement.Inhibit")) return
         acquireCookie("org.freedesktop.ScreenSaver", "org.freedesktop.ScreenSaver.Inhibit")
     }
 
     private fun holdingAnything(): Boolean =
         systemdProcess?.isAlive == true ||
-            kdeSleepCookie != null ||
-            kdeScreenCookie != null ||
+            kdeCookie != null ||
             powerCookie != null ||
             screensaverCookie != null
 
@@ -91,21 +89,12 @@ internal object ScreensaverInhibit {
             runCatching { process.destroy() }
             systemdProcess = null
         }
-        kdeScreenCookie?.let { cookie ->
-            kdeScreenCookie = null
+        kdeCookie?.let { cookie ->
+            kdeCookie = null
             gdbusCall(
                 "org.kde.Solid.PowerManagement",
-                "/org/kde/Solid/PowerManagement",
-                "org.kde.Solid.PowerManagement.stopSuppressingScreenPowerManagement",
-                cookie,
-            )
-        }
-        kdeSleepCookie?.let { cookie ->
-            kdeSleepCookie = null
-            gdbusCall(
-                "org.kde.Solid.PowerManagement",
-                "/org/kde/Solid/PowerManagement",
-                "org.kde.Solid.PowerManagement.stopSuppressingSleep",
+                "/org/kde/Solid/PowerManagement/PolicyAgent",
+                "org.kde.Solid.PowerManagement.PolicyAgent.ReleaseInhibition",
                 cookie,
             )
         }
@@ -155,33 +144,26 @@ internal object ScreensaverInhibit {
         return true
     }
 
-    /** KDE native suppress API (org.kde.Solid.PowerManagement): blocks PowerDevil
-     *  screen blanking and suspend until the matching stop* call. Each begin*
-     *  call takes a `why` string and returns a uint suppression cookie that the
-     *  stop* call consumes — same cookie pattern as the freedesktop interfaces. */
-    private fun acquireKdeSuppress(): Boolean {
-        val sleepCookie = callKdeSuppress("beginSuppressingSleep")
-        val screenCookie = callKdeSuppress("beginSuppressingScreenPowerManagement")
-        if (sleepCookie == null && screenCookie == null) return false
-        kdeSleepCookie = sleepCookie
-        kdeScreenCookie = screenCookie
-        log.i { "screensaver inhibit held via org.kde.Solid.PowerManagement (sleep=${sleepCookie != null} screen=${screenCookie != null})" }
-        return true
-    }
-
-    private fun callKdeSuppress(method: String): String? {
+    /** KDE native inhibit via powerdevil's PolicyAgent. `types=5` blocks both
+     *  suspend (InterruptSession=1) and screen blanking (ChangeScreenSettings=4).
+     *  Cookie-based, so a one-shot gdbus call holds it until ReleaseInhibition. */
+    private fun acquireKdePolicyAgentInhibit(): Boolean {
         val result = gdbusCall(
             "org.kde.Solid.PowerManagement",
-            "/org/kde/Solid/PowerManagement",
-            "org.kde.Solid.PowerManagement.$method",
+            "/org/kde/Solid/PowerManagement/PolicyAgent",
+            "org.kde.Solid.PowerManagement.PolicyAgent.AddInhibition",
+            "5",
+            "'Nuvio Linux'",
             "'Playing video'",
-        ) ?: return null
+        ) ?: return false
         val cookie = SCREENSAVER_COOKIE_REGEX.find(result)?.groupValues?.get(1)
         if (cookie == null) {
-            log.w { "$method returned unexpected result: $result" }
-            return null
+            log.w { "PolicyAgent.AddInhibition returned unexpected result: $result" }
+            return false
         }
-        return cookie
+        kdeCookie = cookie
+        log.i { "screensaver inhibit held via org.kde.Solid.PowerManagement.PolicyAgent (cookie $cookie)" }
+        return true
     }
 
     /** Cookie-based fallback on the session bus (works in the Flatpak
