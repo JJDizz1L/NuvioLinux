@@ -23,5 +23,8 @@ actual object AppFeaturePolicy {
     // the system package manager, so the GitHub-release banner isn't useful.
     // The updater code stays intact — re-enable with `!isFlatpakRuntime` above.
     actual val inAppUpdaterEnabled: Boolean = false
+    // Instead of the download/install banner, surface a new release as an
+    // in-app toast that links to the GitHub releases page.
+    actual val updateNotificationEnabled: Boolean = true
     actual val imdbRatingLogoEnabled: Boolean = true
 }
