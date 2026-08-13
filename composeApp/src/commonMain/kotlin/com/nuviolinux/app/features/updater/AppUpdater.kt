@@ -76,7 +76,7 @@ private class NoChannelReleaseException : IllegalStateException(
     runBlocking { getString(Res.string.updates_no_channel_release) },
 )
 
-private object VersionUtils {
+internal object VersionUtils {
     fun normalize(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
         return raw.trim().removePrefix("v").removePrefix("V")
@@ -113,8 +113,60 @@ private object VersionUtils {
     }
 }
 
-private object AppUpdaterRepository {
+internal data class AppReleaseInfo(
+    val tag: String,
+    val title: String,
+    val releaseUrl: String?,
+)
+
+internal object AppUpdaterRepository {
+    /** Latest release metadata without an asset requirement — used by the
+     *  toast-only update notification, which never downloads anything. */
+    suspend fun getLatestReleaseInfo(): Result<AppReleaseInfo> = runCatching {
+        val release = fetchLatestRelease()
+        AppReleaseInfo(
+            tag = release.tag,
+            title = release.title,
+            releaseUrl = release.htmlUrl,
+        )
+    }
+
     suspend fun getLatestChannelUpdate(): Result<AppUpdate> = runCatching {
+        val release = fetchLatestRelease()
+
+        val asset = selectBestUpdateAsset(
+            assets = release.assets.map { asset ->
+                AppUpdateAssetCandidate(
+                    name = asset.name,
+                    downloadUrl = asset.browserDownloadUrl,
+                    size = asset.size,
+                    contentType = asset.contentType,
+                )
+            },
+            selector = AppUpdaterPlatform.assetSelector,
+        )
+            ?: error(getString(Res.string.updates_update_asset_missing))
+
+        AppUpdate(
+            tag = release.tag,
+            title = release.title,
+            notes = release.notes,
+            releaseUrl = release.htmlUrl,
+            assetName = asset.name,
+            assetUrl = asset.downloadUrl,
+            assetSizeBytes = asset.size,
+        )
+    }
+
+    private class LatestRelease(
+        val tag: String,
+        val title: String,
+        val notes: String,
+        val htmlUrl: String?,
+        val assets: List<GitHubAssetDto>,
+    )
+
+    private suspend fun fetchLatestRelease(): LatestRelease {
         val source = AppUpdaterPlatform.releaseSource
         val response = httpRequestRaw(
             method = "GET",
@@ -141,27 +193,12 @@ private object AppUpdaterRepository {
             ?: release.name?.takeIf { it.isNotBlank() }
             ?: error(getString(Res.string.updates_release_missing_title))
 
-        val asset = selectBestUpdateAsset(
-            assets = release.assets.map { asset ->
-                AppUpdateAssetCandidate(
-                    name = asset.name,
-                    downloadUrl = asset.browserDownloadUrl,
-                    size = asset.size,
-                    contentType = asset.contentType,
-                )
-            },
-            selector = AppUpdaterPlatform.assetSelector,
-        )
-            ?: error(getString(Res.string.updates_update_asset_missing))
-
-        AppUpdate(
+        return LatestRelease(
             tag = tag,
             title = release.name?.takeIf { it.isNotBlank() } ?: tag,
             notes = release.body.orEmpty(),
-            releaseUrl = release.htmlUrl,
-            assetName = asset.name,
-            assetUrl = asset.downloadUrl,
-            assetSizeBytes = asset.size,
+            htmlUrl = release.htmlUrl,
+            assets = release.assets,
         )
     }
 
