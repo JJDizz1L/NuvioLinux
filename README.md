@@ -121,7 +121,13 @@ sudo pacman -U ./nuvio-linux-0.1.17alpha-3-x86_64.pkg.tar.zst
 
 ### Install from the AUR
 
-A VCS package (`nuvio-linux-git`) tracks the `dev` branch and builds from source:
+Install the **prebuilt binary** (no compile) with `yay` or `paru`:
+
+```bash
+yay -S nuvio-linux-bin
+```
+
+or build the **VCS package** from source (tracks the `dev` branch):
 
 ```bash
 yay -S nuvio-linux-git
