@@ -62,6 +62,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
@@ -552,6 +553,7 @@ fun NuvioToastHost(
         exit = fadeOut() + slideOutVertically { -it },
     ) {
         val currentToast = renderedToast ?: return@AnimatedVisibility
+        val uriHandler = LocalUriHandler.current
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -567,7 +569,20 @@ fun NuvioToastHost(
             ) {
                 Text(
                     text = currentToast.message,
-                    modifier = Modifier.padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s12),
+                    modifier = Modifier
+                        .then(
+                            if (currentToast.actionUri != null) {
+                                Modifier.clickable {
+                                    currentToast.actionUri?.let { url ->
+                                        runCatching { uriHandler.openUri(url) }
+                                    }
+                                    NuvioToastController.dismiss(currentToast.id)
+                                }
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(horizontal = NuvioTokens.Space.s16, vertical = NuvioTokens.Space.s12),
                     style = MaterialTheme.typography.bodyMedium,
                     color = tokens.colors.textPrimary,
                 )
@@ -580,6 +595,7 @@ data class NuvioToastMessage(
     val id: Long,
     val message: String,
     val durationMillis: Long,
+    val actionUri: String? = null,
 )
 
 object NuvioToastController {
@@ -590,12 +606,14 @@ object NuvioToastController {
     fun show(
         message: String,
         durationMillis: Long = 2500L,
+        actionUri: String? = null,
     ) {
         nextToastId += 1L
         _currentToast.value = NuvioToastMessage(
             id = nextToastId,
             message = message,
             durationMillis = durationMillis,
+            actionUri = actionUri,
         )
     }
 
