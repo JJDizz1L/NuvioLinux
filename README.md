@@ -283,16 +283,6 @@ For comprehensive legal information, including our full disclaimer, third-party 
 - libmpv (MPV render API) via a C++/JNI bridge
 - Discord IPC (Rich Presence)
 
-## Star History
-
-<a href="https://www.star-history.com/#JJDizz1L/NuvioLinux&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JJDizz1L/NuvioLinux&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JJDizz1L/NuvioLinux&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=JJDizz1L/NuvioLinux&type=date&legend=top-left" />
- </picture>
-</a>
-
 <!-- MARKDOWN LINKS & IMAGES -->
 [contributors-shield]: https://img.shields.io/github/contributors/JJDizz1L/NuvioLinux.svg?style=for-the-badge
 [contributors-url]: https://github.com/JJDizz1L/NuvioLinux/graphs/contributors
