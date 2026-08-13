@@ -96,7 +96,7 @@ sudo pacman-key --recv-key 6702DBAB3E41EDE1 && sudo pacman-key --lsign-key 6702D
 ### Install directly from the release URL
 
 ```bash
-sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.17-alpha/nuvio-linux-0.1.17alpha-2-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.17-alpha/nuvio-linux-0.1.17alpha-3-x86_64.pkg.tar.zst
 ```
 
 ### Install a manually downloaded package
@@ -104,7 +104,7 @@ sudo pacman -U https://github.com/JJDizz1L/NuvioLinux/releases/download/v0.1.17-
 Download the `.pkg.tar.zst` from the latest [release](https://github.com/JJDizz1L/NuvioLinux/releases), then install it:
 
 ```bash
-sudo pacman -U ./nuvio-linux-0.1.17alpha-2-x86_64.pkg.tar.zst
+sudo pacman -U ./nuvio-linux-0.1.17alpha-3-x86_64.pkg.tar.zst
 ```
 
 ### Build from source
@@ -241,14 +241,14 @@ Use the version helper when changing desktop release versions:
 ./scripts/set-version.sh --show
 ```
 
-Per-format package names carry the same release counter (Arch `pkgrel` / RPM `Release` / the `-<release>` suffix in DEB, AppImage and Flatpak names), e.g. release 2 of `0.1.17-alpha`:
+Per-format package names carry the same release counter (Arch `pkgrel` / RPM `Release` / the `-<release>` suffix in DEB, AppImage and Flatpak names), e.g. release 3 of `0.1.17-alpha`:
 
 ```
-nuvio-linux-0.1.17alpha-2-x86_64.pkg.tar.zst
-nuvio-linux-0.1.17alpha-2.x86_64.rpm
-nuvio-linux_0.1.17-alpha-2_amd64.deb
-nuvio-linux-0.1.17-alpha-2-x86_64.AppImage
-nuvio-linux-0.1.17-alpha-2.flatpak
+nuvio-linux-0.1.17alpha-3-x86_64.pkg.tar.zst
+nuvio-linux-0.1.17alpha-3.x86_64.rpm
+nuvio-linux_0.1.17-alpha-3_amd64.deb
+nuvio-linux-0.1.17-alpha-3-x86_64.AppImage
+nuvio-linux-0.1.17-alpha-3.flatpak
 ```
 
 ## Legal & DMCA
