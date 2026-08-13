@@ -1560,6 +1560,7 @@
     <string name="updates_title_allow_installs">Allow installs to continue</string>
     <string name="updates_title_available">Update available</string>
     <string name="updates_title_status">Update status</string>
+    <string name="updates_toast_available">Nuvio Linux %1$s is available — tap to view releases</string>
     <string name="addon_already_installed">That addon is already installed.</string>
     <string name="addon_invalid_url">Enter a valid addon URL</string>
     <string name="addon_load_manifest_failed">Unable to load manifest</string>

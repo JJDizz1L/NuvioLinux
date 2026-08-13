@@ -256,6 +256,7 @@ import com.nuviolinux.app.features.tracking.TrackingProviderId
 import com.nuviolinux.app.features.tracking.toggleTrackingLibraryMembership
 import com.nuviolinux.app.features.updater.AppUpdaterHost
 import com.nuviolinux.app.features.updater.AppUpdaterPlatform
+import com.nuviolinux.app.features.updater.UpdateNotifier
 import com.nuviolinux.app.features.updater.rememberAppUpdaterController
 import com.nuviolinux.app.features.watched.WatchedRepository
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingItem
@@ -890,6 +891,9 @@ private fun MainAppContent(
             )
         }
         val appUpdaterController = rememberAppUpdaterController()
+        LaunchedEffect(Unit) {
+            UpdateNotifier.notifyIfUpdateAvailable()
+        }
         val hapticFeedback = LocalHapticFeedback.current
         val focusManager = LocalFocusManager.current
         val uriHandler = LocalUriHandler.current
