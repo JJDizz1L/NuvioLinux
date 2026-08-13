@@ -21,6 +21,8 @@ finish-args:
   - --socket=pulseaudio
   - --device=dri
   - --device=all
+  - --talk-name=org.freedesktop.ScreenSaver
+  - --talk-name=org.freedesktop.PowerManagement
   - --filesystem=home/.config/mpv:ro
   - --filesystem=home/.mpv:ro
   - --filesystem=xdg-download:rw
