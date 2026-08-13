@@ -39,10 +39,10 @@ internal object ScreensaverInhibit {
     private var systemdProcess: Process? = null
 
     @Volatile
-    private var kdeSleepSuppressed = false
+    private var kdeSleepCookie: String? = null
 
     @Volatile
-    private var kdeScreenSuppressed = false
+    private var kdeScreenCookie: String? = null
 
     @Volatile
     private var powerCookie: String? = null
@@ -80,8 +80,8 @@ internal object ScreensaverInhibit {
 
     private fun holdingAnything(): Boolean =
         systemdProcess?.isAlive == true ||
-            kdeSleepSuppressed ||
-            kdeScreenSuppressed ||
+            kdeSleepCookie != null ||
+            kdeScreenCookie != null ||
             powerCookie != null ||
             screensaverCookie != null
 
@@ -91,21 +91,23 @@ internal object ScreensaverInhibit {
             runCatching { process.destroy() }
             systemdProcess = null
         }
-        if (kdeScreenSuppressed) {
+        kdeScreenCookie?.let { cookie ->
+            kdeScreenCookie = null
             gdbusCall(
                 "org.kde.Solid.PowerManagement",
                 "/org/kde/Solid/PowerManagement",
                 "org.kde.Solid.PowerManagement.stopSuppressingScreenPowerManagement",
+                cookie,
             )
-            kdeScreenSuppressed = false
         }
-        if (kdeSleepSuppressed) {
+        kdeSleepCookie?.let { cookie ->
+            kdeSleepCookie = null
             gdbusCall(
                 "org.kde.Solid.PowerManagement",
                 "/org/kde/Solid/PowerManagement",
                 "org.kde.Solid.PowerManagement.stopSuppressingSleep",
+                cookie,
             )
-            kdeSleepSuppressed = false
         }
         powerCookie?.let { cookie ->
             powerCookie = null
@@ -154,24 +156,32 @@ internal object ScreensaverInhibit {
     }
 
     /** KDE native suppress API (org.kde.Solid.PowerManagement): blocks PowerDevil
-     *  screen blanking and suspend until the matching stop* call. Cookie-free and
-     *  not connection-bound, so a one-shot gdbus call holds it. */
+     *  screen blanking and suspend until the matching stop* call. Each begin*
+     *  call takes a `why` string and returns a uint suppression cookie that the
+     *  stop* call consumes — same cookie pattern as the freedesktop interfaces. */
     private fun acquireKdeSuppress(): Boolean {
-        val sleepOk = gdbusCall(
-            "org.kde.Solid.PowerManagement",
-            "/org/kde/Solid/PowerManagement",
-            "org.kde.Solid.PowerManagement.beginSuppressingSleep",
-        ) != null
-        val screenOk = gdbusCall(
-            "org.kde.Solid.PowerManagement",
-            "/org/kde/Solid/PowerManagement",
-            "org.kde.Solid.PowerManagement.beginSuppressingScreenPowerManagement",
-        ) != null
-        if (!sleepOk && !screenOk) return false
-        kdeSleepSuppressed = sleepOk
-        kdeScreenSuppressed = screenOk
-        log.i { "screensaver inhibit held via org.kde.Solid.PowerManagement (sleep=$sleepOk screen=$screenOk)" }
+        val sleepCookie = callKdeSuppress("beginSuppressingSleep")
+        val screenCookie = callKdeSuppress("beginSuppressingScreenPowerManagement")
+        if (sleepCookie == null && screenCookie == null) return false
+        kdeSleepCookie = sleepCookie
+        kdeScreenCookie = screenCookie
+        log.i { "screensaver inhibit held via org.kde.Solid.PowerManagement (sleep=${sleepCookie != null} screen=${screenCookie != null})" }
         return true
+    }
+
+    private fun callKdeSuppress(method: String): String? {
+        val result = gdbusCall(
+            "org.kde.Solid.PowerManagement",
+            "/org/kde/Solid/PowerManagement",
+            "org.kde.Solid.PowerManagement.$method",
+            "'Playing video'",
+        ) ?: return null
+        val cookie = SCREENSAVER_COOKIE_REGEX.find(result)?.groupValues?.get(1)
+        if (cookie == null) {
+            log.w { "$method returned unexpected result: $result" }
+            return null
+        }
+        return cookie
     }
 
     /** Cookie-based fallback on the session bus (works in the Flatpak
