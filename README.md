@@ -55,6 +55,17 @@ Install the `.rpm` from a [release](https://github.com/JJDizz1L/NuvioLinux/relea
 sudo dnf install ./nuvio-linux-*.x86_64.rpm
 ```
 
+## Installation (Debian / Ubuntu)
+
+Install the `.deb` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases) (requires system `mpv`):
+
+```bash
+sudo apt install ./nuvio-linux_0.1.17-alpha-3_amd64.deb
+```
+
+The package is self-contained (bundled JRE, no system Java required), installs to
+`/opt/nuvio-linux`, and is compiled for **generic x86-64**.
+
 ## Installation (AppImage)
 
 Download `nuvio-linux-*-x86_64.AppImage` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases), then:
@@ -78,7 +89,8 @@ flatpak run io.github.jjdizz1l.NuvioLinux
 The Flatpak bundles libmpv built from source — no system `mpv` needed. Your
 `~/.config/mpv/mpv.conf` is honored read-only. P2P/TorrServer works via the
 bundled binary. Updates are delivered through the bundle (the in-app updater
-is disabled in the sandbox).
+is disabled in the sandbox); a toast in the app points to new releases on
+GitHub.
 
 ## Installation (Arch Linux)
 
@@ -105,6 +117,14 @@ Download the `.pkg.tar.zst` from the latest [release](https://github.com/JJDizz1
 
 ```bash
 sudo pacman -U ./nuvio-linux-0.1.17alpha-3-x86_64.pkg.tar.zst
+```
+
+### Install from the AUR
+
+A VCS package (`nuvio-linux-git`) tracks the `dev` branch and builds from source:
+
+```bash
+yay -S nuvio-linux-git
 ```
 
 ### Build from source
@@ -185,6 +205,17 @@ from source inside the sandbox for baseline x86-64 portability):
 > Note: this fork's primary Linux distribution is the [Arch Linux package](#installation-arch-linux) (self-contained, bundled JRE). All Linux packages require a native `mpv` installation at runtime — except the Flatpak, which bundles libmpv built from source. All artifacts are attached to each [release](https://github.com/JJDizz1L/NuvioLinux/releases).
 
 ## Troubleshooting
+
+### Add-ons not loading / sync issues after an update
+
+Release 0.1.17 restored the upstream sync identity (client-id prefix, device
+name, user agent) for cross-app sync parity. If you signed in with an earlier
+0.1.16.x build, your device may conflict with the sync service — add-ons can
+stop loading and settings may not sync. To fix it, sign out and back in:
+
+**Settings → Account → Account and Sync Status → Sign Out**, then sign in to
+your Nuvio account again. This re-registers the device. Fresh installs are
+unaffected.
 
 ### Tiling window managers (niri, sway, i3, bspwm, …)
 
