@@ -12,10 +12,18 @@ import kotlin.concurrent.Volatile
  * and other logind-aware power managers honor it, and the process keeps the
  * lock as long as it lives.
  *
- * Fallback: a cookie-based `org.freedesktop.ScreenSaver.Inhibit` /
- * `org.freedesktop.PowerManagement.Inhibit` call on the session bus via
- * `gdbus` — used in the Flatpak sandbox, where `systemd-inhibit` is not
- * available and there is no system bus access.
+ * Flatpak / no-system-bus fallbacks, tried in order:
+ *  1. KDE's native `org.kde.Solid.PowerManagement` suppress API
+ *     (`beginSuppressingSleep` + `beginSuppressingScreenPowerManagement`) —
+ *     the same calls `xdg-desktop-portal-kde` makes internally for the Inhibit
+ *     portal. Cookie-free and not tied to the caller connection, so a one-shot
+ *     `gdbus` call holds it until the matching `stop*` call. This is the only
+ *     thing that actually blocks PowerDevil's screen blanking on Plasma 6:
+ *     `org.freedesktop.ScreenSaver.Inhibit` (ksmserver) only guards the locker,
+ *     and `org.freedesktop.PowerManagement` is no longer implemented.
+ *  2. `org.freedesktop.PowerManagement.Inhibit` cookie (legacy powerdevil).
+ *  3. `org.freedesktop.ScreenSaver.Inhibit` cookie (GNOME gnome-settings-daemon,
+ *     which does block blanking there).
  *
  * Idempotent: [setActive] only acts on state changes; callers may invoke it
  * from any thread.
@@ -29,6 +37,15 @@ internal object ScreensaverInhibit {
 
     @Volatile
     private var systemdProcess: Process? = null
+
+    @Volatile
+    private var kdeSleepSuppressed = false
+
+    @Volatile
+    private var kdeScreenSuppressed = false
+
+    @Volatile
+    private var powerCookie: String? = null
 
     @Volatile
     private var screensaverCookie: String? = null
@@ -53,24 +70,20 @@ internal object ScreensaverInhibit {
     fun release() = setActive(false)
 
     private fun acquireLocked() {
-        if (systemdProcess?.isAlive == true || screensaverCookie != null) return
+        if (holdingAnything()) return
         log.i { "acquiring screensaver inhibit" }
-        if (!acquireSystemdInhibit()) {
-            // KDE's PowerDevil implements org.freedesktop.PowerManagement.Inhibit
-            // and honors it for both idle (screen blanking) and sleep/suspend,
-            // so try it before the more limited ScreenSaver interface (GNOME's
-            // gnome-settings-daemon / KDE's ksmserver), which mostly guards the
-            // locker. Inside the Flatpak sandbox systemd-inhibit is unreachable
-            // (filtered system bus), so these cookies are the only path.
-            acquireScreensaverCookie(
-                "org.freedesktop.PowerManagement",
-                "org.freedesktop.PowerManagement.Inhibit",
-            ) || acquireScreensaverCookie(
-                "org.freedesktop.ScreenSaver",
-                "org.freedesktop.ScreenSaver.Inhibit",
-            )
-        }
+        if (acquireSystemdInhibit()) return
+        if (acquireKdeSuppress()) return
+        if (acquireCookie("org.freedesktop.PowerManagement", "org.freedesktop.PowerManagement.Inhibit")) return
+        acquireCookie("org.freedesktop.ScreenSaver", "org.freedesktop.ScreenSaver.Inhibit")
     }
+
+    private fun holdingAnything(): Boolean =
+        systemdProcess?.isAlive == true ||
+            kdeSleepSuppressed ||
+            kdeScreenSuppressed ||
+            powerCookie != null ||
+            screensaverCookie != null
 
     private fun releaseLocked() {
         log.i { "releasing screensaver inhibit" }
@@ -78,19 +91,38 @@ internal object ScreensaverInhibit {
             runCatching { process.destroy() }
             systemdProcess = null
         }
+        if (kdeScreenSuppressed) {
+            gdbusCall(
+                "org.kde.Solid.PowerManagement",
+                "/org/kde/Solid/PowerManagement",
+                "org.kde.Solid.PowerManagement.stopSuppressingScreenPowerManagement",
+            )
+            kdeScreenSuppressed = false
+        }
+        if (kdeSleepSuppressed) {
+            gdbusCall(
+                "org.kde.Solid.PowerManagement",
+                "/org/kde/Solid/PowerManagement",
+                "org.kde.Solid.PowerManagement.stopSuppressingSleep",
+            )
+            kdeSleepSuppressed = false
+        }
+        powerCookie?.let { cookie ->
+            powerCookie = null
+            gdbusCall(
+                "org.freedesktop.PowerManagement",
+                "/org/freedesktop/PowerManagement",
+                "org.freedesktop.PowerManagement.UnInhibit",
+                cookie,
+            )
+        }
         screensaverCookie?.let { cookie ->
             screensaverCookie = null
             gdbusCall(
                 "org.freedesktop.ScreenSaver",
                 "/org/freedesktop/ScreenSaver",
                 "org.freedesktop.ScreenSaver.UnInhibit",
-                "uint32:$cookie",
-            )
-            gdbusCall(
-                "org.freedesktop.PowerManagement",
-                "/org/freedesktop/PowerManagement",
-                "org.freedesktop.PowerManagement.UnInhibit",
-                "uint32:$cookie",
+                cookie,
             )
         }
     }
@@ -121,9 +153,30 @@ internal object ScreensaverInhibit {
         return true
     }
 
+    /** KDE native suppress API (org.kde.Solid.PowerManagement): blocks PowerDevil
+     *  screen blanking and suspend until the matching stop* call. Cookie-free and
+     *  not connection-bound, so a one-shot gdbus call holds it. */
+    private fun acquireKdeSuppress(): Boolean {
+        val sleepOk = gdbusCall(
+            "org.kde.Solid.PowerManagement",
+            "/org/kde/Solid/PowerManagement",
+            "org.kde.Solid.PowerManagement.beginSuppressingSleep",
+        ) != null
+        val screenOk = gdbusCall(
+            "org.kde.Solid.PowerManagement",
+            "/org/kde/Solid/PowerManagement",
+            "org.kde.Solid.PowerManagement.beginSuppressingScreenPowerManagement",
+        ) != null
+        if (!sleepOk && !screenOk) return false
+        kdeSleepSuppressed = sleepOk
+        kdeScreenSuppressed = screenOk
+        log.i { "screensaver inhibit held via org.kde.Solid.PowerManagement (sleep=$sleepOk screen=$screenOk)" }
+        return true
+    }
+
     /** Cookie-based fallback on the session bus (works in the Flatpak
      *  sandbox, which has no system bus access). */
-    private fun acquireScreensaverCookie(destination: String, method: String): Boolean {
+    private fun acquireCookie(destination: String, method: String): Boolean {
         val result = gdbusCall(
             destination,
             if (destination == "org.freedesktop.PowerManagement") {
@@ -132,15 +185,19 @@ internal object ScreensaverInhibit {
                 "/org/freedesktop/ScreenSaver"
             },
             method,
-            "string:Nuvio Linux",
-            "string:Playing video",
+            "'Nuvio Linux'",
+            "'Playing video'",
         ) ?: return false
         val cookie = SCREENSAVER_COOKIE_REGEX.find(result)?.groupValues?.get(1)
         if (cookie == null) {
             log.w { "$method returned unexpected result: $result" }
             return false
         }
-        screensaverCookie = cookie
+        if (destination == "org.freedesktop.PowerManagement") {
+            powerCookie = cookie
+        } else {
+            screensaverCookie = cookie
+        }
         log.i { "screensaver inhibit held via $destination (cookie $cookie)" }
         return true
     }
