@@ -56,12 +56,18 @@ internal object ScreensaverInhibit {
         if (systemdProcess?.isAlive == true || screensaverCookie != null) return
         log.i { "acquiring screensaver inhibit" }
         if (!acquireSystemdInhibit()) {
+            // KDE's PowerDevil implements org.freedesktop.PowerManagement.Inhibit
+            // and honors it for both idle (screen blanking) and sleep/suspend,
+            // so try it before the more limited ScreenSaver interface (GNOME's
+            // gnome-settings-daemon / KDE's ksmserver), which mostly guards the
+            // locker. Inside the Flatpak sandbox systemd-inhibit is unreachable
+            // (filtered system bus), so these cookies are the only path.
             acquireScreensaverCookie(
-                "org.freedesktop.ScreenSaver",
-                "org.freedesktop.ScreenSaver.Inhibit",
-            ) || acquireScreensaverCookie(
                 "org.freedesktop.PowerManagement",
                 "org.freedesktop.PowerManagement.Inhibit",
+            ) || acquireScreensaverCookie(
+                "org.freedesktop.ScreenSaver",
+                "org.freedesktop.ScreenSaver.Inhibit",
             )
         }
     }
