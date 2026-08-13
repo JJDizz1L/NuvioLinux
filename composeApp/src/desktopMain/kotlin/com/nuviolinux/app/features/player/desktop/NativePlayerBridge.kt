@@ -24,8 +24,6 @@ internal object NativePlayerBridge {
 
     external fun dispose(handle: Long)
     external fun renderFrame(handle: Long, width: Int, height: Int, buffer: java.nio.ByteBuffer): Boolean
-    external fun updateControls(handle: Long, controlsJson: String)
-    external fun requestFocus(handle: Long)
     external fun setPaused(handle: Long, paused: Boolean)
     external fun seekTo(handle: Long, positionMs: Long)
     external fun seekBy(handle: Long, offsetMs: Long)

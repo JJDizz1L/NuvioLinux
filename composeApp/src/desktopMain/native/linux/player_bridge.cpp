@@ -1452,19 +1452,6 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     return player->renderResult ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_updateControls(
-    JNIEnv *env, jclass clazz, jlong handle, jstring controlsJson)
-{
-    /* Controls overlay requires WebKitGTK; not implemented yet.
-     * Compose-based controls work independently. */
-}
-
-JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_requestFocus(
-    JNIEnv *env, jclass clazz, jlong handle)
-{
-    /* AWT focus handling is sufficient. */
-}
-
 JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setPaused(
     JNIEnv *env, jclass clazz, jlong handle, jboolean paused)
 {
