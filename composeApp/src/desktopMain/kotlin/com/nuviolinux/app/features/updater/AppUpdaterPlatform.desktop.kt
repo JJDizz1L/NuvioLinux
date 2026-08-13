@@ -25,6 +25,7 @@ import kotlin.system.exitProcess
 
 private const val desktopUpdaterPreferencesName = "updater"
 private const val ignoredTagKey = "ignored_release_tag"
+private const val lastNotifiedTagKey = "last_notified_release_tag"
 
 private val desktopUpdaterHttpClient: HttpClient = HttpClient.newBuilder()
     .connectTimeout(Duration.ofSeconds(60))
@@ -55,6 +56,12 @@ actual object AppUpdaterPlatform {
 
     actual fun setIgnoredTag(tag: String?) {
         store.putString(ignoredTagKey, tag)
+    }
+
+    actual fun getLastNotifiedTag(): String? = store.getString(lastNotifiedTagKey)
+
+    actual fun setLastNotifiedTag(tag: String?) {
+        store.putString(lastNotifiedTagKey, tag)
     }
 
     actual suspend fun downloadUpdateAsset(
