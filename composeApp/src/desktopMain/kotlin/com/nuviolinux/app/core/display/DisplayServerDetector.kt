@@ -22,19 +22,24 @@ enum class DisplayServer {
 }
 
 object DisplayServerDetector {
-    fun detect(): DisplayServer {
-        val sessionType = System.getenv("XDG_SESSION_TYPE")?.trim()?.lowercase()
-        val hasWaylandDisplay = !System.getenv("WAYLAND_DISPLAY").isNullOrBlank()
-        val hasX11Display = !System.getenv("DISPLAY").isNullOrBlank()
+    fun detect(): DisplayServer = detect(
+        sessionType = System.getenv("XDG_SESSION_TYPE")?.trim()?.lowercase(),
+        hasWaylandDisplay = !System.getenv("WAYLAND_DISPLAY").isNullOrBlank(),
+        hasX11Display = !System.getenv("DISPLAY").isNullOrBlank(),
+    )
 
-        return when {
-            sessionType == "wayland" && hasX11Display -> DisplayServer.XWayland
-            sessionType == "wayland" && !hasX11Display && hasWaylandDisplay -> DisplayServer.Wayland
-            sessionType == "x11" && hasX11Display -> DisplayServer.X11
-            hasX11Display -> DisplayServer.X11
-            hasWaylandDisplay -> DisplayServer.Wayland
-            else -> DisplayServer.Unknown
-        }
+    /** Pure session→server mapping, exposed for tests (no environment access). */
+    internal fun detect(
+        sessionType: String?,
+        hasWaylandDisplay: Boolean,
+        hasX11Display: Boolean,
+    ): DisplayServer = when {
+        sessionType == "wayland" && hasX11Display -> DisplayServer.XWayland
+        sessionType == "wayland" && !hasX11Display && hasWaylandDisplay -> DisplayServer.Wayland
+        sessionType == "x11" && hasX11Display -> DisplayServer.X11
+        hasX11Display -> DisplayServer.X11
+        hasWaylandDisplay -> DisplayServer.Wayland
+        else -> DisplayServer.Unknown
     }
 
     /** True when running under XWayland: a Wayland session with an X11 display. */
