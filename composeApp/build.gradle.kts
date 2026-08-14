@@ -340,10 +340,26 @@ val buildLinuxPlayerBridge = tasks.register<Exec>("buildLinuxPlayerBridge") {
     )
 }
 
+val portalInhibitHelperSource = layout.projectDirectory.file("src/desktopMain/native/linux/portal_inhibit_helper.c")
+val portalInhibitHelperOutput = layout.buildDirectory.file("native/linux/portal-inhibit-helper")
+val buildPortalInhibitHelper = tasks.register<Exec>("buildPortalInhibitHelper") {
+    notCompatibleWithConfigurationCache("Builds the host-local portal inhibit helper for Linux.")
+    enabled = isLinuxHost
+    inputs.file(portalInhibitHelperSource)
+    outputs.file(portalInhibitHelperOutput)
+    commandLine(
+        "sh", "-c",
+        "gcc -O2 -o '${portalInhibitHelperOutput.get().asFile.absolutePath}' " +
+            "'${portalInhibitHelperSource.asFile.absolutePath}' " +
+            "\$(pkg-config --cflags --libs gio-2.0)",
+    )
+}
+
 tasks.withType<Jar>().configureEach {
     if (isLinuxHost && name == "desktopJar") {
-        dependsOn(buildLinuxPlayerBridge)
+        dependsOn(buildLinuxPlayerBridge, buildPortalInhibitHelper)
         from(linuxPlayerBridgeOutput) { into("native/linux") }
+        from(portalInhibitHelperOutput) { into("native/linux") }
     }
 }
 

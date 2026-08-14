@@ -24,6 +24,7 @@ finish-args:
   - --talk-name=org.freedesktop.ScreenSaver
   - --talk-name=org.freedesktop.PowerManagement
   - --talk-name=org.kde.Solid.PowerManagement
+  - --talk-name=org.freedesktop.portal.Desktop
   - --filesystem=home/.config/mpv:ro
   - --filesystem=home/.mpv:ro
   - --filesystem=xdg-download:rw

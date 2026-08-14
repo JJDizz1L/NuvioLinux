@@ -1,6 +1,8 @@
 package com.nuviolinux.app.core.power
 
 import co.touchlab.kermit.Logger
+import com.nuviolinux.app.core.storage.DesktopCache
+import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.Volatile
 
@@ -13,18 +15,20 @@ import kotlin.concurrent.Volatile
  * lock as long as it lives.
  *
  * Flatpak / no-system-bus fallbacks, tried in order:
- *  1. KDE's `org.kde.Solid.PowerManagement.PolicyAgent` at
- *     `/org/kde/Solid/PowerManagement/PolicyAgent` — `AddInhibition(types,
- *     app_name, reason)` returns a cookie, released with `ReleaseInhibition`.
- *     This is exactly what `xdg-desktop-portal-kde` calls internally for the
- *     Inhibit portal, and powerdevil bridges it to logind on the host, so it
- *     works from the sandbox. `types` is a bitmask: `1` = InterruptSession
- *     (sleep), `4` = ChangeScreenSettings (screen blanking/idle) — `5` = both.
- *     On Plasma 6 the older `org.freedesktop.ScreenSaver.Inhibit` is a compat
- *     no-op and `beginSuppressing*` no longer exists, so this is the only
- *     reliable session-bus inhibit on KDE.
- *  2. `org.freedesktop.PowerManagement.Inhibit` cookie (legacy powerdevil).
- *  3. `org.freedesktop.ScreenSaver.Inhibit` cookie (GNOME gnome-settings-daemon,
+ *  1. XDG Desktop Portal `org.freedesktop.portal.Inhibit` (v3 API) via the
+ *     bundled `portal-inhibit-helper` subprocess. The portal bridges the
+ *     session-bus call to the desktop's own inhibit mechanism; on KDE
+ *     xdg-desktop-portal-kde calls PowerDevil's PolicyAgent as the host portal
+ *     process, which PowerDevil honors (a direct sandboxed PolicyAgent call is
+ *     silently dropped). The portal Request is bound to the caller's
+ *     connection, so the helper makes the call and blocks, holding the
+ *     connection; killing it releases the inhibition. Flags = 12
+ *     (Suspend=4 | Idle=8), matching native `systemd-inhibit --what=sleep:idle`.
+ *  2. KDE's `org.kde.Solid.PowerManagement.PolicyAgent.AddInhibition` cookie
+ *     (release via `ReleaseInhibition`) — kept as a fallback for setups
+ *     without a portal, though PowerDevil may drop it.
+ *  3. `org.freedesktop.PowerManagement.Inhibit` cookie (legacy powerdevil).
+ *  4. `org.freedesktop.ScreenSaver.Inhibit` cookie (GNOME gnome-settings-daemon,
  *     which does block blanking there).
  *
  * Idempotent: [setActive] only acts on state changes; callers may invoke it
@@ -39,6 +43,9 @@ internal object ScreensaverInhibit {
 
     @Volatile
     private var systemdProcess: Process? = null
+
+    @Volatile
+    private var portalProcess: Process? = null
 
     @Volatile
     private var kdeCookie: String? = null
@@ -72,6 +79,7 @@ internal object ScreensaverInhibit {
         if (holdingAnything()) return
         log.i { "acquiring screensaver inhibit" }
         if (acquireSystemdInhibit()) return
+        if (acquirePortalInhibit()) return
         if (acquireKdePolicyAgentInhibit()) return
         if (acquireCookie("org.freedesktop.PowerManagement", "org.freedesktop.PowerManagement.Inhibit")) return
         acquireCookie("org.freedesktop.ScreenSaver", "org.freedesktop.ScreenSaver.Inhibit")
@@ -79,6 +87,7 @@ internal object ScreensaverInhibit {
 
     private fun holdingAnything(): Boolean =
         systemdProcess?.isAlive == true ||
+            portalProcess?.isAlive == true ||
             kdeCookie != null ||
             powerCookie != null ||
             screensaverCookie != null
@@ -88,6 +97,13 @@ internal object ScreensaverInhibit {
         systemdProcess?.let { process ->
             runCatching { process.destroy() }
             systemdProcess = null
+        }
+        portalProcess?.let { process ->
+            runCatching {
+                process.destroy()
+                if (!process.waitFor(1L, TimeUnit.SECONDS)) process.destroyForcibly()
+            }
+            portalProcess = null
         }
         kdeCookie?.let { cookie ->
             kdeCookie = null
@@ -142,6 +158,59 @@ internal object ScreensaverInhibit {
         systemdProcess = process
         log.i { "screensaver inhibit held via systemd-inhibit" }
         return true
+    }
+
+    /** XDG Desktop Portal Inhibit (v3), held by the bundled persistent helper.
+     *  The helper makes the call and blocks, keeping its session-bus connection
+     *  alive — killing it closes the connection and the portal releases the
+     *  inhibition. Works in the Flatpak sandbox, which has no system bus. */
+    private fun acquirePortalInhibit(): Boolean {
+        val helper = resolvePortalHelper() ?: return false
+        if (!helper.canExecute()) helper.setExecutable(true)
+        val process = runCatching {
+            ProcessBuilder(helper.absolutePath, PORTAL_FLAGS.toString())
+                .redirectErrorStream(true)
+                .start()
+        }.getOrNull() ?: return false
+        val reader = process.inputStream.bufferedReader()
+        val line = reader.readLine()
+        if (line == null || !line.startsWith("OK ")) {
+            log.w { "portal-inhibit-helper failed: ${line?.trim().orEmpty().ifBlank { "no output" }}" }
+            runCatching { process.destroy() }
+            return false
+        }
+        if (!process.isAlive) {
+            log.w { "portal-inhibit-helper exited immediately" }
+            return false
+        }
+        portalProcess = process
+        val handle = line.substringAfter("OK ").trim()
+        log.i { "screensaver inhibit held via org.freedesktop.portal.Inhibit (handle $handle)" }
+        return true
+    }
+
+    /** Locates the bundled portal-inhibit-helper: packaged app resources first,
+     *  then the local build directory, then classpath extraction to cache. */
+    private fun resolvePortalHelper(): File? {
+        System.getProperty("compose.application.resources.dir")
+            ?.takeIf(String::isNotBlank)
+            ?.let { File(it).resolve("native/linux/$HELPER_NAME") }
+            ?.takeIf(File::isFile)
+            ?.let { return it }
+
+        listOf(
+            File("composeApp/build/native/linux/$HELPER_NAME"),
+            File("build/native/linux/$HELPER_NAME"),
+        ).firstOrNull { it.isFile }?.let { return it }
+
+        val bytes = ScreensaverInhibit::class.java.getResourceAsStream("/native/linux/$HELPER_NAME")
+            ?.use { it.readBytes() }
+            ?: return null
+        val dir = DesktopCache.installVersionedFiles(
+            "portal-inhibit-helper",
+            mapOf(HELPER_NAME to bytes),
+        ).toFile()
+        return dir.resolve(HELPER_NAME).takeIf(File::isFile)
     }
 
     /** KDE native inhibit via powerdevil's PolicyAgent. `types=5` blocks both
@@ -219,4 +288,9 @@ internal object ScreensaverInhibit {
         }.getOrNull()
 
     private val SCREENSAVER_COOKIE_REGEX = Regex("""\(uint32 (\d+),""")
+
+    private const val HELPER_NAME = "portal-inhibit-helper"
+
+    /** Portal Inhibit flags: 4 = Suspend, 8 = Idle (screen blanking). */
+    private const val PORTAL_FLAGS = 12
 }
