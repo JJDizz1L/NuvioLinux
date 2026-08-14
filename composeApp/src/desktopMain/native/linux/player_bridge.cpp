@@ -329,6 +329,8 @@ static int load_libmpv() {
 #define EGL_GREEN_SIZE                0x3023
 #define EGL_BLUE_SIZE                 0x3022
 #define EGL_ALPHA_SIZE                0x3021
+#define EGL_WIDTH                     0x3057
+#define EGL_HEIGHT                    0x3056
 #define EGL_PLATFORM_X11_EXT          0x31D5
 #define EGL_PLATFORM_WAYLAND_EXT      0x31D8
 
@@ -354,7 +356,9 @@ typedef void* (*egl_get_display_t)(void*);
 typedef int   (*egl_initialize_t)(void*, int*, int*);
 typedef int   (*egl_choose_config_t)(void*, const int*, void*, int, int*);
 typedef void* (*egl_create_context_t)(void*, void*, void*, const int*);
+typedef void* (*egl_create_pbuffer_surface_t)(void*, void*, const int*);
 typedef int   (*egl_make_current_t)(void*, void*, void*, void*);
+typedef int   (*egl_destroy_surface_t)(void*, void*);
 typedef int   (*egl_destroy_context_t)(void*, void*);
 typedef int   (*egl_terminate_t)(void*);
 typedef int   (*egl_get_error_t)(void);
@@ -378,6 +382,11 @@ struct GlRenderer {
     void *eglLib = nullptr;
     void *display = nullptr;
     void *context = nullptr;
+    /* PBuffer surface used only when the EGL implementation rejects
+     * surfaceless make-current (NVIDIA's X11/Wayland platform displays do).
+     * The bridge renders into its own FBO, so the 1x1 surface merely
+     * satisfies eglMakeCurrent. */
+    void *surface = nullptr;
     unsigned int fbo = 0;
     unsigned int texture = 0;
     int width = 0;
@@ -386,6 +395,8 @@ struct GlRenderer {
 
     egl_get_proc_address_t eglGetProcAddress = nullptr;
     egl_make_current_t eglMakeCurrent = nullptr;
+    egl_create_pbuffer_surface_t eglCreatePbufferSurface = nullptr;
+    egl_destroy_surface_t eglDestroySurface = nullptr;
     egl_destroy_context_t eglDestroyContext = nullptr;
     egl_terminate_t eglTerminate = nullptr;
     egl_get_error_t eglGetError = nullptr;
@@ -429,6 +440,12 @@ static void *gl_get_proc_address_cb(void *ctx, const char *name) {
 static void gl_destroy(GlRenderer *gl) {
     if (gl->display && gl->context) {
         gl->eglMakeCurrent(gl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    }
+    if (gl->display && gl->surface && gl->eglDestroySurface) {
+        gl->eglDestroySurface(gl->display, gl->surface);
+        gl->surface = nullptr;
+    }
+    if (gl->display && gl->context) {
         gl->eglDestroyContext(gl->display, gl->context);
         gl->context = nullptr;
     }
@@ -458,6 +475,8 @@ static bool gl_init(GlRenderer *gl) {
     auto eglChooseConfig = (egl_choose_config_t)dlsym(gl->eglLib, "eglChooseConfig");
     auto eglCreateContext = (egl_create_context_t)dlsym(gl->eglLib, "eglCreateContext");
     gl->eglMakeCurrent = (egl_make_current_t)dlsym(gl->eglLib, "eglMakeCurrent");
+    gl->eglCreatePbufferSurface = (egl_create_pbuffer_surface_t)dlsym(gl->eglLib, "eglCreatePbufferSurface");
+    gl->eglDestroySurface = (egl_destroy_surface_t)dlsym(gl->eglLib, "eglDestroySurface");
     gl->eglDestroyContext = (egl_destroy_context_t)dlsym(gl->eglLib, "eglDestroyContext");
     gl->eglTerminate = (egl_terminate_t)dlsym(gl->eglLib, "eglTerminate");
     if (!gl->eglGetProcAddress || !eglGetPlatformDisplay || !eglInitialize || !eglChooseConfig ||
@@ -554,9 +573,42 @@ static bool gl_init(GlRenderer *gl) {
         return false;
     }
     if (!gl->eglMakeCurrent(gl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, gl->context)) {
-        LOG("GL renderer unavailable: eglMakeCurrent failed, falling back to SW renderer");
-        gl_destroy(gl);
-        return false;
+        /* Surfaceless contexts are not honored by every EGL implementation:
+         * NVIDIA's X11/Wayland platform displays reject EGL_NO_SURFACE with
+         * EGL_BAD_MATCH. Fall back to a 1x1 PBuffer surface — the bridge
+         * renders into its own FBO and never draws to the default
+         * framebuffer, so the surface only exists to satisfy make-current. */
+        bool madeCurrent = false;
+        if (gl->eglCreatePbufferSurface) {
+            /* The config chosen above may not advertise EGL_PBUFFER_BIT
+             * (configs from the B–D chains can lack it). Re-select a
+             * pbuffer-capable config explicitly so surface creation cannot
+             * fail with EGL_BAD_MATCH on such configs. */
+            void *pbufferConfig = config;
+            int pbNum = 0;
+            if (!eglChooseConfig(gl->display, configAttrsA, &pbufferConfig, 1, &pbNum) || pbNum < 1) {
+                pbufferConfig = config;
+            }
+            const int pbufferAttrs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+            gl->surface = gl->eglCreatePbufferSurface(gl->display, pbufferConfig, pbufferAttrs);
+            if (gl->surface) {
+                madeCurrent = gl->eglMakeCurrent(gl->display, gl->surface, gl->surface, gl->context);
+                if (madeCurrent) {
+                    DBG("surfaceless context unsupported, using 1x1 pbuffer");
+                } else {
+                    DBG("eglMakeCurrent on pbuffer failed (error=0x%x)",
+                        gl->eglGetError ? gl->eglGetError() : 0);
+                }
+            } else {
+                DBG("eglCreatePbufferSurface failed (error=0x%x)",
+                    gl->eglGetError ? gl->eglGetError() : 0);
+            }
+        }
+        if (!madeCurrent) {
+            LOG("GL renderer unavailable: eglMakeCurrent failed, falling back to SW renderer");
+            gl_destroy(gl);
+            return false;
+        }
     }
 
     gl->glGenFramebuffers = (gl_gen_framebuffers_t)gl_resolve(gl, "glGenFramebuffers");
