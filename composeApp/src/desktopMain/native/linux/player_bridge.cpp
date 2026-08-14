@@ -828,6 +828,12 @@ struct MpvPlayer {
     std::string cachedAudioTracksJson;
     std::string cachedSubtitleTracksJson;
 
+    /* Software-decode warning (logged once per file) and frame-drop tracking
+     * (event-thread only; reset on file-loaded). */
+    bool          warnedSoftwareDecode = false;
+    int64_t       lastDropFrameCount = -1;
+    int64_t       lastVoDropFrameCount = -1;
+
     /* Initial seek applied deterministically on MPV_EVENT_FILE_LOADED. A seek
      * issued immediately after loadfile can be dropped before the file is
      * loaded, silently starting playback from 0. */
@@ -1105,24 +1111,9 @@ struct MpvPlayer {
 
         /* Embedding-critical options: applied AFTER any user config so they
          * always win. A user vo=gpu-next would otherwise make mpv open its
-         * own window and render there instead of into our FBO. hwdec is app-
-         * controlled too: zero-copy vaapi (AMD/Intel) and nvdec (NVIDIA) work
-         * with the GL render API because we hand mpv a DRM render node and
-         * the vaapi/cuda interops import decoded surfaces directly into GL
-         * textures; auto-copy (vulkan-copy on AMD) is the safe fallback. */
+         * own window and render there instead of into our FBO. */
         p_mpv_set_option_string(mpv, "vo", "libmpv");
         p_mpv_set_option_string(mpv, "force-window", "no");
-        const char *hwdecOpt = decoderPriority >= 2 ? "no" : "vaapi,nvdec,auto-copy";
-        /* Tester escape hatch: NUVIO_MPV_HWDEC overrides the computed value
-         * (e.g. NUVIO_MPV_HWDEC=auto-copy or =nvdec-copy) without a rebuild. */
-        if (const char *overrideHwdec = getenv("NUVIO_MPV_HWDEC")) {
-            if (overrideHwdec[0] != '\0') {
-                hwdecOpt = overrideHwdec;
-                LOG("hwdec overridden by NUVIO_MPV_HWDEC = %s", hwdecOpt);
-            }
-        }
-        p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
-        DBG("hwdec option = %s", hwdecOpt);
 
         /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
          * read-ahead and the network cache) and optional on-disk cache. */
@@ -1176,6 +1167,31 @@ struct MpvPlayer {
             mpv = nullptr;
             return -1;
         }
+
+        /* hwdec is vendor-aware and set after the render thread has run gl_init
+         * (startRenderThread blocks until renderInitDone), so gl.nvidiaVendor is
+         * known here. It must be set before loadfile so the decoder picks it up.
+         * Zero-copy vaapi (AMD/Intel) and nvdec (NVIDIA) work with the GL render
+         * API because we hand mpv a DRM render node and the vaapi/cuda interops
+         * import decoded surfaces into GL textures. We avoid the generic
+         * "auto"/"auto-copy" lists so mpv never probes drmprime-overlay (needs a
+         * DRM atomic/modeset context that does not exist in a desktop session)
+         * nor libcuda on non-NVIDIA hardware. */
+        const char *hwdecOpt = "no";
+        if (decoderPriority < 2) {
+            hwdecOpt = gl.nvidiaVendor ? "nvdec,nvdec-copy" : "vaapi,vaapi-copy";
+        }
+        /* Tester escape hatch: NUVIO_MPV_HWDEC overrides the computed value
+         * (e.g. NUVIO_MPV_HWDEC=auto-copy or =nvdec-copy) without a rebuild. */
+        if (const char *overrideHwdec = getenv("NUVIO_MPV_HWDEC")) {
+            if (overrideHwdec[0] != '\0') {
+                hwdecOpt = overrideHwdec;
+                LOG("hwdec overridden by NUVIO_MPV_HWDEC = %s", hwdecOpt);
+            }
+        }
+        p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
+        DBG("hwdec option = %s", hwdecOpt);
+
         /* Request events */
         p_mpv_request_event(mpv, MPV_EVENT_PROPERTY_CHANGE, 1);
         p_mpv_request_event(mpv, MPV_EVENT_LOG_MESSAGE, 1);
@@ -1192,6 +1208,8 @@ struct MpvPlayer {
         p_mpv_observe_property(mpv, 0, "track-list", MPV_FORMAT_NODE);
         p_mpv_observe_property(mpv, 0, "hwdec-current", MPV_FORMAT_STRING);
         p_mpv_observe_property(mpv, 0, "hwdec-active", MPV_FORMAT_FLAG);
+        p_mpv_observe_property(mpv, 0, "drop-frame-count", MPV_FORMAT_INT64);
+        p_mpv_observe_property(mpv, 0, "vo-drop-frame-count", MPV_FORMAT_INT64);
 
         /* Load the file. The initial position (if any) is applied once
          * MPV_EVENT_FILE_LOADED arrives — a seek issued immediately after
@@ -1237,6 +1255,9 @@ struct MpvPlayer {
 
             if (evId == MPV_EVENT_FILE_LOADED) {
                 cachedEnded = 0;
+                warnedSoftwareDecode = false;
+                lastDropFrameCount = -1;
+                lastVoDropFrameCount = -1;
                 int64_t pending = pendingInitialPositionMs.load();
                 if (pending > 0) {
                     pendingInitialPositionMs.store(0);
@@ -1300,9 +1321,27 @@ struct MpvPlayer {
                 else if (strcmp(pname, "hwdec-current") == 0 && prop->format == MPV_FORMAT_STRING) {
                     const char *hwdec = pdata ? *(const char**)pdata : nullptr;
                     DBG("hwdec-current = %s", hwdec ? hwdec : "(null)");
+                    if (hwdec && strcmp(hwdec, "no") == 0 && !warnedSoftwareDecode) {
+                        warnedSoftwareDecode = true;
+                        LOG("software decoding active (hwdec-current=no) — 4K/high-bitrate streams may lag on this hardware");
+                    }
                 }
                 else if (strcmp(pname, "hwdec-active") == 0 && prop->format == MPV_FORMAT_FLAG) {
                     DBG("hwdec-active = %d", *(int*)pdata);
+                }
+                else if (strcmp(pname, "drop-frame-count") == 0 && prop->format == MPV_FORMAT_INT64) {
+                    int64_t drops = *(int64_t*)pdata;
+                    if (drops > lastDropFrameCount) {
+                        LOG("decoder dropped frames: %lld", (long long)drops);
+                        lastDropFrameCount = drops;
+                    }
+                }
+                else if (strcmp(pname, "vo-drop-frame-count") == 0 && prop->format == MPV_FORMAT_INT64) {
+                    int64_t drops = *(int64_t*)pdata;
+                    if (drops > lastVoDropFrameCount) {
+                        LOG("render dropped frames: %lld", (long long)drops);
+                        lastVoDropFrameCount = drops;
+                    }
                 }
             }
         }
