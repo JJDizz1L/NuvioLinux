@@ -999,6 +999,7 @@ private fun MainAppContent(
         WatchedRepository.ensureLoaded()
         WatchedRepository.uiState
     }.collectAsStateWithLifecycle()
+    val fullyWatchedSeriesKeys by WatchedRepository.fullyWatchedSeriesKeys.collectAsStateWithLifecycle()
     val downloadsUiState by remember {
         DownloadsRepository.ensureLoaded()
         DownloadsRepository.uiState
@@ -3430,6 +3431,7 @@ private fun MainAppContent(
                     val isWatched = WatchingState.isPosterWatched(
                         watchedKeys = watchedUiState.watchedKeys,
                         item = preview,
+                        fullyWatchedSeriesKeys = fullyWatchedSeriesKeys,
                     )
                     val removesFromLibrary = isSaved &&
                         (posterActionTarget.libraryItem != null || !isRemoteLibrarySource)
