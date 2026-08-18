@@ -1,6 +1,7 @@
 package com.nuviolinux.app.features.player
 
 import com.nuviolinux.app.core.build.AppFeaturePolicy
+import com.nuviolinux.app.features.player.skip.AutoSkipSegmentType
 import com.nuviolinux.app.features.player.skip.NextEpisodeThresholdMode
 import com.nuviolinux.app.features.streams.StreamAutoPlayMode
 import com.nuviolinux.app.features.streams.StreamAutoPlaySource
@@ -69,6 +70,7 @@ data class PlayerSettingsUiState(
     val streamAutoPlayRegex: String = "",
     val streamAutoPlayTimeoutSeconds: Int = 3,
     val skipIntroEnabled: Boolean = true,
+    val autoSkipSegmentTypes: Set<AutoSkipSegmentType> = emptySet(),
     val animeSkipEnabled: Boolean = false,
     val animeSkipClientId: String = "",
     val introDbApiKey: String = "",
@@ -117,6 +119,7 @@ object PlayerSettingsRepository {
     private var streamAutoPlayRegex = ""
     private var streamAutoPlayTimeoutSeconds = 3
     private var skipIntroEnabled = true
+    private var autoSkipSegmentTypes: Set<AutoSkipSegmentType> = emptySet()
     private var animeSkipEnabled = false
     private var animeSkipClientId = ""
     private var introDbApiKey = ""
@@ -170,6 +173,7 @@ object PlayerSettingsRepository {
         streamAutoPlayRegex = ""
         streamAutoPlayTimeoutSeconds = 3
         skipIntroEnabled = true
+        autoSkipSegmentTypes = emptySet()
         animeSkipEnabled = false
         animeSkipClientId = ""
         introDbApiKey = ""
@@ -281,6 +285,10 @@ object PlayerSettingsRepository {
             PlayerSettingsStorage.saveStreamAutoPlayTimeoutSeconds(streamAutoPlayTimeoutSeconds)
         }
         skipIntroEnabled = PlayerSettingsStorage.loadSkipIntroEnabled() ?: true
+        autoSkipSegmentTypes = PlayerSettingsStorage.loadAutoSkipSegmentTypes()
+            ?.mapNotNull(AutoSkipSegmentType::fromStoredValue)
+            ?.toSet()
+            ?: emptySet()
         animeSkipEnabled = PlayerSettingsStorage.loadAnimeSkipEnabled() ?: false
         animeSkipClientId = PlayerSettingsStorage.loadAnimeSkipClientId() ?: ""
         introDbApiKey = PlayerSettingsStorage.loadIntroDbApiKey() ?: ""
@@ -555,6 +563,15 @@ object PlayerSettingsRepository {
         PlayerSettingsStorage.saveSkipIntroEnabled(enabled)
     }
 
+    fun setAutoSkipSegmentTypeEnabled(segmentType: AutoSkipSegmentType, enabled: Boolean) {
+        ensureLoaded()
+        val updated = if (enabled) autoSkipSegmentTypes + segmentType else autoSkipSegmentTypes - segmentType
+        if (autoSkipSegmentTypes == updated) return
+        autoSkipSegmentTypes = updated
+        publish()
+        PlayerSettingsStorage.saveAutoSkipSegmentTypes(updated.mapTo(linkedSetOf()) { it.storedValue })
+    }
+
     fun setAnimeSkipEnabled(enabled: Boolean) {
         ensureLoaded()
         if (animeSkipEnabled == enabled) return
@@ -689,6 +706,7 @@ object PlayerSettingsRepository {
             streamAutoPlayRegex = streamAutoPlayRegex,
             streamAutoPlayTimeoutSeconds = streamAutoPlayTimeoutSeconds,
             skipIntroEnabled = skipIntroEnabled,
+            autoSkipSegmentTypes = autoSkipSegmentTypes,
             animeSkipEnabled = animeSkipEnabled,
             animeSkipClientId = animeSkipClientId,
             introDbApiKey = introDbApiKey,
