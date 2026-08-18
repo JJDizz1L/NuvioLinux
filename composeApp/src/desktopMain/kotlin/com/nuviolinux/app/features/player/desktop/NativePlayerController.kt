@@ -374,7 +374,10 @@ internal class NativePlayerController(
 
     override fun setSubtitleUri(url: String) {
         log.d { "setSubtitleUri ${url.toPlaybackLogKey()} handle=$handle" }
-        handle.takeIf { it != 0L }?.let { NativePlayerBridge.addSubtitleUrl(it, url) }
+        handle.takeIf { it != 0L }?.let { current ->
+            NativePlayerBridge.clearExternalSubtitles(current)
+            NativePlayerBridge.addSubtitleUrl(current, url)
+        }
     }
 
     override fun clearExternalSubtitle() {
