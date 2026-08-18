@@ -7,7 +7,7 @@
 
 pkgname=nuvio-linux
 pkgver=0.1.17alpha
-pkgrel=6
+pkgrel=7
 pkgdesc="Nuvio Linux desktop media player — Linux native mpv playback"
 arch=('x86_64')
 url="https://github.com/JJDizz1L/NuvioLinux"
