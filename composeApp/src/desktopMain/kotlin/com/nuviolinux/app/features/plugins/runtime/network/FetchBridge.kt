@@ -2,10 +2,10 @@ package com.nuviolinux.app.features.plugins.runtime.network
 
 import co.touchlab.kermit.Logger
 import com.dokar.quickjs.QuickJs
-import com.dokar.quickjs.binding.function
+import com.dokar.quickjs.binding.asyncFunction
 import com.nuviolinux.app.features.addons.httpRequestRaw
 import com.nuviolinux.app.features.plugins.runtime.host.HostModule
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -20,7 +20,7 @@ internal class FetchBridge : HostModule {
     private val json = Json { ignoreUnknownKeys = true }
 
     override fun register(runtime: QuickJs) {
-        runtime.function("__native_fetch") { args ->
+        runtime.asyncFunction("__native_fetch") { args ->
             val url = args.getOrNull(0)?.toString() ?: ""
             val method = args.getOrNull(1)?.toString() ?: "GET"
             val headersJson = args.getOrNull(2)?.toString() ?: "{}"
@@ -28,6 +28,8 @@ internal class FetchBridge : HostModule {
             val followRedirects = args.getOrNull(4) as? Boolean ?: true
             try {
                 performNativeFetch(url, method, headersJson, body, followRedirects)
+            } catch (ce: CancellationException) {
+                throw ce
             } catch (t: Throwable) {
                 log.e(t) { "Fetch bridge error for $method $url" }
                 JsonObject(
@@ -44,7 +46,7 @@ internal class FetchBridge : HostModule {
         }
     }
 
-    private fun performNativeFetch(
+    private suspend fun performNativeFetch(
         url: String,
         method: String,
         headersJson: String,
@@ -56,15 +58,13 @@ internal class FetchBridge : HostModule {
             headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-        val response = runBlocking {
-            httpRequestRaw(
-                method = method,
-                url = url,
-                headers = headers,
-                body = body,
-                followRedirects = followRedirects,
-            )
-        }
+        val response = httpRequestRaw(
+            method = method,
+            url = url,
+            headers = headers,
+            body = body,
+            followRedirects = followRedirects,
+        )
 
         val responseHeaders = response.headers.mapKeys { (key, _) -> key.lowercase() }
             .mapValues { (_, value) -> truncateString(value, MAX_FETCH_HEADER_VALUE_CHARS) }

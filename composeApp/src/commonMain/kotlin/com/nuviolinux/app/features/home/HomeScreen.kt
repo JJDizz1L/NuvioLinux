@@ -24,6 +24,7 @@ import com.nuviolinux.app.core.auth.AuthState
 import com.nuviolinux.app.core.network.NetworkCondition
 import com.nuviolinux.app.core.network.NetworkStatusRepository
 import com.nuviolinux.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
+import com.nuviolinux.app.core.ui.DisintegrationRequest
 import com.nuviolinux.app.core.ui.NuvioScreen
 import com.nuviolinux.app.core.ui.NuvioNetworkOfflineCard
 import com.nuviolinux.app.core.ui.nuvioSafeBottomPadding
@@ -112,6 +113,7 @@ fun HomeScreen(
     onPosterLongClick: ((MetaPreview) -> Unit)? = null,
     onContinueWatchingClick: ((ContinueWatchingItem) -> Unit)? = null,
     onContinueWatchingLongPress: ((ContinueWatchingItem) -> Unit)? = null,
+    continueWatchingDisintegrationRequest: DisintegrationRequest<String>? = null,
     onFolderClick: ((collectionId: String, folderId: String) -> Unit)? = null,
     onFirstCatalogRendered: (() -> Unit)? = null,
 ) {
@@ -909,6 +911,7 @@ fun HomeScreen(
                         upcomingListState = upcomingListState,
                         onItemClick = onContinueWatchingClick,
                         onItemLongPress = onContinueWatchingLongPress,
+                        disintegrationRequest = continueWatchingDisintegrationRequest,
                     )
                     item {
                         HomeEmptyStateCard(
@@ -931,6 +934,7 @@ fun HomeScreen(
                         upcomingListState = upcomingListState,
                         onItemClick = onContinueWatchingClick,
                         onItemLongPress = onContinueWatchingLongPress,
+                        disintegrationRequest = continueWatchingDisintegrationRequest,
                     )
                     items(3) {
                         HomeSkeletonRow(
@@ -975,6 +979,7 @@ fun HomeScreen(
                         upcomingListState = upcomingListState,
                         onItemClick = onContinueWatchingClick,
                         onItemLongPress = onContinueWatchingLongPress,
+                        disintegrationRequest = continueWatchingDisintegrationRequest,
                     )
 
                     keyedEnabledHomeItems.forEach { keyedSettingsItem ->
@@ -1032,6 +1037,7 @@ private fun LazyListScope.homeContinueWatchingSections(
     upcomingListState: LazyListState,
     onItemClick: ((ContinueWatchingItem) -> Unit)?,
     onItemLongPress: ((ContinueWatchingItem) -> Unit)?,
+    disintegrationRequest: DisintegrationRequest<String>?,
 ) {
     if (!preferences.isVisible) return
 
@@ -1049,6 +1055,7 @@ private fun LazyListScope.homeContinueWatchingSections(
                 listState = continueWatchingListState,
                 onItemClick = onItemClick,
                 onItemLongPress = onItemLongPress,
+                disintegrationRequest = disintegrationRequest,
             )
         }
     }
@@ -1068,6 +1075,7 @@ private fun LazyListScope.homeContinueWatchingSections(
                 listState = upcomingListState,
                 onItemClick = onItemClick,
                 onItemLongPress = onItemLongPress,
+                disintegrationRequest = disintegrationRequest,
             )
         }
     }

@@ -150,6 +150,14 @@ internal object DiscordPresenceManager {
             mustSend = dirty
         }
 
+        if (DISCORD_APP_ID.isBlank()) {
+            if (lastEnabledSent != currentConfig.enabled || currentConfig.enabled) {
+                lastEnabledSent = currentConfig.enabled
+                client.disconnect()
+            }
+            return
+        }
+
         if (lastEnabledSent != currentConfig.enabled) {
             lastEnabledSent = currentConfig.enabled
             lastKey = ""

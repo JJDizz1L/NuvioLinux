@@ -2,7 +2,6 @@ package com.nuviolinux.app.features.watching.sync
 
 import com.nuviolinux.app.features.watched.WatchedItem
 import com.nuviolinux.app.features.watched.watchedItemKey
-import com.nuviolinux.app.features.watched.watchedItemTypeAliases
 
 internal data class TraktWatchedProjectionCandidate(
     val item: WatchedItem,
@@ -51,11 +50,9 @@ internal fun buildTraktWatchedProjection(
         candidates.forEach { candidate ->
             val item = candidate.item
             val storedKey = watchedItemKey(item.type, item.id, item.season, item.episode)
-            watchedItemTypeAliases(item.type).forEach { type ->
-                candidate.contentIds.forEach { contentId ->
-                    val key = watchedItemKey(type, contentId, item.season, item.episode)
-                    if (key != storedKey) add(key)
-                }
+            candidate.contentIds.forEach { contentId ->
+                val key = watchedItemKey(item.type, contentId, item.season, item.episode)
+                if (key != storedKey) add(key)
             }
         }
     }

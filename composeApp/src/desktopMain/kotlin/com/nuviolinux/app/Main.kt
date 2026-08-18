@@ -30,6 +30,7 @@ import com.nuviolinux.app.features.player.desktop.DesktopWindowGeometry
 import com.nuviolinux.app.features.player.desktop.DesktopWindowModeStorage
 import com.nuviolinux.app.features.player.desktop.installDesktopAppFullscreenShortcuts
 import com.nuviolinux.app.features.player.desktop.registerDesktopAppFullscreenToggle
+import com.nuviolinux.app.features.profiles.ProfileRepository
 import java.awt.Desktop
 import java.awt.Color as AwtColor
 import java.awt.event.ComponentAdapter
@@ -49,6 +50,9 @@ fun main(args: Array<String>) {
     Logger.withTag("WindowEnvironment").i { "display server: ${DisplayServerDetector.detect()}" }
     installDesktopOpenUriHandler()
     handleDesktopLaunchArgs(args)
+    // Load cached profile data synchronously so the profile color is available
+    // on the very first Compose frame (matching Android's SharedPreferences behavior).
+    ProfileRepository.loadCachedProfiles()
 
     application {
         val smokePlayerUrl = (
@@ -59,19 +63,37 @@ fun main(args: Array<String>) {
         val wasFullscreenOnLastExit = remember { DesktopWindowModeStorage.loadWasFullscreen() }
         val wasMaximizedOnLastExit = remember { DesktopWindowModeStorage.loadWasMaximized() }
         val savedGeometry = remember { DesktopWindowModeStorage.loadWindowedGeometry() }
+        // Nuvio Linux is Linux-only, so fullscreen is always emulated
+        // natively (see DesktopAppFullscreenController) and restored
+        // separately below rather than driven by WindowPlacement.
+        val initialPlacement = when {
+            wasFullscreenOnLastExit -> WindowPlacement.Fullscreen
+            wasMaximizedOnLastExit == false && savedGeometry != null -> WindowPlacement.Floating
+            else -> WindowPlacement.Maximized
+        }
+        val isStartingMaximizedOrFullscreen =
+            initialPlacement == WindowPlacement.Maximized || initialPlacement == WindowPlacement.Fullscreen
+        val maxScreenBounds = remember {
+            runCatching {
+                java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
+            }.getOrNull()
+        }
+        val initialWidth = when {
+            isStartingMaximizedOrFullscreen && maxScreenBounds != null -> maxScreenBounds.width.dp
+            savedGeometry != null -> savedGeometry.width.dp
+            else -> 1280.dp
+        }
+        val initialHeight = when {
+            isStartingMaximizedOrFullscreen && maxScreenBounds != null -> maxScreenBounds.height.dp
+            savedGeometry != null -> savedGeometry.height.dp
+            else -> 820.dp
+        }
         val windowState = rememberWindowState(
-            width = savedGeometry?.width?.dp ?: 1280.dp,
-            height = savedGeometry?.height?.dp ?: 820.dp,
+            width = initialWidth,
+            height = initialHeight,
             position = savedGeometry?.let { WindowPosition.Absolute(x = it.x.dp, y = it.y.dp) }
                 ?: WindowPosition.PlatformDefault,
-            // Nuvio Linux is Linux-only, so fullscreen is always emulated
-            // natively (see DesktopAppFullscreenController) and restored
-            // separately below rather than driven by WindowPlacement.
-            placement = when {
-                wasFullscreenOnLastExit -> WindowPlacement.Fullscreen
-                wasMaximizedOnLastExit == false && savedGeometry != null -> WindowPlacement.Floating
-                else -> WindowPlacement.Maximized
-            },
+            placement = initialPlacement,
         )
         val fullscreenController = remember { DesktopAppFullscreenController() }
 

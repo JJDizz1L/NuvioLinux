@@ -219,3 +219,14 @@ internal fun findPersistedSubtitleTrackIndex(
     }
     return -1
 }
+
+internal fun persistedAddonSubtitleUrlForItem(
+    preference: PersistedPlayerTrackPreference,
+    itemId: String,
+): String? {
+    if (preference.subtitleType != PersistedSubtitleSelectionType.ADDON) return null
+    val currentItemId = itemId.trim().takeIf { it.isNotBlank() } ?: return null
+    val storedItemId = preference.addonSubtitleItemId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (storedItemId != currentItemId) return null
+    return preference.addonSubtitleUrl?.trim()?.takeIf { it.isNotBlank() }
+}

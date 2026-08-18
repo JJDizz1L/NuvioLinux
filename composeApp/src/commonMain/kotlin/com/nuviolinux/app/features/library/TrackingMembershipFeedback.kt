@@ -50,6 +50,22 @@ private suspend fun showRewriteToast(rewrite: TrackingMembershipResolution) {
     )
 }
 
+internal suspend fun showTrackingMembershipRewriteFeedback(result: TrackingMembershipApplyResult) {
+    val rewrite = result.rewrites.firstOrNull() ?: return
+    val providerName = providerDisplayName(rewrite.providerId)
+    val tabs = TrackingProviderRegistry.libraryProvider(rewrite.providerId)?.snapshot()?.tabs.orEmpty()
+    val requestedTitle = tabs.statusTitle(rewrite.requestedListKey, providerName)
+    val resolvedTitle = tabs.statusTitle(rewrite.resolvedListKey, providerName)
+    NuvioToastController.show(
+        getString(
+            Res.string.tracking_list_status_rewritten,
+            providerName,
+            resolvedTitle,
+            requestedTitle,
+        ),
+    )
+}
+
 private fun providerDisplayName(providerId: com.nuviolinux.app.features.tracking.TrackingProviderId): String =
     TrackingProviderRegistry.authProvider(providerId)
         ?.descriptor

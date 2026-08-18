@@ -15,11 +15,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * Discord application ID for this app (create at discord.com/developers,
- * under "Applications" → "Rich Presence" assets). Set to the real ID; the
- * RPC is disabled while this starts with "REPLACE_WITH".
- */
-internal const val DISCORD_APP_ID = "1532796978973638830"
+* Discord application ID for this app (create at discord.com/developers,
+  * under "Applications" → "Rich Presence" assets). Overridable at build time
+  * via NUVIO_DISCORD_CLIENT_ID (local.properties/env) — see the generated
+  * DiscordConfig; the RPC is disabled while the ID is blank.
+  */
+internal val DISCORD_APP_ID: String = DiscordConfig.CLIENT_ID
 
 private const val OP_HANDSHAKE = 0
 private const val OP_FRAME = 1

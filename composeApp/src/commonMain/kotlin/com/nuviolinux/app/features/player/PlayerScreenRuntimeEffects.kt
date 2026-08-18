@@ -8,9 +8,13 @@ import com.nuviolinux.app.features.p2p.P2pSettingsRepository
 import com.nuviolinux.app.features.p2p.P2pStreamRequest
 import com.nuviolinux.app.features.p2p.P2pStreamingEngine
 import com.nuviolinux.app.features.p2p.P2pStreamingState
+import com.nuviolinux.app.features.player.skip.AutoSkipSegmentType
 import com.nuviolinux.app.features.player.skip.NextEpisodeInfo
 import com.nuviolinux.app.features.player.skip.PlayerNextEpisodeRules
 import com.nuviolinux.app.features.player.skip.SkipIntroRepository
+import com.nuviolinux.app.features.player.skip.SkipIntervalLookup
+import com.nuviolinux.app.features.player.skip.autoSkipKey
+import com.nuviolinux.app.features.player.skip.resolveSkipIntervalLookup
 import com.nuviolinux.app.features.streams.BingeGroupCacheRepository
 import com.nuviolinux.app.features.streams.StreamLinkCacheRepository
 import com.nuviolinux.app.features.streams.StreamItem
@@ -412,40 +416,53 @@ private fun PlayerScreenRuntime.BindPlayerMetadataAndSkipEffects() {
         }
     }
 
-    LaunchedEffect(activeVideoId, activeSeasonNumber, activeEpisodeNumber) {
+    LaunchedEffect(
+        activeVideoId,
+        activeSeasonNumber,
+        activeEpisodeNumber,
+        playerSettingsUiState.skipIntroEnabled,
+    ) {
         skipIntervals = emptyList()
         activeSkipInterval = null
         skipIntervalDismissed = false
+        autoSkippedIntervalKeys.clear()
         showNextEpisodeCard = false
         nextEpisodeAutoPlayJob?.cancel()
         nextEpisodeAutoPlaySearching = false
 
-        val season = activeSeasonNumber
-        val episode = activeEpisodeNumber
-        val vid = activeVideoId
-        if (season == null || episode == null || vid == null) return@LaunchedEffect
+        if (!playerSettingsUiState.skipIntroEnabled) return@LaunchedEffect
+
+        val lookup = resolveSkipIntervalLookup(
+            videoId = activeVideoId,
+            season = activeSeasonNumber,
+            episode = activeEpisodeNumber,
+        ) ?: return@LaunchedEffect
 
         launch {
-            val intervals = when {
-                vid.startsWith("mal:") -> {
-                    val malId = vid.removePrefix("mal:").substringBefore(':')
-                    SkipIntroRepository.getSkipIntervalsForMal(malId = malId, episode = episode)
-                }
-                vid.startsWith("kitsu:") -> {
-                    val kitsuId = vid.removePrefix("kitsu:").substringBefore(':')
-                    SkipIntroRepository.getSkipIntervalsForKitsu(kitsuId = kitsuId, episode = episode)
-                }
-                else -> SkipIntroRepository.getSkipIntervals(
-                    imdbId = vid.substringBefore(':').takeIf { it.startsWith("tt") },
-                    season = season,
-                    episode = episode,
+            val intervals = when (lookup) {
+                is SkipIntervalLookup.Imdb -> SkipIntroRepository.getSkipIntervals(
+                    imdbId = lookup.imdbId,
+                    season = lookup.season,
+                    episode = lookup.episode,
+                )
+                is SkipIntervalLookup.Mal -> SkipIntroRepository.getSkipIntervalsForMal(
+                    malId = lookup.malId,
+                    episode = lookup.episode,
+                )
+                is SkipIntervalLookup.Kitsu -> SkipIntroRepository.getSkipIntervalsForKitsu(
+                    kitsuId = lookup.kitsuId,
+                    episode = lookup.episode,
                 )
             }
             skipIntervals = intervals
         }
     }
 
-    LaunchedEffect(playbackSnapshot.positionMs, skipIntervals) {
+    LaunchedEffect(
+        playbackSnapshot.positionMs,
+        skipIntervals,
+        playerSettingsUiState.autoSkipSegmentTypes,
+    ) {
         if (skipIntervals.isEmpty()) {
             activeSkipInterval = null
             return@LaunchedEffect
@@ -457,6 +474,22 @@ private fun PlayerScreenRuntime.BindPlayerMetadataAndSkipEffects() {
         if (current != activeSkipInterval) {
             activeSkipInterval = current
             if (current != null) skipIntervalDismissed = false
+        }
+        if (current != null) {
+            val segmentType = AutoSkipSegmentType.fromSkipIntervalType(current.type)
+            val intervalKey = current.autoSkipKey()
+            val controller = playerController
+            if (
+                controller != null &&
+                segmentType != null &&
+                segmentType in playerSettingsUiState.autoSkipSegmentTypes &&
+                intervalKey !in autoSkippedIntervalKeys
+            ) {
+                autoSkippedIntervalKeys.add(intervalKey)
+                controller.seekTo((current.endTime * 1000).toLong())
+                scheduleProgressSyncAfterSeek()
+                skipIntervalDismissed = true
+            }
         }
     }
 

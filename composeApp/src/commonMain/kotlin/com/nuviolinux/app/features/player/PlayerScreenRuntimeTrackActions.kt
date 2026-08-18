@@ -3,6 +3,9 @@ package com.nuviolinux.app.features.player
 internal val PlayerScreenRuntime.subtitleStyle: SubtitleStyleState
     get() = playerSettingsUiState.subtitleStyle
 
+private val PlayerScreenRuntime.subtitlePreferenceItemId: String
+    get() = "${playbackSession.videoId}|${activeSeasonNumber ?: -1}|${activeEpisodeNumber ?: -1}"
+
 internal val PlayerScreenRuntime.activeAddonSubtitleType: String
     get() = contentType ?: parentMetaType
 
@@ -55,6 +58,7 @@ internal fun PlayerScreenRuntime.persistInternalSubtitlePreference(track: Subtit
             subtitleTrackId = track?.id,
             addonSubtitleId = null,
             addonSubtitleUrl = null,
+            addonSubtitleItemId = null,
             addonSubtitleAddonName = null,
         )
     }
@@ -69,6 +73,7 @@ internal fun PlayerScreenRuntime.persistAddonSubtitlePreference(subtitle: AddonS
             subtitleTrackId = null,
             addonSubtitleId = subtitle.id,
             addonSubtitleUrl = subtitle.url,
+            addonSubtitleItemId = subtitlePreferenceItemId,
             addonSubtitleAddonName = subtitle.addonName,
         )
     }
@@ -121,13 +126,20 @@ internal fun PlayerScreenRuntime.restorePersistedTrackPreferenceIfNeeded() {
             }
         }
         PersistedSubtitleSelectionType.ADDON -> {
-            val url = preference.addonSubtitleUrl?.takeIf { it.isNotBlank() }
+            val url = persistedAddonSubtitleUrlForItem(
+                preference = preference,
+                itemId = subtitlePreferenceItemId,
+            )
             if (url != null) {
                 selectedAddonSubtitleId = preference.addonSubtitleId ?: url
                 selectedSubtitleIndex = -1
                 useCustomSubtitles = true
                 playerController?.setSubtitleUri(url)
                 preferredSubtitleSelectionApplied = true
+            } else {
+                selectedAddonSubtitleId = null
+                selectedSubtitleIndex = -1
+                useCustomSubtitles = false
             }
         }
     }

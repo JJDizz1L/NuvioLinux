@@ -54,11 +54,13 @@ internal actual object PlayerSettingsStorage {
     private const val streamAutoPlayRegexKey = "stream_auto_play_regex"
     private const val streamAutoPlayTimeoutSecondsKey = "stream_auto_play_timeout_seconds"
     private const val skipIntroEnabledKey = "skip_intro_enabled"
+    private const val autoSkipSegmentTypesKey = "auto_skip_segment_types"
     private const val animeSkipEnabledKey = "animeskip_enabled"
     private const val animeSkipClientIdKey = "animeskip_client_id"
     private const val introDbApiKeyKey = "introdb_api_key"
     private const val introSubmitEnabledKey = "intro_submit_enabled"
     private const val streamAutoPlayNextEpisodeEnabledKey = "stream_auto_play_next_episode_enabled"
+    private const val streamAutoPlayNextEpisodeFallbackEnabledKey = "stream_auto_play_next_episode_fallback_enabled"
     private const val streamAutoPlayPreferBingeGroupKey = "stream_auto_play_prefer_binge_group"
     private const val streamAutoPlayReuseBingeGroupKey = "stream_auto_play_reuse_binge_group"
     private const val nextEpisodeThresholdModeKey = "next_episode_threshold_mode"
@@ -104,9 +106,11 @@ internal actual object PlayerSettingsStorage {
         streamAutoPlayRegexKey,
         streamAutoPlayTimeoutSecondsKey,
         skipIntroEnabledKey,
+        autoSkipSegmentTypesKey,
         animeSkipEnabledKey,
         animeSkipClientIdKey,
         streamAutoPlayNextEpisodeEnabledKey,
+        streamAutoPlayNextEpisodeFallbackEnabledKey,
         streamAutoPlayPreferBingeGroupKey,
         streamAutoPlayReuseBingeGroupKey,
         nextEpisodeThresholdModeKey,
@@ -192,6 +196,8 @@ internal actual object PlayerSettingsStorage {
     actual fun saveStreamAutoPlayTimeoutSeconds(seconds: Int) = saveInt(streamAutoPlayTimeoutSecondsKey, seconds)
     actual fun loadSkipIntroEnabled(): Boolean? = loadBoolean(skipIntroEnabledKey)
     actual fun saveSkipIntroEnabled(enabled: Boolean) = saveBoolean(skipIntroEnabledKey, enabled)
+    actual fun loadAutoSkipSegmentTypes(): Set<String>? = loadStringSet(autoSkipSegmentTypesKey)
+    actual fun saveAutoSkipSegmentTypes(segmentTypes: Set<String>) = saveStringSet(autoSkipSegmentTypesKey, segmentTypes)
     actual fun loadAnimeSkipEnabled(): Boolean? = loadBoolean(animeSkipEnabledKey)
     actual fun saveAnimeSkipEnabled(enabled: Boolean) = saveBoolean(animeSkipEnabledKey, enabled)
     actual fun loadAnimeSkipClientId(): String? = loadString(animeSkipClientIdKey)
@@ -202,6 +208,8 @@ internal actual object PlayerSettingsStorage {
     actual fun saveIntroSubmitEnabled(enabled: Boolean) = saveBoolean(introSubmitEnabledKey, enabled)
     actual fun loadStreamAutoPlayNextEpisodeEnabled(): Boolean? = loadBoolean(streamAutoPlayNextEpisodeEnabledKey)
     actual fun saveStreamAutoPlayNextEpisodeEnabled(enabled: Boolean) = saveBoolean(streamAutoPlayNextEpisodeEnabledKey, enabled)
+    actual fun loadStreamAutoPlayNextEpisodeFallbackEnabled(): Boolean? = loadBoolean(streamAutoPlayNextEpisodeFallbackEnabledKey)
+    actual fun saveStreamAutoPlayNextEpisodeFallbackEnabled(enabled: Boolean) = saveBoolean(streamAutoPlayNextEpisodeFallbackEnabledKey, enabled)
     actual fun loadStreamAutoPlayPreferBingeGroup(): Boolean? = loadBoolean(streamAutoPlayPreferBingeGroupKey)
     actual fun saveStreamAutoPlayPreferBingeGroup(enabled: Boolean) = saveBoolean(streamAutoPlayPreferBingeGroupKey, enabled)
     actual fun loadStreamAutoPlayReuseBingeGroup(): Boolean? = loadBoolean(streamAutoPlayReuseBingeGroupKey)
@@ -268,9 +276,11 @@ internal actual object PlayerSettingsStorage {
         loadStreamAutoPlayRegex()?.let { put(streamAutoPlayRegexKey, encodeSyncString(it)) }
         loadStreamAutoPlayTimeoutSeconds()?.let { put(streamAutoPlayTimeoutSecondsKey, encodeSyncInt(it)) }
         loadSkipIntroEnabled()?.let { put(skipIntroEnabledKey, encodeSyncBoolean(it)) }
+        loadAutoSkipSegmentTypes()?.let { put(autoSkipSegmentTypesKey, encodeSyncStringSet(it)) }
         loadAnimeSkipEnabled()?.let { put(animeSkipEnabledKey, encodeSyncBoolean(it)) }
         loadAnimeSkipClientId()?.let { put(animeSkipClientIdKey, encodeSyncString(it)) }
         loadStreamAutoPlayNextEpisodeEnabled()?.let { put(streamAutoPlayNextEpisodeEnabledKey, encodeSyncBoolean(it)) }
+        loadStreamAutoPlayNextEpisodeFallbackEnabled()?.let { put(streamAutoPlayNextEpisodeFallbackEnabledKey, encodeSyncBoolean(it)) }
         loadStreamAutoPlayPreferBingeGroup()?.let { put(streamAutoPlayPreferBingeGroupKey, encodeSyncBoolean(it)) }
         loadStreamAutoPlayReuseBingeGroup()?.let { put(streamAutoPlayReuseBingeGroupKey, encodeSyncBoolean(it)) }
         loadNextEpisodeThresholdMode()?.let { put(nextEpisodeThresholdModeKey, encodeSyncString(it)) }
@@ -319,11 +329,13 @@ internal actual object PlayerSettingsStorage {
         payload.decodeSyncString(streamAutoPlayRegexKey)?.let(::saveStreamAutoPlayRegex)
         payload.decodeSyncInt(streamAutoPlayTimeoutSecondsKey)?.let(::saveStreamAutoPlayTimeoutSeconds)
         payload.decodeSyncBoolean(skipIntroEnabledKey)?.let(::saveSkipIntroEnabled)
+        payload.decodeSyncStringSet(autoSkipSegmentTypesKey)?.let(::saveAutoSkipSegmentTypes)
         payload.decodeSyncBoolean(animeSkipEnabledKey)?.let(::saveAnimeSkipEnabled)
         payload.decodeSyncString(animeSkipClientIdKey)?.let(::saveAnimeSkipClientId)
         payload.decodeSyncString(introDbApiKeyKey)?.let(::saveIntroDbApiKey)
         payload.decodeSyncBoolean(introSubmitEnabledKey)?.let(::saveIntroSubmitEnabled)
         payload.decodeSyncBoolean(streamAutoPlayNextEpisodeEnabledKey)?.let(::saveStreamAutoPlayNextEpisodeEnabled)
+        payload.decodeSyncBoolean(streamAutoPlayNextEpisodeFallbackEnabledKey)?.let(::saveStreamAutoPlayNextEpisodeFallbackEnabled)
         payload.decodeSyncBoolean(streamAutoPlayPreferBingeGroupKey)?.let(::saveStreamAutoPlayPreferBingeGroup)
         payload.decodeSyncBoolean(streamAutoPlayReuseBingeGroupKey)?.let(::saveStreamAutoPlayReuseBingeGroup)
         payload.decodeSyncString(nextEpisodeThresholdModeKey)?.let(::saveNextEpisodeThresholdMode)

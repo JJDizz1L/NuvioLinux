@@ -17,8 +17,8 @@ actual object AppFeaturePolicy {
     actual val personalMediaAddonCopyEnabled: Boolean = false
     actual val p2pEnabled: Boolean = true
     actual val externalPlayerSupported: Boolean = false
-    actual val trailerPlaybackMode: TrailerPlaybackMode = TrailerPlaybackMode.EXTERNAL
-    actual val heroTrailerPlaybackSupported: Boolean = false
+    actual val trailerPlaybackMode: TrailerPlaybackMode = TrailerPlaybackMode.IN_APP
+    actual val heroTrailerPlaybackSupported: Boolean = true
     // In-app updates are disabled for now: Linux builds are updated through
     // the system package manager, so the GitHub-release banner isn't useful.
     // The updater code stays intact — re-enable with `!isFlatpakRuntime` above.

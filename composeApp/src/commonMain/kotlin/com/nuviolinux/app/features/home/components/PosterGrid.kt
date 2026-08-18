@@ -115,56 +115,66 @@ private fun PosterGridTile(
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
 ) {
-    Column(
+    HomePosterHoverPreview(
+        item = item,
+        isWatched = isWatched,
+        onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(item.posterShape.posterGridAspectRatio())
-                .clip(RoundedCornerShape(cornerRadiusDp.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .nuvioCardDepth(
-                    shape = RoundedCornerShape(cornerRadiusDp.dp),
-                    surface = NuvioCardDepthSurface.Posters,
-                )
-                .posterCardClickable(
-                    onClick = onClick,
-                    onLongClick = onLongClick,
-                    zoomImageUrl = item.poster,
-                    zoomCornerRadius = cornerRadiusDp.dp,
-                ),
+                .then(it),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (item.poster != null) {
-                AsyncImage(
-                    model = item.poster,
-                    contentDescription = item.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(item.posterShape.posterGridAspectRatio())
+                    .clip(RoundedCornerShape(cornerRadiusDp.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .nuvioCardDepth(
+                        shape = RoundedCornerShape(cornerRadiusDp.dp),
+                        surface = NuvioCardDepthSurface.Posters,
+                    )
+                    .posterCardClickable(
+                        onClick = onClick,
+                        onLongClick = onLongClick,
+                        zoomImageUrl = item.poster,
+                        zoomCornerRadius = cornerRadiusDp.dp,
+                    ),
+            ) {
+                if (item.poster != null) {
+                    AsyncImage(
+                        model = item.poster,
+                        contentDescription = item.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                NuvioPosterWatchedOverlay(isWatched = isWatched)
             }
-            NuvioPosterWatchedOverlay(isWatched = isWatched)
-        }
-        if (!hideLabels) {
-            Text(
-                text = item.name,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val detail = item.releaseInfo?.let { formatReleaseDateForDisplay(it) }
-            if (detail != null) {
+            if (!hideLabels) {
                 Text(
-                    text = detail,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    text = item.name,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-            } else {
-                Spacer(modifier = Modifier.height(8.dp))
+                val detail = item.releaseInfo?.let { formatReleaseDateForDisplay(it) }
+                if (detail != null) {
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }

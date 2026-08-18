@@ -52,6 +52,7 @@ import nuviolinux.composeapp.generated.resources.cd_selected
 import nuviolinux.composeapp.generated.resources.collections_header
 import nuviolinux.composeapp.generated.resources.compose_settings_page_continue_watching
 import nuviolinux.composeapp.generated.resources.compose_settings_page_homescreen
+import nuviolinux.composeapp.generated.resources.compose_settings_page_hover_preview
 import nuviolinux.composeapp.generated.resources.compose_settings_page_meta_screen
 import nuviolinux.composeapp.generated.resources.compose_settings_page_poster_customization
 import nuviolinux.composeapp.generated.resources.compose_settings_page_streams
@@ -64,6 +65,7 @@ import nuviolinux.composeapp.generated.resources.settings_appearance_amoled_desc
 import nuviolinux.composeapp.generated.resources.settings_appearance_continue_watching_description
 import nuviolinux.composeapp.generated.resources.settings_appearance_desktop_navigation
 import nuviolinux.composeapp.generated.resources.settings_appearance_desktop_navigation_sheet_title
+import nuviolinux.composeapp.generated.resources.settings_appearance_hover_preview_description
 import nuviolinux.composeapp.generated.resources.settings_appearance_liquid_glass
 import nuviolinux.composeapp.generated.resources.settings_appearance_liquid_glass_description
 import nuviolinux.composeapp.generated.resources.settings_appearance_poster_customization_description
@@ -100,6 +102,7 @@ internal fun LazyListScope.appearanceSettingsContent(
     onCollectionsClick: () -> Unit,
     onContinueWatchingClick: () -> Unit,
     onPosterCustomizationClick: () -> Unit,
+    onHoverPreviewClick: () -> Unit,
 ) {
     item {
         SettingsSection(
@@ -189,6 +192,13 @@ internal fun LazyListScope.appearanceSettingsContent(
                         description = stringResource(desktopNavigationLayout.labelRes),
                         isTablet = isTablet,
                         onClick = { showDesktopNavigationSheet = true },
+                    )
+                    SettingsGroupDivider(isTablet = isTablet)
+                    SettingsNavigationRow(
+                        title = stringResource(Res.string.compose_settings_page_hover_preview),
+                        description = stringResource(Res.string.settings_appearance_hover_preview_description),
+                        isTablet = isTablet,
+                        onClick = onHoverPreviewClick,
                     )
                 }
                 SettingsGroupDivider(isTablet = isTablet)
