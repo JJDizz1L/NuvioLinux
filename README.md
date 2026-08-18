@@ -39,9 +39,9 @@ This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMe
 
 ## What's Different From Upstream
 
-- **Native Linux playback via MPV (libmpv).** The old embedded player is replaced by a C++/JNI bridge that embeds mpv using its render API, drawing video straight into the Compose scene — all overlay UI works on X11 and Wayland. The app itself runs under XWayland; the embedded player is display-agnostic (offscreen EGL) and works on both backends.
-- **Hardware acceleration.** Zero-copy decode via **VA-API (Mesa/AMD/Intel)** and **NVDEC (NVIDIA)**, chosen automatically by the app's decoder setting, with a software fallback.
-- **HDR support.** The embedded player loads your `mpv.conf` wholesale, so HDR/color configuration — tone-mapping, `target-peak`, inverse-tone-mapping, profiles — applies as-is.
+- **Native Linux playback via MPV (libmpv).** The old embedded player is replaced by a C++/JNI bridge that embeds mpv using its render API, drawing video straight into the Compose scene — all overlay UI works on X11 and Wayland. The app itself runs under XWayland; the embedded player renders offscreen with a **vendor-aware GL context**: **GLX** on NVIDIA (the same API family as the UI — NVIDIA's GLX and EGL stacks cannot coexist in one process) and **EGL** on Mesa/AMD/Intel (surfaceless). Both render into an FBO that is read back into the Compose scene, so the UI and video are both GPU-accelerated on every vendor.
+- **Hardware acceleration.** Zero-copy decode via **VA-API (Mesa/AMD/Intel)** and **NVDEC (NVIDIA)**, chosen automatically by the app's decoder setting, with a software fallback. AV1 NVDEC requires a **GeForce RTX 3000 or newer** (older cards lack the AV1 decode engine); H.264/HEVC work on any card with NVDEC (GTX 750+).
+- **HDR support.** The embedded player loads your `mpv.conf` wholesale, so HDR/color configuration — tone-mapping, `target-peak`, inverse-tone-mapping, profiles — applies as-is. (Not available in the Flatpak sandbox — see below.)
 - **Discord Rich Presence.** Show what you're watching or browsing on your Discord profile. Configurable under **Settings → Integrations → Discord Rich Presence**.
 - **Trakt & Simkl tracking.** Connect your Trakt or Simkl account under **Settings → Integrations → Tracking** — library, watch progress, watched history and scrobbling sync across your devices, with a "Sync now" button and automatic refresh.
 - **Arch Linux distribution.** A first-class Arch package with a bundled JRE (no system Java required), including a launcher and desktop entry.
@@ -60,7 +60,7 @@ sudo dnf install ./nuvio-linux-*.x86_64.rpm
 Install the `.deb` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases) (requires system `mpv`):
 
 ```bash
-sudo apt install ./nuvio-linux_0.1.17-alpha-3_amd64.deb
+sudo apt install ./nuvio-linux_0.1.17-alpha-7_amd64.deb
 ```
 
 The package is self-contained (bundled JRE, no system Java required), installs to
@@ -86,11 +86,16 @@ flatpak install --user ./nuvio-linux-*.flatpak
 flatpak run io.github.jjdizz1l.NuvioLinux
 ```
 
-The Flatpak bundles libmpv built from source — no system `mpv` needed. Your
-`~/.config/mpv/mpv.conf` is honored read-only. P2P/TorrServer works via the
-bundled binary. Updates are delivered through the bundle (the in-app updater
-is disabled in the sandbox); a toast in the app points to new releases on
-GitHub.
+The Flatpak bundles libmpv built from source — no system `mpv` needed, and
+hardware decode is included: **NVDEC (CUDA)** for NVIDIA and **VA-API** for
+AMD/Intel (via the Mesa GL extension). Your `~/.config/mpv/mpv.conf` is honored
+read-only. P2P/TorrServer works via the bundled binary. Updates are delivered
+through the bundle (the in-app updater is disabled in the sandbox); a toast in
+the app points to new releases on GitHub.
+
+> **HDR limitation:** HDR tone-mapping/passthrough is **not available in the
+> Flatpak** — the sandboxed runtime can't access the display's HDR output path.
+> Use the native Arch/RPM/DEB/AppImage packages for HDR content.
 
 ## Installation (Arch Linux)
 
@@ -255,14 +260,14 @@ Use the version helper when changing desktop release versions:
 ./scripts/set-version.sh --show
 ```
 
-Per-format package names carry the same release counter (Arch `pkgrel` / RPM `Release` / the `-<release>` suffix in DEB, AppImage and Flatpak names), e.g. release 3 of `0.1.17-alpha`:
+Per-format package names carry the same release counter (Arch `pkgrel` / RPM `Release` / the `-<release>` suffix in DEB, AppImage and Flatpak names), e.g. release 7 of `0.1.17-alpha`:
 
 ```
-nuvio-linux-0.1.17alpha-3-x86_64.pkg.tar.zst
-nuvio-linux-0.1.17alpha-3.x86_64.rpm
-nuvio-linux_0.1.17-alpha-3_amd64.deb
-nuvio-linux-0.1.17-alpha-3-x86_64.AppImage
-nuvio-linux-0.1.17-alpha-3.flatpak
+nuvio-linux-0.1.17alpha-7-x86_64.pkg.tar.zst
+nuvio-linux-0.1.17alpha-7.x86_64.rpm
+nuvio-linux_0.1.17-alpha-7_amd64.deb
+nuvio-linux-0.1.17-alpha-7-x86_64.AppImage
+nuvio-linux-0.1.17-alpha-7.flatpak
 ```
 
 ## Legal & DMCA
