@@ -50,6 +50,8 @@ gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor >/dev/null 2>&1 || :
 %{_datadir}/icons/hicolor/*/apps/nuvio-linux.png
 
 %changelog
+* Tue Aug 18 2026 JJDizz1L - 0.1.20alpha-1
+- Version bump to 0.1.20-alpha.
 * Fri Aug 07 2026 JJDizz1L - 0.1.17alpha-1
 - Version bump to 0.1.17-alpha.
 * Sat Aug 01 2026 JJDizz1L - 0.1.15alpha-1
