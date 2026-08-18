@@ -18,6 +18,7 @@ import nuviolinux.composeapp.generated.resources.compose_settings_page_content_d
 import nuviolinux.composeapp.generated.resources.compose_settings_page_debrid
 import nuviolinux.composeapp.generated.resources.compose_settings_page_continue_watching
 import nuviolinux.composeapp.generated.resources.compose_settings_page_homescreen
+import nuviolinux.composeapp.generated.resources.compose_settings_page_hover_preview
 import nuviolinux.composeapp.generated.resources.compose_settings_page_integrations
 import nuviolinux.composeapp.generated.resources.compose_settings_page_licenses_attributions
 import nuviolinux.composeapp.generated.resources.compose_settings_page_presence
@@ -80,6 +81,11 @@ internal enum class SettingsPage(
         titleRes = Res.string.compose_settings_page_appearance,
         category = SettingsCategory.General,
         parentPage = Root,
+    ),
+    HoverPreview(
+        titleRes = Res.string.compose_settings_page_hover_preview,
+        category = SettingsCategory.General,
+        parentPage = Appearance,
     ),
     Streams(
         titleRes = Res.string.compose_settings_page_streams,

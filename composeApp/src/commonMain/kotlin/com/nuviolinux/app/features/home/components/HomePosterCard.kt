@@ -22,20 +22,27 @@ fun HomePosterCard(
     val posterCardStyle = rememberPosterCardStyleUiState()
     val isLandscapeMode = useLandscapeBackdropMode || posterCardStyle.catalogLandscapeModeEnabled
 
-    NuvioPosterCard(
-        title = item.name,
-        imageUrl = if (isLandscapeMode) (item.banner ?: item.poster) else item.poster,
-        modifier = modifier,
-        basePosterWidthDp = desktopCatalogShelfPosterBaseWidthDp(posterCardStyle.widthDp),
-        shape = if (isLandscapeMode) NuvioPosterShape.Landscape else item.posterShape.toNuvioPosterShape(),
-        detailLine = if (isLandscapeMode || posterCardStyle.hideLabelsEnabled) null else item.releaseInfo?.let { formatReleaseDateForDisplay(it) },
-        showTitleBelow = !posterCardStyle.hideLabelsEnabled,
-        bottomLeftLogoUrl = if (isLandscapeMode) item.logo else null,
-        bottomLeftText = if (isLandscapeMode && item.logo.isNullOrBlank() && !posterCardStyle.hideLabelsEnabled) item.name else null,
+    HomePosterHoverPreview(
+        item = item,
         isWatched = isWatched,
         onClick = onClick,
         onLongClick = onLongClick,
-    )
+    ) { hoverModifier ->
+        NuvioPosterCard(
+            title = item.name,
+            imageUrl = if (isLandscapeMode) (item.banner ?: item.poster) else item.poster,
+            modifier = modifier.then(hoverModifier),
+            basePosterWidthDp = desktopCatalogShelfPosterBaseWidthDp(posterCardStyle.widthDp),
+            shape = if (isLandscapeMode) NuvioPosterShape.Landscape else item.posterShape.toNuvioPosterShape(),
+            detailLine = if (isLandscapeMode || posterCardStyle.hideLabelsEnabled) null else item.releaseInfo?.let { formatReleaseDateForDisplay(it) },
+            showTitleBelow = !posterCardStyle.hideLabelsEnabled,
+            bottomLeftLogoUrl = if (isLandscapeMode) item.logo else null,
+            bottomLeftText = if (isLandscapeMode && item.logo.isNullOrBlank() && !posterCardStyle.hideLabelsEnabled) item.name else null,
+            isWatched = isWatched,
+            onClick = onClick,
+            onLongClick = onLongClick,
+        )
+    }
 }
 
 private fun PosterShape.toNuvioPosterShape(): NuvioPosterShape =

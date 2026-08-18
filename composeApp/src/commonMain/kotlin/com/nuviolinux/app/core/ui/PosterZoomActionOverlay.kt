@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,7 +85,25 @@ object PosterZoomAnchorHolder {
         pending = anchor
     }
 
-    fun consume(): PosterZoomAnchor? = pending.also { pending = null }
+    fun consume(): PosterZoomAnchor? = pending.also { anchor ->
+        pending = null
+        if (anchor != null) {
+            PosterZoomOverlayCoordinator.show()
+        }
+    }
+}
+
+object PosterZoomOverlayCoordinator {
+    var isVisible by mutableStateOf(false)
+        private set
+
+    fun show() {
+        isVisible = true
+    }
+
+    fun hide() {
+        isVisible = false
+    }
 }
 
 enum class PosterZoomOverlayExitAnimation {
@@ -163,6 +182,13 @@ fun NuvioPosterZoomActionOverlay(
 
     var rootOrigin by remember { mutableStateOf(Offset.Zero) }
     var slotBounds by remember { mutableStateOf<Rect?>(null) }
+
+    DisposableEffect(Unit) {
+        PosterZoomOverlayCoordinator.show()
+        onDispose {
+            PosterZoomOverlayCoordinator.hide()
+        }
+    }
 
     LaunchedEffect(Unit) {
         launch { scrim.animateTo(1f, tween(durationMillis = 260, easing = NuvioTokens.Motion.standard)) }

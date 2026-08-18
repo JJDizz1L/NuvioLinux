@@ -111,6 +111,7 @@ internal fun settingsSearchEntries(
     val detailPage = stringResource(Res.string.compose_settings_page_meta_screen)
     val continueWatchingPage = stringResource(Res.string.compose_settings_page_continue_watching)
     val posterStylePage = stringResource(Res.string.compose_settings_page_poster_customization)
+    val hoverPreviewPage = stringResource(Res.string.compose_settings_page_hover_preview)
     val addonsPage = stringResource(Res.string.compose_settings_page_addons)
     val pluginsPage = stringResource(Res.string.compose_settings_page_plugins)
     val collectionsPage = stringResource(Res.string.collections_header)
@@ -443,6 +444,13 @@ internal fun settingsSearchEntries(
         title = posterStylePage,
         description = stringResource(Res.string.settings_appearance_poster_customization_description),
         icon = Icons.Rounded.Tune,
+    )
+    addPage(
+        page = SettingsPage.HoverPreview,
+        key = "hover-preview",
+        title = hoverPreviewPage,
+        description = stringResource(Res.string.settings_appearance_hover_preview_description),
+        icon = Icons.Rounded.Style,
     )
 
     addPage(
