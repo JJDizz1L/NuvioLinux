@@ -129,6 +129,7 @@ fun DesktopDetailHero(
                 sourceAudioUrl = heroTrailerSourceAudioUrl,
                 playWhenReady = heroTrailerPlayWhenReady,
                 muted = heroTrailerMuted,
+                fillFrame = true,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {

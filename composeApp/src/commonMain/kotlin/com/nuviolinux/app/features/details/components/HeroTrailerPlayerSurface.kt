@@ -9,6 +9,8 @@ expect fun HeroTrailerPlayerSurface(
     sourceAudioUrl: String?,
     playWhenReady: Boolean,
     muted: Boolean,
+    startPositionMillis: Long = 0L,
+    fillFrame: Boolean = false,
     modifier: Modifier,
     onReady: () -> Unit,
     onEnded: () -> Unit,
