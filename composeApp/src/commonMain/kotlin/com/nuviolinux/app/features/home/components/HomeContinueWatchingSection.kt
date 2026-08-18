@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuviolinux.app.core.ui.DisintegratingContainer
+import com.nuviolinux.app.core.ui.DisintegrationRequest
 import com.nuviolinux.app.core.ui.NuvioAsyncImage as AsyncImage
 import com.nuviolinux.app.core.ui.NuvioCardDepthSurface
 import com.nuviolinux.app.core.ui.NuvioProgressBar
@@ -64,6 +65,7 @@ import com.nuviolinux.app.features.cloud.CloudLibraryContentType
 import com.nuviolinux.app.features.cloud.cloudLibraryDisplayArtworkUrl
 import com.nuviolinux.app.features.tracking.WatchProgressSource
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingItem
+import com.nuviolinux.app.features.watchprogress.continueWatchingItemKey
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingSectionStyle
 import com.nuviolinux.app.features.watchprogress.CurrentDateProvider
 import com.nuviolinux.app.features.watchprogress.computeAirDateBadgeText
@@ -235,6 +237,7 @@ internal fun HomeContinueWatchingSection(
     listState: LazyListState = rememberLazyListState(),
     onItemClick: ((ContinueWatchingItem) -> Unit)? = null,
     onItemLongPress: ((ContinueWatchingItem) -> Unit)? = null,
+    disintegrationRequest: DisintegrationRequest<String>? = null,
 ) {
     if (items.isEmpty()) return
 
@@ -252,6 +255,7 @@ internal fun HomeContinueWatchingSection(
             listState = listState,
             onItemClick = onItemClick,
             onItemLongPress = onItemLongPress,
+            disintegrationRequest = disintegrationRequest,
         )
     } else {
         BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
@@ -268,6 +272,7 @@ internal fun HomeContinueWatchingSection(
                 listState = listState,
                 onItemClick = onItemClick,
                 onItemLongPress = onItemLongPress,
+                disintegrationRequest = disintegrationRequest,
             )
         }
     }
@@ -287,18 +292,15 @@ private fun HomeContinueWatchingSectionContent(
     listState: LazyListState,
     onItemClick: ((ContinueWatchingItem) -> Unit)?,
     onItemLongPress: ((ContinueWatchingItem) -> Unit)?,
+    disintegrationRequest: DisintegrationRequest<String>?,
 ) {
     key(dataSourceKey) {
         val disintegration = remember {
             ScopedDisintegrationTracker<WatchProgressSource, String, ContinueWatchingItem>(
-                itemKey = { item ->
-                    val season = item.seasonNumber ?: -1
-                    val episode = item.episodeNumber ?: -1
-                    "${item.parentMetaId}:$season:$episode"
-                },
+                itemKey = ::continueWatchingItemKey,
             )
         }
-        val displayEntries = disintegration.sync(dataSourceKey, items)
+        val displayEntries = disintegration.sync(dataSourceKey, items, disintegrationRequest)
 
         NuvioShelfSection(
             title = title ?: stringResource(Res.string.compose_settings_page_continue_watching),
