@@ -615,6 +615,15 @@ fun App(
         var autoSkipProfileSelection by rememberSaveable { mutableStateOf(false) }
         var pendingProfileSwitch by remember { mutableStateOf<PendingProfileSwitch?>(null) }
 
+        // Use the incoming profile's color during a switch so the loading overlay
+        // already shows the correct hue before MainAppContent's own overlay takes over.
+        val gateProfileColor = remember(pendingProfileSwitch, profileState.activeProfile, profileState.profiles) {
+            val sourceProfile = pendingProfileSwitch?.profile
+                ?: profileState.activeProfile
+                ?: profileState.profiles.firstOrNull()
+            sourceProfile?.avatarColorHex?.let(::parseHexColor) ?: Color(0xFF1E88E5)
+        }
+
         LaunchedEffect(gateScreen, onAppReady) {
             if (gateScreen != AppGateScreen.Main.name) {
                 onAppReady?.invoke(false)
@@ -789,7 +798,10 @@ fun App(
             when (currentGate) {
                 AppGateScreen.Loading.name,
                 AppGateScreen.ProfileSwitching.name -> {
-                    AppLaunchOverlay(modifier = Modifier.fillMaxSize())
+                    AppLaunchOverlay(
+                        profileColor = gateProfileColor,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
                 AppGateScreen.Auth.name -> {
                     AuthScreen(modifier = Modifier.fillMaxSize())
