@@ -35,6 +35,7 @@ static int g_debug = -1; /* -1 = uninitialized */
 #include <chrono>
 #include <cstdlib>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -338,6 +339,33 @@ static int load_libmpv() {
 #define EGL_PLATFORM_DEVICE_EXT       0x313F
 #define EGL_VENDOR                    0x3053
 
+/* GLX offscreen (pbuffer) context tokens. The bridge falls back to a GLX
+ * context when EGL cannot initialize — on NVIDIA, GLX and EGL cannot coexist
+ * in one process (Skiko/Compose already owns a GLX context for the UI), so
+ * the video renderer must use the same GLX API family. Multiple GLX contexts
+ * per process are standard (one per window), so this coexists fine with the
+ * UI renderer. */
+#define GLX_DRAWABLE_TYPE               0x8010
+#define GLX_RENDER_TYPE                 0x8011
+#define GLX_X_RENDERABLE                0x8012
+#define GLX_RED_SIZE                    0x8013
+#define GLX_GREEN_SIZE                  0x8014
+#define GLX_BLUE_SIZE                   0x8015
+#define GLX_ALPHA_SIZE                  0x801B
+#define GLX_PRESERVED_CONTENTS          0x801B
+#define GLX_PBUFFER_HEIGHT              0x8040
+#define GLX_PBUFFER_WIDTH               0x8041
+#define GLX_RGBA_BIT                    0x0001
+#define GLX_PBUFFER_BIT                 0x0004
+#define GLX_CONTEXT_MAJOR_VERSION_ARB   0x2091
+#define GLX_CONTEXT_MINOR_VERSION_ARB   0x2092
+#define GLX_CONTEXT_PROFILE_MASK_ARB    0x9126
+#define GLX_CONTEXT_CORE_PROFILE_BIT_ARB 0x00000001
+#define GLX_CONTEXT_ES2_PROFILE_BIT_EXT 0x00000004
+#define GLX_RGBA_TYPE                   0x8014
+#define None                            0L
+#define True                            1
+
 #define GL_FRAMEBUFFER                0x8D40
 #define GL_FRAMEBUFFER_COMPLETE       0x8CD5
 #define GL_COLOR_ATTACHMENT0          0x8CE0
@@ -371,6 +399,24 @@ typedef int   (*egl_terminate_t)(void*);
 typedef int   (*egl_get_error_t)(void);
 typedef int   (*egl_bind_api_t)(unsigned int);
 
+/* X11 (dlopen'd libX11.so.6) and GLX (dlopen'd libGL.so.1) — used by the
+ * offscreen GLX render path. Types are opaque (void*) since the bridge never
+ * includes Xlib headers. */
+typedef void* (*x_open_display_t)(const char*);
+typedef long  (*x_default_screen_t)(void*);
+typedef void* (*x_set_error_handler_t)(int (*)(void*, void*));
+typedef int   (*x_free_t)(void*);
+typedef int   (*x_close_display_t)(void*);
+typedef void* (*glx_get_proc_address_t)(const unsigned char*);
+typedef int   (*glx_query_extension_t)(void*, int*, int*);
+typedef void* (*glx_choose_fb_config_t)(void*, int, const int*, int*);
+typedef void* (*glx_create_pbuffer_t)(void*, void*, const int*);
+typedef void* (*glx_create_context_attribs_t)(void*, void*, void*, int, const int*);
+typedef void* (*glx_create_new_context_t)(void*, void*, int, void*, int);
+typedef int   (*glx_make_current_t)(void*, void*, void*);
+typedef int   (*glx_destroy_pbuffer_t)(void*, void*);
+typedef void  (*glx_destroy_context_t)(void*, void*);
+
 typedef void (*gl_gen_framebuffers_t)(int, unsigned int*);
 typedef void (*gl_delete_framebuffers_t)(int, const unsigned int*);
 typedef void (*gl_bind_framebuffer_t)(unsigned int, unsigned int);
@@ -387,6 +433,11 @@ typedef void (*gl_clear_t)(unsigned int);
 typedef const unsigned char* (*gl_get_string_t)(unsigned int);
 
 struct GlRenderer {
+    /* 0 = not initialized, 1 = EGL, 2 = GLX. Determines which cleanup path
+     * and entry-point resolver is used. */
+    int provider = 0;
+
+    /* EGL path state. */
     void *eglLib = nullptr;
     void *display = nullptr;
     void *context = nullptr;
@@ -395,6 +446,14 @@ struct GlRenderer {
      * The bridge renders into its own FBO, so the 1x1 surface merely
      * satisfies eglMakeCurrent. */
     void *surface = nullptr;
+
+    /* GLX path state (provider == 2). */
+    void *glxLib = nullptr;
+    void *x11Lib = nullptr;
+    void *xDisplay = nullptr;
+    void *glxContext = nullptr;
+    void *glxPBuffer = nullptr;
+
     unsigned int fbo = 0;
     unsigned int texture = 0;
     int width = 0;
@@ -411,6 +470,13 @@ struct GlRenderer {
     egl_query_string_t eglQueryString = nullptr;
     egl_bind_api_t eglBindAPI = nullptr;
     void *(*eglGetCurrentContext)(void) = nullptr;
+
+    glx_get_proc_address_t glxGetProcAddressARB = nullptr;
+    glx_make_current_t glxMakeCurrent = nullptr;
+    glx_destroy_pbuffer_t glxDestroyPbuffer = nullptr;
+    glx_destroy_context_t glxDestroyContext = nullptr;
+    x_set_error_handler_t xSetErrorHandler = nullptr;
+    x_close_display_t xCloseDisplay = nullptr;
 
     gl_gen_framebuffers_t glGenFramebuffers = nullptr;
     gl_delete_framebuffers_t glDeleteFramebuffers = nullptr;
@@ -434,7 +500,9 @@ struct GlRenderer {
 
 static void *gl_resolve(GlRenderer *gl, const char *name) {
     void *p = nullptr;
-    if (gl->eglGetProcAddress) {
+    if (gl->provider == 2 && gl->glxGetProcAddressARB) {
+        p = gl->glxGetProcAddressARB((const unsigned char*)name);
+    } else if (gl->provider == 1 && gl->eglGetProcAddress) {
         p = gl->eglGetProcAddress(name);
     }
     if (!p) {
@@ -448,25 +516,52 @@ static void *gl_get_proc_address_cb(void *ctx, const char *name) {
 }
 
 static void gl_destroy(GlRenderer *gl) {
-    if (gl->display && gl->context) {
-        gl->eglMakeCurrent(gl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (gl->provider == 1) {
+        if (gl->display && gl->context) {
+            gl->eglMakeCurrent(gl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
+        if (gl->display && gl->surface && gl->eglDestroySurface) {
+            gl->eglDestroySurface(gl->display, gl->surface);
+            gl->surface = nullptr;
+        }
+        if (gl->display && gl->context) {
+            gl->eglDestroyContext(gl->display, gl->context);
+            gl->context = nullptr;
+        }
+        if (gl->display) {
+            gl->eglTerminate(gl->display);
+            gl->display = nullptr;
+        }
+        if (gl->eglLib) {
+            dlclose(gl->eglLib);
+            gl->eglLib = nullptr;
+        }
+    } else if (gl->provider == 2) {
+        if (gl->xDisplay && gl->glxMakeCurrent) {
+            gl->glxMakeCurrent(gl->xDisplay, None, None);
+        }
+        if (gl->xDisplay && gl->glxContext && gl->glxDestroyContext) {
+            gl->glxDestroyContext(gl->xDisplay, gl->glxContext);
+            gl->glxContext = nullptr;
+        }
+        if (gl->xDisplay && gl->glxPBuffer && gl->glxDestroyPbuffer) {
+            gl->glxDestroyPbuffer(gl->xDisplay, gl->glxPBuffer);
+            gl->glxPBuffer = nullptr;
+        }
+        if (gl->xDisplay && gl->xCloseDisplay) {
+            gl->xCloseDisplay(gl->xDisplay);
+            gl->xDisplay = nullptr;
+        }
+        if (gl->glxLib) {
+            dlclose(gl->glxLib);
+            gl->glxLib = nullptr;
+        }
+        if (gl->x11Lib) {
+            dlclose(gl->x11Lib);
+            gl->x11Lib = nullptr;
+        }
     }
-    if (gl->display && gl->surface && gl->eglDestroySurface) {
-        gl->eglDestroySurface(gl->display, gl->surface);
-        gl->surface = nullptr;
-    }
-    if (gl->display && gl->context) {
-        gl->eglDestroyContext(gl->display, gl->context);
-        gl->context = nullptr;
-    }
-    if (gl->display) {
-        gl->eglTerminate(gl->display);
-        gl->display = nullptr;
-    }
-    if (gl->eglLib) {
-        dlclose(gl->eglLib);
-        gl->eglLib = nullptr;
-    }
+    gl->provider = 0;
     gl->ready = false;
 }
 
@@ -606,7 +701,26 @@ static bool gl_try_display(GlRenderer *gl, void *display, const char *label,
     return false;
 }
 
-static bool gl_init(GlRenderer *gl) {
+/* True when the NVIDIA proprietary (or open-kernel-module) driver is loaded.
+ * nouveau/Mesa systems have neither path. Used to prefer the GLX render path
+ * (NVIDIA's GLX and EGL stacks cannot coexist in one process). */
+static bool nvidia_driver_present() {
+    struct stat st;
+    return (stat("/sys/module/nvidia", &st) == 0) || (stat("/dev/nvidiactl", &st) == 0);
+}
+
+/* No-op X error handler installed only for the GLX setup window: failed GLX
+ * setup calls would otherwise hit Xlib's default handler, which calls exit()
+ * (fatal inside the JVM). The previous handler (the JDK's) is restored right
+ * after setup. */
+static int glx_noop_xerror(void *display, void *event) {
+    return 0;
+}
+
+/* Attempts the EGL render path: dlopen libEGL, then try every display
+ * candidate (surfaceless-mesa, default, device) through gl_try_display.
+ * Returns true with gl->provider=1 and the context current on success. */
+static bool gl_try_egl(GlRenderer *gl) {
     gl->eglLib = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
     if (!gl->eglLib) {
         LOG("GL renderer unavailable: libEGL.so.1 not found, falling back to SW renderer");
@@ -645,7 +759,8 @@ static bool gl_init(GlRenderer *gl) {
     if (display) {
         LOG("[gl-init] trying display path: surfaceless-mesa");
         if (gl_try_display(gl, display, "surfaceless-mesa", eglInitialize, eglChooseConfig, eglCreateContext)) {
-            goto gl_ready;
+            gl->provider = 1;
+            return true;
         }
     } else {
         LOG("[gl-init] surfaceless-mesa: no display");
@@ -656,7 +771,8 @@ static bool gl_init(GlRenderer *gl) {
     if (display) {
         LOG("[gl-init] trying display path: default");
         if (gl_try_display(gl, display, "default", eglInitialize, eglChooseConfig, eglCreateContext)) {
-            goto gl_ready;
+            gl->provider = 1;
+            return true;
         }
     } else {
         LOG("[gl-init] default: no display");
@@ -678,7 +794,8 @@ static bool gl_init(GlRenderer *gl) {
                     continue;
                 }
                 if (gl_try_display(gl, display, label, eglInitialize, eglChooseConfig, eglCreateContext)) {
-                    goto gl_ready;
+                    gl->provider = 1;
+                    return true;
                 }
             }
         } else {
@@ -692,8 +809,204 @@ static bool gl_init(GlRenderer *gl) {
     dlclose(gl->eglLib);
     gl->eglLib = nullptr;
     return false;
+}
 
-gl_ready:
+/* Attempts the GLX render path: dlopen libX11 + libGL, open the X display,
+ * choose a pbuffer-capable GLXFBConfig, create a 1x1 pbuffer, create a GL
+ * 3.3 core context (falling back to GL 2.x then ES 2) and make it current.
+ * Used when EGL cannot initialize — on NVIDIA, GLX and EGL cannot coexist in
+ * one process, and the UI (Skiko/Compose) already owns a GLX context, so the
+ * video renderer must use the same GLX API family. Returns true with
+ * gl->provider=2 and the context current on success. */
+static bool gl_try_glx(GlRenderer *gl) {
+    /* Declared up front so every goto glx_fail below can jump past them. */
+    void *prevHandler = nullptr;
+    void *fbConfigs = nullptr;
+    int numConfigs = 0;
+    int configAttrs[] = {
+        GLX_DRAWABLE_TYPE, GLX_PBUFFER_BIT,
+        GLX_RENDER_TYPE, GLX_RGBA_BIT,
+        GLX_X_RENDERABLE, True,
+        GLX_RED_SIZE, 8, GLX_GREEN_SIZE, 8, GLX_BLUE_SIZE, 8, GLX_ALPHA_SIZE, 8,
+        None,
+    };
+    int looseAttrs[] = {
+        GLX_RENDER_TYPE, GLX_RGBA_BIT,
+        GLX_DRAWABLE_TYPE, GLX_PBUFFER_BIT,
+        None,
+    };
+    int pbAttrs[] = {
+        GLX_PBUFFER_WIDTH, 1, GLX_PBUFFER_HEIGHT, 1,
+        GLX_PRESERVED_CONTENTS, True,
+        None,
+    };
+    int ctx33[] = {
+        GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+        GLX_CONTEXT_MINOR_VERSION_ARB, 3,
+        GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
+        None,
+    };
+    int ctx21[] = { GLX_CONTEXT_MAJOR_VERSION_ARB, 2, None };
+    int ctxEs2[] = {
+        GLX_CONTEXT_MAJOR_VERSION_ARB, 2,
+        GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_ES2_PROFILE_BIT_EXT,
+        None,
+    };
+    const char *ctxLabel = nullptr;
+    void *config = nullptr;
+    int (*restoreHandler)(void*, void*) = nullptr;
+    int screen = 0;
+    int errBase = 0;
+    int eventBase = 0;
+
+    gl->x11Lib = dlopen("libX11.so.6", RTLD_NOW | RTLD_GLOBAL);
+    if (!gl->x11Lib) {
+        LOG("GL renderer unavailable: libX11.so.6 not found");
+        return false;
+    }
+    auto XOpenDisplay = (x_open_display_t)dlsym(gl->x11Lib, "XOpenDisplay");
+    auto XDefaultScreen = (x_default_screen_t)dlsym(gl->x11Lib, "XDefaultScreen");
+    auto XFree = (x_free_t)dlsym(gl->x11Lib, "XFree");
+    gl->xSetErrorHandler = (x_set_error_handler_t)dlsym(gl->x11Lib, "XSetErrorHandler");
+    gl->xCloseDisplay = (x_close_display_t)dlsym(gl->x11Lib, "XCloseDisplay");
+    if (!XOpenDisplay || !XDefaultScreen || !XFree || !gl->xSetErrorHandler || !gl->xCloseDisplay) {
+        LOG("GL renderer unavailable: missing X11 symbols");
+        gl_destroy(gl);
+        return false;
+    }
+
+    gl->glxLib = dlopen("libGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+    if (!gl->glxLib) {
+        LOG("GL renderer unavailable: libGL.so.1 not found");
+        gl_destroy(gl);
+        return false;
+    }
+    gl->glxGetProcAddressARB = (glx_get_proc_address_t)dlsym(gl->glxLib, "glXGetProcAddressARB");
+    auto glXQueryExtension = (glx_query_extension_t)dlsym(gl->glxLib, "glXQueryExtension");
+    auto glXChooseFBConfig = (glx_choose_fb_config_t)dlsym(gl->glxLib, "glXChooseFBConfig");
+    auto glXCreatePbuffer = (glx_create_pbuffer_t)dlsym(gl->glxLib, "glXCreatePbuffer");
+    auto glXCreateContextAttribsARB = (glx_create_context_attribs_t)dlsym(gl->glxLib, "glXCreateContextAttribsARB");
+    auto glXCreateNewContext = (glx_create_new_context_t)dlsym(gl->glxLib, "glXCreateNewContext");
+    gl->glxMakeCurrent = (glx_make_current_t)dlsym(gl->glxLib, "glXMakeCurrent");
+    gl->glxDestroyPbuffer = (glx_destroy_pbuffer_t)dlsym(gl->glxLib, "glXDestroyPbuffer");
+    gl->glxDestroyContext = (glx_destroy_context_t)dlsym(gl->glxLib, "glXDestroyContext");
+    if (!gl->glxGetProcAddressARB || !glXQueryExtension || !glXChooseFBConfig || !glXCreatePbuffer ||
+        !gl->glxMakeCurrent || !gl->glxDestroyContext || !gl->glxDestroyPbuffer) {
+        LOG("GL renderer unavailable: missing GLX symbols");
+        gl_destroy(gl);
+        return false;
+    }
+
+    gl->xDisplay = XOpenDisplay(nullptr);
+    if (!gl->xDisplay) {
+        LOG("[gl-init] GLX: XOpenDisplay failed (DISPLAY=%s)", getenv("DISPLAY") ? getenv("DISPLAY") : "(unset)");
+        gl_destroy(gl);
+        return false;
+    }
+    screen = (int)XDefaultScreen(gl->xDisplay);
+    if (!glXQueryExtension(gl->xDisplay, &errBase, &eventBase)) {
+        LOG("[gl-init] GLX: no GLX extension on display");
+        gl_destroy(gl);
+        return false;
+    }
+
+    /* Install a no-op X error handler for the setup window. GLX setup calls
+     * (pbuffer/context creation) can raise protocol errors on unsupported
+     * configs, and Xlib's default handler calls exit() — unacceptable inside
+     * the JVM. The handler is process-global, so restore the previous one
+     * (typically the JDK's) as soon as setup completes. */
+    prevHandler = gl->xSetErrorHandler(glx_noop_xerror);
+    restoreHandler = (int (*)(void*, void*))prevHandler;
+
+    fbConfigs = glXChooseFBConfig(gl->xDisplay, screen, configAttrs, &numConfigs);
+    if (!fbConfigs || numConfigs < 1) {
+        /* Fall back to a permissive match (some X servers expose no strict
+         * RGBA8 pbuffer config). */
+        fbConfigs = glXChooseFBConfig(gl->xDisplay, screen, looseAttrs, &numConfigs);
+    }
+    if (!fbConfigs || numConfigs < 1) {
+        LOG("[gl-init] GLX: no usable GLXFBConfig");
+        gl->xSetErrorHandler(restoreHandler);
+        goto glx_fail;
+    }
+    config = ((void**)fbConfigs)[0];
+
+    gl->glxPBuffer = glXCreatePbuffer(gl->xDisplay, config, pbAttrs);
+    if (!gl->glxPBuffer) {
+        LOG("[gl-init] GLX: glXCreatePbuffer failed");
+        gl->xSetErrorHandler(restoreHandler);
+        XFree(fbConfigs);
+        goto glx_fail;
+    }
+
+    if (glXCreateContextAttribsARB) {
+        gl->glxContext = glXCreateContextAttribsARB(gl->xDisplay, config, nullptr, True, ctx33);
+        ctxLabel = "GL3.3 core";
+        if (!gl->glxContext) {
+            gl->glxContext = glXCreateContextAttribsARB(gl->xDisplay, config, nullptr, True, ctx21);
+            ctxLabel = "GL2.x";
+        }
+        if (!gl->glxContext) {
+            gl->glxContext = glXCreateContextAttribsARB(gl->xDisplay, config, nullptr, True, ctxEs2);
+            ctxLabel = "ES2";
+        }
+    }
+    if (!gl->glxContext && glXCreateNewContext) {
+        gl->glxContext = glXCreateNewContext(gl->xDisplay, config, GLX_RGBA_TYPE, nullptr, True);
+        ctxLabel = "GLX new (RGBA)";
+    }
+    if (!gl->glxContext) {
+        LOG("[gl-init] GLX: context creation failed");
+        gl->xSetErrorHandler(restoreHandler);
+        XFree(fbConfigs);
+        goto glx_fail;
+    }
+    if (!gl->glxMakeCurrent(gl->xDisplay, gl->glxPBuffer, gl->glxContext)) {
+        LOG("[gl-init] GLX: glXMakeCurrent failed");
+        gl->xSetErrorHandler(restoreHandler);
+        XFree(fbConfigs);
+        goto glx_fail;
+    }
+    gl->xSetErrorHandler(restoreHandler);
+    XFree(fbConfigs);
+    LOG("[gl-init] GLX: %s context current (pbuffer offscreen)", ctxLabel);
+    gl->provider = 2;
+    return true;
+
+glx_fail:
+    gl_destroy(gl);
+    return false;
+}
+
+static bool gl_init(GlRenderer *gl) {
+    /* NVIDIA's GLX and EGL stacks cannot coexist in one process: once
+     * Skiko/Compose has a GLX context current (the default UI renderer), the
+     * bridge's EGL eglMakeCurrent fails. So on NVIDIA the bridge must use the
+     * same GLX API family as the UI; on other vendors EGL is preferred (it
+     * needs no X display and is the modern path). */
+    bool nvidiaDriver = nvidia_driver_present();
+    bool ok = false;
+    if (nvidiaDriver) {
+        LOG("[gl-init] NVIDIA driver detected; preferring GLX render path");
+        if (!gl_try_glx(gl)) {
+            LOG("[gl-init] GLX path failed; trying EGL");
+            ok = gl_try_egl(gl);
+        } else {
+            ok = true;
+        }
+    } else {
+        if (!gl_try_egl(gl)) {
+            LOG("[gl-init] EGL path failed; trying GLX");
+            ok = gl_try_glx(gl);
+        } else {
+            ok = true;
+        }
+    }
+    if (!ok) {
+        return false;
+    }
+    gl->provider = ok ? gl->provider : 0;
+    LOG("[gl-init] provider=%d", gl->provider);
     gl->glGenFramebuffers = (gl_gen_framebuffers_t)gl_resolve(gl, "glGenFramebuffers");
     gl->glDeleteFramebuffers = (gl_delete_framebuffers_t)gl_resolve(gl, "glDeleteFramebuffers");
     gl->glBindFramebuffer = (gl_bind_framebuffer_t)gl_resolve(gl, "glBindFramebuffer");

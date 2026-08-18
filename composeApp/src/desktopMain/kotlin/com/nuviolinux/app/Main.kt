@@ -19,7 +19,6 @@ import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.build.AppIdentity
 import com.nuviolinux.app.core.display.AwtNonReparentingSupport
 import com.nuviolinux.app.core.display.DisplayServerDetector
-import com.nuviolinux.app.core.display.SkikoRenderConfig
 import com.nuviolinux.app.core.display.WindowDiagnostics
 import com.nuviolinux.app.core.ui.NuvioTheme
 import com.nuviolinux.app.core.deeplink.handleAppUrl
@@ -46,11 +45,6 @@ fun main(args: Array<String>) {
     // and caches it, so the tiling-WM (niri/sway/i3/…) sizing fix has to be
     // applied here, first.
     AwtNonReparentingSupport.applyIfNeeded()
-    // Must also run before any AWT/Skiko access: Skiko caches its render API
-    // (default OpenGL) on first use, and NVIDIA's GLX/EGL stacks cannot
-    // coexist in-process — the player bridge's EGL context needs a software
-    // Skiko rasterizer to get GPU video decoding (nvdec) on NVIDIA.
-    SkikoRenderConfig.applyIfNeeded()
     configureDesktopQuickJsLibrary()
     Logger.withTag("WindowEnvironment").i { "display server: ${DisplayServerDetector.detect()}" }
     installDesktopOpenUriHandler()
