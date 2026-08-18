@@ -436,7 +436,7 @@ internal class NativePlayerController(
             outlineSize = if (style.outlineEnabled) style.outlineWidth.toFloat() else 0f,
             bold = style.bold,
             fontSize = style.toMpvSubtitleFontSize(),
-            subPos = style.toMpvSubtitlePosition(useLibass),
+            subPos = style.toMpvSubtitlePosition(),
             useLibass = useLibass,
         )
     }
@@ -489,14 +489,8 @@ private fun Color.toMpvColorString(): String {
     }
 }
 
-private fun SubtitleStyleState.toMpvSubtitlePosition(useLibass: Boolean): Int {
-    val relativeOffset = if (useLibass) {
-        bottomOffset - SubtitleStyleState.DEFAULT.bottomOffset
-    } else {
-        bottomOffset
-    }
-    return (100 - (relativeOffset / 2)).coerceIn(0, 150)
-}
+private fun SubtitleStyleState.toMpvSubtitlePosition(): Int =
+    (100 - (bottomOffset / 2)).coerceIn(0, 150)
 
 private fun SubtitleStyleState.toMpvSubtitleFontSize(): Float =
     (fontSizeSp * 3f).coerceIn(18f, 96f)
