@@ -54,6 +54,7 @@ import nuviolinux.composeapp.generated.resources.compose_player_select_addon_sub
 import nuviolinux.composeapp.generated.resources.compose_player_style
 import nuviolinux.composeapp.generated.resources.compose_player_subtitle_delay
 import nuviolinux.composeapp.generated.resources.compose_player_text_opacity
+import nuviolinux.composeapp.generated.resources.compose_player_use_custom_styling
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -67,6 +68,8 @@ fun SubtitleStylePanel(
     isCompact: Boolean,
     showHeader: Boolean = true,
     onStyleChanged: (SubtitleStyleState) -> Unit,
+    onCustomStylingToggle: () -> Unit,
+    customStylingEnabled: Boolean,
     onSubtitleDelayChanged: (Int) -> Unit,
     onSubtitleDelayReset: () -> Unit,
     onAutoSyncCapture: () -> Unit,
@@ -84,6 +87,13 @@ fun SubtitleStylePanel(
                 text = stringResource(Res.string.compose_player_style),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
+            )
+        }
+
+        SubtitleStyleSection(title = stringResource(Res.string.compose_player_use_custom_styling)) {
+            SubtitleToggleChip(
+                enabled = customStylingEnabled,
+                onClick = onCustomStylingToggle,
             )
         }
 
