@@ -79,6 +79,7 @@ modules:
       - ./configure --prefix=/app --disable-doc --disable-debug
         --disable-postproc --disable-everything
         --enable-shared --enable-network --enable-openssl
+        --enable-cuda --enable-nvdec --enable-ffnvcodec
         --enable-protocol=file,http,https,tcp,tls,crypto
         --enable-demuxer=matroska,webm,avi,mp4,mov,m4v,mpegts,mpeg,mpegvideo,flv,webm_dash_manifest,hls,ogg,wav,w64,aiff,ac3,eac3,dts,dtshd,truehd,aac,asf,asf_o,mp3,flac,ape,wv,caf,gif,subreader,ass,srt,webvtt
         --enable-parser=h264,hevc,vp9,av1,vp8,mpeg4video,mpegvideo,aac,aac_latm,ac3,dca,eac3,flac,mpegaudio,opus,ogg,vorbis,truehd,mlp,vc1
@@ -86,7 +87,9 @@ modules:
         --enable-decoder=aac,aac_fixed,aac_latm,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp1,mp1float,mp2,mp2float,mp3,mp3float,mp3adu,flac,alac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice
         --enable-decoder=pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_f64le,pcm_u8,pcm_s8,pcm_alaw,pcm_mulaw,adpcm_ima_wav,adpcm_ms,adpcm_yamaha,gsm,gsm_ms,speex
         --enable-decoder=mov_text,ass,subrip,webvtt
+        --enable-decoder=h264_nvdec,hevc_nvdec,vp9_nvdec,av1_nvdec
         --enable-hwaccel=h264_vaapi,hevc_vaapi,vp9_vaapi,av1_vaapi
+        --enable-hwaccel=h264_nvdec,hevc_nvdec,vp9_nvdec,av1_nvdec
         --enable-encoder=png --enable-ffmpeg --disable-ffplay --disable-ffprobe
         --enable-pthreads --enable-gpl --enable-version3 --disable-x86asm
       - make -j${FLATPAK_BUILDER_N_JOBS}

@@ -1,0 +1,6 @@
+83da07ca940aa05365e7a3e587143fd4396366f75413e0121252be9069c3a036  dist/arch/nuvio-linux-0.1.17alpha-7-x86_64.pkg.tar.zst
+832ca4b9f51af3b31ec4634e256bd00c2f4f5e67869addf7d489ed384fd5fd3e  dist/arch/nuvio-linux-0.1.17alpha-7-x86_64.pkg.tar.zst.sig
+9d8178ba2a9ac3f646309d7e01d471a000e7ecc80782c4c9da12c9c8e947d09e  composeApp/build/native/rpmbuild/RPMS/x86_64/nuvio-linux-0.1.17alpha-7.x86_64.rpm
+53fca1b9dcac41f5eeb39b4e9d96e08d72671a2dc9bed490ecabf31bed5e8020  composeApp/build/compose/binaries/main-release/deb/nuvio-linux_0.1.17-alpha-7_amd64.deb
+e61b8a6cfe9f373ecd1c8ff4145d5a3932604f278b61d4da5e5ab2128de5cc4c  nuvio-linux-0.1.17-alpha-7-x86_64.AppImage
+700f61258eb43ce7fc4db223b386f2c517edbc4bbea89e89657c5559a55829fd  dist/flatpak/nuvio-linux-0.1.17-alpha-7.flatpak
