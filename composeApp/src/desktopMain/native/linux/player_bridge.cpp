@@ -348,10 +348,10 @@ static int load_libmpv() {
 #define GLX_DRAWABLE_TYPE               0x8010
 #define GLX_RENDER_TYPE                 0x8011
 #define GLX_X_RENDERABLE                0x8012
-#define GLX_RED_SIZE                    0x8013
-#define GLX_GREEN_SIZE                  0x8014
-#define GLX_BLUE_SIZE                   0x8015
-#define GLX_ALPHA_SIZE                  0x801B
+#define GLX_RED_SIZE                    8
+#define GLX_GREEN_SIZE                  9
+#define GLX_BLUE_SIZE                   10
+#define GLX_ALPHA_SIZE                  11
 #define GLX_PRESERVED_CONTENTS          0x801B
 #define GLX_PBUFFER_HEIGHT              0x8040
 #define GLX_PBUFFER_WIDTH               0x8041
