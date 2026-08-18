@@ -931,13 +931,13 @@ private fun MainAppContent(
         val discordBrowseSearch = stringResource(Res.string.discord_browsing_search)
         val discordBrowseLibrary = stringResource(Res.string.discord_browsing_library)
         val discordBrowseSettings = stringResource(Res.string.discord_browsing_settings)
-        val discordBrowseTitle = stringResource(Res.string.discord_browsing_title)
+        val discordViewingTitle = stringResource(Res.string.discord_viewing_title)
         val discordBrowsePerson = stringResource(Res.string.discord_browsing_person)
         val discordBrowseCollections = stringResource(Res.string.discord_browsing_collections)
         val discordBrowseContext = remember(currentRoute, selectedTab) {
             when (currentRoute) {
                 is PlayerRoute, is StreamRoute -> Triple<String?, String?, String?>(null, null, null)
-                is DetailRoute -> Triple(discordBrowseTitle, currentRoute.title, null)
+                is DetailRoute -> Triple(discordViewingTitle, currentRoute.title, null)
                 is PersonDetailRoute -> Triple(discordBrowsePerson, currentRoute.personName, currentRoute.personPhoto)
                 is EntityBrowseRoute -> Triple(discordBrowseGeneric, currentRoute.entityName, null)
                 is CollectionsRoute -> Triple(discordBrowseCollections, null, null)

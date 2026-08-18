@@ -145,6 +145,12 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     } else {
         ""
     }
+    val discordEpisodeLabel = if (seasonNumber != null && episodeNumber != null) {
+        val base = "S${seasonNumber}, E${episodeNumber}"
+        if (!episodeTitle.isNullOrBlank()) "$base: $episodeTitle" else base
+    } else {
+        null
+    }
     val allFilterLabel = stringResource(Res.string.collections_tab_all)
     val playingLabel = stringResource(Res.string.compose_player_playing)
     val sourceFilters = buildPlayerControlFilters(
@@ -422,7 +428,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     ) {
         DiscordPlaybackPresenceEffect(
             title = title.ifBlank { activeStreamTitle },
-            subtitle = episodeText.ifBlank { null },
+            subtitle = discordEpisodeLabel,
             posterUrl = poster ?: background,
             isPlaying = playbackSnapshot.isPlaying,
             positionMs = playbackSnapshot.positionMs,

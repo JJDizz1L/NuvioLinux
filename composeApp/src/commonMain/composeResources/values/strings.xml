@@ -865,6 +865,7 @@
     <string name="discord_browsing_library">Browsing their library</string>
     <string name="discord_browsing_settings">Tweaking settings</string>
     <string name="discord_browsing_title">Browsing a title</string>
+    <string name="discord_viewing_title">Viewing</string>
     <string name="discord_browsing_person">Looking someone up</string>
     <string name="discord_browsing_collections">Browsing collections</string>
     <string name="discord_browsing_generic">Browsing Nuvio Linux</string>

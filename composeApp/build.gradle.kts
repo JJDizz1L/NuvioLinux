@@ -51,6 +51,9 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
     @get:Input
     abstract val sentryEnvironment: Property<String>
 
+    @get:Input
+    abstract val discordClientId: Property<String>
+
     @TaskAction
     fun generate() {
         val props = Properties()
@@ -98,6 +101,19 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
                 |    const val CLIENT_ID = "${props.getProperty("TRAKT_CLIENT_ID", "")}" 
                 |    const val CLIENT_SECRET = "${props.getProperty("TRAKT_CLIENT_SECRET", "")}" 
                 |    const val REDIRECT_URI = "${props.getProperty("TRAKT_REDIRECT_URI", "nuvio://auth/trakt")}" 
+                |}
+                """.trimMargin()
+            )
+        }
+
+        outDir.resolve("com/nuviolinux/app/features/discord").apply {
+            mkdirs()
+            resolve("DiscordConfig.kt").writeText(
+                """
+                |package com.nuviolinux.app.features.discord
+                |
+                |object DiscordConfig {
+                |    const val CLIENT_ID = "${discordClientId.get()}"
                 |}
                 """.trimMargin()
             )
@@ -315,6 +331,7 @@ val generateRuntimeConfigs = tasks.register<GenerateRuntimeConfigsTask>("generat
             else -> "production"
         }
     )
+    discordClientId.set(runtimeConfigValue("NUVIO_DISCORD_CLIENT_ID", "1532796978973638830"))
 }
 
 val isLinuxHost = System.getProperty("os.name").contains("linux", ignoreCase = true)
