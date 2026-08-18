@@ -321,8 +321,10 @@ static int load_libmpv() {
 #define EGL_NO_CONTEXT                ((void*)0)
 #define EGL_NO_SURFACE                ((void*)0)
 #define EGL_RENDERABLE_TYPE           0x3040
-#define EGL_OPENGL_BIT                0x0020
+#define EGL_OPENGL_BIT                0x0008
 #define EGL_OPENGL_ES2_BIT            0x0004
+#define EGL_OPENGL_API                0x30A2
+#define EGL_OPENGL_ES_API             0x30A0
 #define EGL_SURFACE_TYPE              0x3033
 #define EGL_PBUFFER_BIT               0x0001
 #define EGL_RED_SIZE                  0x3024
@@ -333,6 +335,8 @@ static int load_libmpv() {
 #define EGL_HEIGHT                    0x3056
 #define EGL_PLATFORM_X11_EXT          0x31D5
 #define EGL_PLATFORM_WAYLAND_EXT      0x31D8
+#define EGL_PLATFORM_DEVICE_EXT       0x313F
+#define EGL_VENDOR                    0x3053
 
 #define GL_FRAMEBUFFER                0x8D40
 #define GL_FRAMEBUFFER_COMPLETE       0x8CD5
@@ -359,9 +363,13 @@ typedef void* (*egl_create_context_t)(void*, void*, void*, const int*);
 typedef void* (*egl_create_pbuffer_surface_t)(void*, void*, const int*);
 typedef int   (*egl_make_current_t)(void*, void*, void*, void*);
 typedef int   (*egl_destroy_surface_t)(void*, void*);
+typedef int         (*egl_query_devices_ext_t)(int, void*, int*);
+typedef void*       (*egl_get_platform_display_ext_t)(unsigned int, void*, const int*);
+typedef const char* (*egl_query_string_t)(void*, int);
 typedef int   (*egl_destroy_context_t)(void*, void*);
 typedef int   (*egl_terminate_t)(void*);
 typedef int   (*egl_get_error_t)(void);
+typedef int   (*egl_bind_api_t)(unsigned int);
 
 typedef void (*gl_gen_framebuffers_t)(int, unsigned int*);
 typedef void (*gl_delete_framebuffers_t)(int, const unsigned int*);
@@ -400,6 +408,8 @@ struct GlRenderer {
     egl_destroy_context_t eglDestroyContext = nullptr;
     egl_terminate_t eglTerminate = nullptr;
     egl_get_error_t eglGetError = nullptr;
+    egl_query_string_t eglQueryString = nullptr;
+    egl_bind_api_t eglBindAPI = nullptr;
     void *(*eglGetCurrentContext)(void) = nullptr;
 
     gl_gen_framebuffers_t glGenFramebuffers = nullptr;
@@ -460,6 +470,142 @@ static void gl_destroy(GlRenderer *gl) {
     gl->ready = false;
 }
 
+/* Attempts a full EGL bring-up on `display`: eglInitialize, config selection,
+ * context creation and make-current (surfaceless first, then a 1x1 pbuffer).
+ * Every step is logged so NVIDIA/JVM failures are self-diagnosing.
+ * Returns true on success (gl->display/gl->context set, context current). */
+static bool gl_try_display(GlRenderer *gl, void *display, const char *label,
+                           egl_initialize_t eglInitialize,
+                           egl_choose_config_t eglChooseConfig,
+                           egl_create_context_t eglCreateContext) {
+    int major = 0, minor = 0;
+    if (!eglInitialize(display, &major, &minor)) {
+        LOG("[gl-init] %s: eglInitialize failed (error=0x%x)", label,
+            gl->eglGetError ? gl->eglGetError() : 0);
+        return false;
+    }
+    LOG("[gl-init] %s: EGL %d.%d", label, major, minor);
+    if (gl->eglQueryString) {
+        const char *vendor = gl->eglQueryString(display, EGL_VENDOR);
+        LOG("[gl-init] %s: vendor=%s", label, vendor ? vendor : "(null)");
+    }
+
+    int configAttrsA[] = {
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        EGL_NONE,
+    };
+    int configAttrsB[] = { EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_NONE };
+    int configAttrsC[] = {
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        EGL_NONE,
+    };
+    int configAttrsD[] = {
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        EGL_NONE,
+    };
+    const int *configAttrsList[] = { configAttrsA, configAttrsB, configAttrsC, configAttrsD };
+
+    /* The current client API defaults to OpenGL ES (EGL spec). Mesa accepts
+     * surfaceless ES contexts, but NVIDIA's headless (surfaceless/device)
+     * platforms reject them — make-current fails with EGL_NOT_INITIALIZED —
+     * and only expose desktop OpenGL configs to eglBindAPI(EGL_OPENGL_API).
+     * Bind desktop GL first so a GL 3.3 core context is created (supported
+     * surfaceless by every EGL vendor), falling back to OpenGL ES for
+     * ES-only EGL stacks. */
+    unsigned int apis[] = { EGL_OPENGL_API, EGL_OPENGL_ES_API };
+    const char *apiNames[] = { "desktop GL", "OpenGL ES" };
+    for (int pass = 0; pass < 2; pass++) {
+        if (gl->eglBindAPI) {
+            gl->eglBindAPI(apis[pass]);
+        }
+        void *config = nullptr;
+        int numConfigs = 0;
+        int chain = -1;
+        for (int i = 0; i < 4; i++) {
+            if (eglChooseConfig(display, configAttrsList[i], &config, 1, &numConfigs) && numConfigs >= 1) {
+                chain = i;
+                break;
+            }
+            config = nullptr;
+            numConfigs = 0;
+        }
+        if (!config || numConfigs < 1) {
+            LOG("[gl-init] %s: %s: no EGL config (error=0x%x)", label, apiNames[pass],
+                gl->eglGetError ? gl->eglGetError() : 0);
+            continue;
+        }
+        LOG("[gl-init] %s: %s: config chain %c", label, apiNames[pass], 'A' + chain);
+
+        int contextAttrs[] = {
+            EGL_CONTEXT_MAJOR_VERSION, 3,
+            EGL_CONTEXT_MINOR_VERSION, 3,
+            EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+            EGL_NONE,
+        };
+        gl->context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttrs);
+        if (!gl->context) {
+            int legacyAttrs[] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE };
+            gl->context = eglCreateContext(display, config, EGL_NO_CONTEXT, legacyAttrs);
+        }
+        if (!gl->context) {
+            int es2Attrs[] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE };
+            gl->context = eglCreateContext(display, config, EGL_NO_CONTEXT, es2Attrs);
+        }
+        if (!gl->context) {
+            LOG("[gl-init] %s: %s: eglCreateContext failed (error=0x%x)", label, apiNames[pass],
+                gl->eglGetError ? gl->eglGetError() : 0);
+            continue;
+        }
+
+        if (gl->eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, gl->context)) {
+            LOG("[gl-init] %s: %s: surfaceless make-current OK", label, apiNames[pass]);
+            gl->display = display;
+            return true;
+        }
+        LOG("[gl-init] %s: %s: surfaceless make-current failed (error=0x%x)", label, apiNames[pass],
+            gl->eglGetError ? gl->eglGetError() : 0);
+
+        /* Fall back to a 1x1 PBuffer surface — the bridge renders into its own
+         * FBO and never draws to the default framebuffer, so the surface only
+         * exists to satisfy make-current. */
+        if (gl->eglCreatePbufferSurface) {
+            void *pbufferConfig = config;
+            int pbNum = 0;
+            if (!eglChooseConfig(display, configAttrsA, &pbufferConfig, 1, &pbNum) || pbNum < 1) {
+                pbufferConfig = config;
+            }
+            const int pbufferAttrs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+            gl->surface = gl->eglCreatePbufferSurface(display, pbufferConfig, pbufferAttrs);
+            if (gl->surface) {
+                if (gl->eglMakeCurrent(display, gl->surface, gl->surface, gl->context)) {
+                    LOG("[gl-init] %s: %s: pbuffer make-current OK", label, apiNames[pass]);
+                    gl->display = display;
+                    return true;
+                }
+                LOG("[gl-init] %s: %s: pbuffer make-current failed (error=0x%x)", label, apiNames[pass],
+                    gl->eglGetError ? gl->eglGetError() : 0);
+                gl->eglDestroySurface(display, gl->surface);
+                gl->surface = nullptr;
+            } else {
+                LOG("[gl-init] %s: %s: eglCreatePbufferSurface failed (error=0x%x)", label, apiNames[pass],
+                    gl->eglGetError ? gl->eglGetError() : 0);
+            }
+        }
+
+        gl->eglDestroyContext(display, gl->context);
+        gl->context = nullptr;
+    }
+
+    LOG("[gl-init] %s: no client API produced a current context, falling back to SW renderer", label);
+    gl->eglTerminate(display);
+    return false;
+}
+
 static bool gl_init(GlRenderer *gl) {
     gl->eglLib = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
     if (!gl->eglLib) {
@@ -468,6 +614,8 @@ static bool gl_init(GlRenderer *gl) {
     }
     gl->eglGetProcAddress = (egl_get_proc_address_t)dlsym(gl->eglLib, "eglGetProcAddress");
     gl->eglGetError = (egl_get_error_t)dlsym(gl->eglLib, "eglGetError");
+    gl->eglBindAPI = (egl_bind_api_t)dlsym(gl->eglLib, "eglBindAPI");
+    gl->eglQueryString = (egl_query_string_t)dlsym(gl->eglLib, "eglQueryString");
     gl->eglGetCurrentContext = (void *(*)(void))dlsym(gl->eglLib, "eglGetCurrentContext");
     auto eglGetPlatformDisplay = (egl_get_platform_display_t)dlsym(gl->eglLib, "eglGetPlatformDisplay");
     auto eglGetDisplay = (egl_get_display_t)dlsym(gl->eglLib, "eglGetDisplay");
@@ -487,130 +635,65 @@ static bool gl_init(GlRenderer *gl) {
         return false;
     }
 
-    /* Surfaceless EGL (Mesa) works on both X11 and Wayland with no window. */
-    gl->display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
-    if (!gl->display) {
-        gl->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    }
-    if (!gl->display) {
-        LOG("GL renderer unavailable: no EGL display, falling back to SW renderer");
-        dlclose(gl->eglLib);
-        gl->eglLib = nullptr;
-        return false;
-    }
-    int major = 0, minor = 0;
-    if (!eglInitialize(gl->display, &major, &minor)) {
-        LOG("GL renderer unavailable: eglInitialize failed, falling back to SW renderer");
-        dlclose(gl->eglLib);
-        gl->eglLib = nullptr;
-        return false;
-    }
+    /* Display candidates, tried in order. Each one goes through
+     * gl_try_display() (initialize, config, context, make-current). */
+    auto eglQueryDevicesEXT = (egl_query_devices_ext_t)gl->eglGetProcAddress("eglQueryDevicesEXT");
+    auto eglGetPlatformDisplayEXT = (egl_get_platform_display_ext_t)gl->eglGetProcAddress("eglGetPlatformDisplayEXT");
 
-    int configAttrsA[] = {
-        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_NONE,
-    };
-    int configAttrsB[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-        EGL_NONE,
-    };
-    int configAttrsC[] = {
-        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_NONE,
-    };
-    int configAttrsD[] = {
-        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_NONE,
-    };
-    const int *configAttrsList[] = { configAttrsA, configAttrsB, configAttrsC, configAttrsD };
-    void *config = nullptr;
-    int numConfigs = 0;
-    for (const int *attrs : configAttrsList) {
-        if (eglChooseConfig(gl->display, attrs, &config, 1, &numConfigs) && numConfigs >= 1) {
-            break;
+    /* 1. Surfaceless MESA platform (implemented by both Mesa and NVIDIA). */
+    void *display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+    if (display) {
+        LOG("[gl-init] trying display path: surfaceless-mesa");
+        if (gl_try_display(gl, display, "surfaceless-mesa", eglInitialize, eglChooseConfig, eglCreateContext)) {
+            goto gl_ready;
         }
-        config = nullptr;
-        numConfigs = 0;
-    }
-    if (!config || numConfigs < 1) {
-        LOG("GL renderer unavailable: no EGL config, falling back to SW renderer");
-        gl_destroy(gl);
-        return false;
+    } else {
+        LOG("[gl-init] surfaceless-mesa: no display");
     }
 
-    int contextAttrs[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 3,
-        EGL_CONTEXT_MINOR_VERSION, 3,
-        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-        EGL_NONE,
-    };
-    gl->context = eglCreateContext(gl->display, config, EGL_NO_CONTEXT, contextAttrs);
-    if (!gl->context) {
-        int legacyAttrs[] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE };
-        gl->context = eglCreateContext(gl->display, config, EGL_NO_CONTEXT, legacyAttrs);
+    /* 2. Default display (X11/Wayland windowing platform). */
+    display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (display) {
+        LOG("[gl-init] trying display path: default");
+        if (gl_try_display(gl, display, "default", eglInitialize, eglChooseConfig, eglCreateContext)) {
+            goto gl_ready;
+        }
+    } else {
+        LOG("[gl-init] default: no display");
     }
-    if (!gl->context) {
-        int es2Attrs[] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE };
-        gl->context = eglCreateContext(gl->display, config, EGL_NO_CONTEXT, es2Attrs);
-    }
-    if (!gl->context) {
-        LOG("GL renderer unavailable: eglCreateContext failed, falling back to SW renderer");
-        gl_destroy(gl);
-        return false;
-    }
-    if (!gl->eglMakeCurrent(gl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, gl->context)) {
-        /* Surfaceless contexts are not honored by every EGL implementation:
-         * NVIDIA's X11/Wayland platform displays reject EGL_NO_SURFACE with
-         * EGL_BAD_MATCH. Fall back to a 1x1 PBuffer surface — the bridge
-         * renders into its own FBO and never draws to the default
-         * framebuffer, so the surface only exists to satisfy make-current. */
-        bool madeCurrent = false;
-        if (gl->eglCreatePbufferSurface) {
-            /* The config chosen above may not advertise EGL_PBUFFER_BIT
-             * (configs from the B–D chains can lack it). Re-select a
-             * pbuffer-capable config explicitly so surface creation cannot
-             * fail with EGL_BAD_MATCH on such configs. */
-            void *pbufferConfig = config;
-            int pbNum = 0;
-            if (!eglChooseConfig(gl->display, configAttrsA, &pbufferConfig, 1, &pbNum) || pbNum < 1) {
-                pbufferConfig = config;
-            }
-            const int pbufferAttrs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
-            gl->surface = gl->eglCreatePbufferSurface(gl->display, pbufferConfig, pbufferAttrs);
-            if (gl->surface) {
-                madeCurrent = gl->eglMakeCurrent(gl->display, gl->surface, gl->surface, gl->context);
-                if (madeCurrent) {
-                    DBG("surfaceless context unsupported, using 1x1 pbuffer");
-                } else {
-                    DBG("eglMakeCurrent on pbuffer failed (error=0x%x)",
-                        gl->eglGetError ? gl->eglGetError() : 0);
+
+    /* 3. GPU device platform (EGL_EXT_platform_device) — NVIDIA's supported
+     * headless path when windowing-platform displays reject make-current. */
+    if (eglQueryDevicesEXT && eglGetPlatformDisplayEXT) {
+        void *devices[8];
+        int num = 0;
+        if (eglQueryDevicesEXT(8, devices, &num) && num > 0) {
+            LOG("[gl-init] device platform: %d device(s)", num);
+            for (int i = 0; i < num; i++) {
+                char label[32];
+                snprintf(label, sizeof(label), "device[%d]", i);
+                display = eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, devices[i], nullptr);
+                if (!display) {
+                    LOG("[gl-init] %s: no display", label);
+                    continue;
                 }
-            } else {
-                DBG("eglCreatePbufferSurface failed (error=0x%x)",
-                    gl->eglGetError ? gl->eglGetError() : 0);
+                if (gl_try_display(gl, display, label, eglInitialize, eglChooseConfig, eglCreateContext)) {
+                    goto gl_ready;
+                }
             }
+        } else {
+            LOG("[gl-init] device platform: no devices");
         }
-        if (!madeCurrent) {
-            LOG("GL renderer unavailable: eglMakeCurrent failed, falling back to SW renderer");
-            gl_destroy(gl);
-            return false;
-        }
+    } else {
+        LOG("[gl-init] device platform unavailable (missing eglQueryDevicesEXT/eglGetPlatformDisplayEXT)");
     }
 
+    LOG("GL renderer unavailable: all EGL display paths failed, falling back to SW renderer");
+    dlclose(gl->eglLib);
+    gl->eglLib = nullptr;
+    return false;
+
+gl_ready:
     gl->glGenFramebuffers = (gl_gen_framebuffers_t)gl_resolve(gl, "glGenFramebuffers");
     gl->glDeleteFramebuffers = (gl_delete_framebuffers_t)gl_resolve(gl, "glDeleteFramebuffers");
     gl->glBindFramebuffer = (gl_bind_framebuffer_t)gl_resolve(gl, "glBindFramebuffer");
@@ -661,7 +744,7 @@ static bool gl_init(GlRenderer *gl) {
     /* NOTE: keep the context current on this thread — mpv_render_context_create
      * (OPENGL) requires a current context, and the render thread keeps it
      * current for its whole lifetime (it is never switched between threads). */
-    LOG("GL renderer initialized (EGL %d.%d, surfaceless)", major, minor);
+    LOG("GL renderer initialized (surfaceless)");
     return true;
 }
 
