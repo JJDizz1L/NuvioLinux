@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -52,6 +53,7 @@ actual object P2pStreamingEngine {
     private val lifecycleLock = Any()
     private var statsJob: Job? = null
     private var cleanupJob: Job? = null
+    private var idleStopJob: Job? = null
     private var currentHash: String? = null
     private var streamGeneration = 0L
     private val binary = TorrServerBinary()
@@ -70,12 +72,24 @@ actual object P2pStreamingEngine {
     }
 
     actual suspend fun startStream(request: P2pStreamRequest): String = withContext(Dispatchers.IO) {
+        idleStopJob?.cancel()
+        idleStopJob = null
         stopStreamNow(stopBinary = false)
         val generation = nextStreamGeneration()
         _state.value = P2pStreamingState.Connecting()
 
         try {
             binary.start()
+            ensureCurrentGeneration(generation)
+
+            // Apply the user's "Torrent cache size" setting to TorrServer's
+            // RAM piece cache before the torrent is added (previously this
+            // setting was stored but never sent to the engine, leaving
+            // TorrServer at its built-in default).
+            P2pSettingsRepository.ensureLoaded()
+            api.applyCacheSettings(
+                P2pSettingsRepository.uiState.value.cacheSize.toTorrServerCacheMb(),
+            )
             ensureCurrentGeneration(generation)
 
             val magnetLink = buildMagnetUri(request.infoHash, request.trackers)
@@ -131,10 +145,15 @@ actual object P2pStreamingEngine {
         }
         _cacheState.value = _cacheState.value.copy(isClearing = true)
         try {
+            // Measure before shutdown: TorrServer may delete cached pieces on
+            // exit (RemoveCacheOnDrop). The bundled binary under bin/ is not
+            // part of the torrent cache.
+            val torrserverDir = AppPaths.cacheDir.resolve("torrserver")
+            val reclaimed = measureDirSize(torrserverDir, excludeName = "bin")
             stopStreamNow(stopBinary = true)
             _cacheState.value = P2pCacheUiState(hasMeasurement = true)
             P2pCacheClearResult(
-                reclaimedBytes = 0L,
+                reclaimedBytes = reclaimed,
                 remainingBytes = 0L,
                 protectedBytes = 0L,
             )
@@ -145,9 +164,11 @@ actual object P2pStreamingEngine {
 
     actual fun stopStream() {
         scheduleStop(stopBinary = false)
+        scheduleIdleBinaryStop()
     }
 
     actual fun shutdown() {
+        idleStopJob?.cancel()
         scheduleStop(stopBinary = true)
     }
 
@@ -164,6 +185,44 @@ actual object P2pStreamingEngine {
         cleanupJob?.join()
         val hash = detachActiveStream()
         cleanupDetachedStream(hash, stopBinary)
+    }
+
+    /* TorrServer previously stayed resident for the whole app session after a
+     * stream ended, holding its RAM piece cache. Shut it down once no stream
+     * has been started for a while; the next startStream relaunches it. */
+    private fun scheduleIdleBinaryStop() {
+        idleStopJob?.cancel()
+        idleStopJob = scope.launch {
+            delay(IDLE_BINARY_STOP_DELAY_MS)
+            val busy = synchronized(lifecycleLock) {
+                currentHash != null
+            } || _state.value is P2pStreamingState.Connecting ||
+                _state.value is P2pStreamingState.Streaming
+            if (busy) return@launch
+            try {
+                binary.stop()
+                log.d { "TorrServer stopped after idle timeout" }
+            } catch (e: Exception) {
+                log.w(e) { "Error stopping idle TorrServer" }
+            }
+        }
+    }
+
+    private fun measureDirSize(dir: java.nio.file.Path, excludeName: String? = null): Long =
+        runCatching {
+            java.nio.file.Files.walk(dir).use { stream ->
+                stream.filter { path -> excludeName == null || path.fileName.toString() != excludeName }
+                    .filter { java.nio.file.Files.isRegularFile(it) }
+                    .mapToLong { java.nio.file.Files.size(it) }
+                    .sum()
+            }
+        }.getOrElse { 0L }
+
+    private fun P2pCacheSize.toTorrServerCacheMb(): Int = when (this) {
+        P2pCacheSize.NONE -> 64
+        P2pCacheSize.GB_2 -> 2048
+        P2pCacheSize.GB_5 -> 5120
+        P2pCacheSize.GB_10 -> 10240
     }
 
     private fun detachActiveStream(): String? {
@@ -335,6 +394,8 @@ actual object P2pStreamingEngine {
         "udp://exodus.desync.com:6969/announce",
         "udp://tracker.torrent.eu.org:451/announce",
     )
+
+    private const val IDLE_BINARY_STOP_DELAY_MS = 60_000L
 
     private class TorrServerBinary {
         private val log = Logger.withTag("TorrServerBinary")
@@ -521,8 +582,7 @@ actual object P2pStreamingEngine {
             const val PORT = 8091
             private const val STARTUP_TIMEOUT_MS = 15_000L
             private const val HEALTH_CHECK_INTERVAL_MS = 200L
-        }
-    }
+        }    }
 
     private data class DesktopTorrServerPlatform(
         val resourceDir: String,
@@ -648,6 +708,30 @@ actual object P2pStreamingEngine {
         fun getStreamUrl(magnetLink: String, fileIdx: Int): String {
             val encodedLink = URLEncoder.encode(magnetLink, Charsets.UTF_8.name())
             return "$baseUrl/stream?link=$encodedLink&index=$fileIdx&play"
+        }
+
+        /* GET-modify-POST: TorrServer's /settings schema varies between
+         * versions, so fetch the current object and only override the RAM
+         * piece-cache size ("cache", in MB; "auto" is the built-in default).
+         * Unknown fields are preserved verbatim. */
+        suspend fun applyCacheSettings(cacheMb: Int) = withContext(Dispatchers.IO) {
+            try {
+                val getRequest = HttpRequest.newBuilder(URI.create("$baseUrl/settings"))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build()
+                val response = client.send(getRequest, HttpResponse.BodyHandlers.ofString())
+                if (response.statusCode() !in 200..299) {
+                    log.w { "applyCacheSettings: GET /settings failed (${response.statusCode()})" }
+                    return@withContext
+                }
+                val current = json.parseToJsonElement(response.body().orEmpty()).jsonObject
+                val updated = JsonObject(current + ("cache" to JsonPrimitive(cacheMb)))
+                postJson("/settings", updated)
+                log.d { "TorrServer cache size applied: $cacheMb MB" }
+            } catch (e: Exception) {
+                log.w(e) { "applyCacheSettings error" }
+            }
         }
 
         private fun postJson(path: String, body: JsonObject): JsonObject? {

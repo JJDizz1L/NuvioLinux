@@ -918,7 +918,14 @@ fun MetaDetailsScreen(
                 }
                 val heroTrailerSourceUrl = heroTrailerPlaybackSource
                     ?.videoUrl
-                    ?.takeIf { it.isNotBlank() && heroTrailerPlaybackEnabled && !heroTrailerFinished && !isLeavingDetails }
+                    ?.takeIf {
+                        it.isNotBlank() && heroTrailerPlaybackEnabled && !heroTrailerFinished &&
+                            !isLeavingDetails &&
+                            // Unmount while the trailer popup plays — two full mpv
+                            // instances (each with its own demuxer cache) would
+                            // otherwise stay resident at once.
+                            selectedTrailer == null
+                    }
                 val heroTrailerSourceAudioUrl = heroTrailerPlaybackSource
                     ?.audioUrl
                     ?.takeIf { heroTrailerSourceUrl != null && it.isNotBlank() }

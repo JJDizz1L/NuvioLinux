@@ -38,6 +38,14 @@ internal object ScreensaverInhibit {
     private val log = Logger.withTag("ScreensaverInhibit")
     private val lock = Any()
 
+    /** Acquire/release spawn subprocesses and block (Thread.sleep, stream
+     *  reads, gdbus waits up to 5s) — never run them on the caller's thread
+     *  (setActive is called from the UI thread on every playback-state flip).
+     *  Single-threaded executor keeps acquire/release strictly ordered. */
+    private val executor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "nuvio-screensaver-inhibit").apply { isDaemon = true }
+    }
+
     @Volatile
     private var active = false
 
@@ -57,17 +65,33 @@ internal object ScreensaverInhibit {
     private var screensaverCookie: String? = null
 
     init {
-        Runtime.getRuntime().addShutdownHook(Thread { setActive(false) })
+        Runtime.getRuntime().addShutdownHook(
+            Thread {
+                // Synchronous release: the JVM is exiting, so an executor task
+                // could never run — the inhibitor subprocesses would leak and
+                // keep holding the logind lock after app close.
+                synchronized(lock) {
+                    active = false
+                    releaseLocked()
+                }
+            }.apply { name = "nuvio-screensaver-release" },
+        )
     }
 
     fun setActive(inhibit: Boolean) {
         synchronized(lock) {
             if (inhibit == active) return
             active = inhibit
-            if (inhibit) {
-                acquireLocked()
-            } else {
-                releaseLocked()
+            executor.execute {
+                synchronized(lock) {
+                    // A newer toggle already superseded this action.
+                    if (inhibit != active) return@synchronized
+                    if (inhibit) {
+                        acquireLocked()
+                    } else {
+                        releaseLocked()
+                    }
+                }
             }
         }
     }

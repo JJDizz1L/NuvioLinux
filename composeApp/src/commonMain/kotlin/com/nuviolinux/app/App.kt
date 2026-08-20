@@ -93,6 +93,7 @@ import androidx.navigation3.ui.NavDisplay
 import androidx.savedstate.serialization.SavedStateConfiguration
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
+import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
@@ -496,6 +497,9 @@ private object NativeAppGateRequests {
     }
 }
 
+/** Hard cap for the Coil memory image cache (128 MiB). */
+private const val IMAGE_MEMORY_CACHE_BYTES = 128L * 1024L * 1024L
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @Preview
@@ -520,6 +524,14 @@ fun App(
             .crossfade(true)
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCachePolicy(CachePolicy.ENABLED)
+            // Explicit cap: coil's default is a fraction of the JVM max heap
+            // (¼ of physical RAM when -Xmx is unset), which let the image
+            // cache grow to hundreds of MB on large-RAM machines.
+            .memoryCache {
+                MemoryCache.Builder()
+                    .maxSizeBytes(IMAGE_MEMORY_CACHE_BYTES)
+                    .build()
+            }
             .components {
                 add(SvgDecoder.Factory())
                 add(
