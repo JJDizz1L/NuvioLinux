@@ -14,6 +14,7 @@ internal object NativePlayerBridge {
     external fun create(
         hostViewPtr: Long,
         sourceUrl: String,
+        sourceAudioUrl: String?,
         headerLines: Array<String>,
         playWhenReady: Boolean,
         initialPositionMs: Long,
@@ -28,6 +29,8 @@ internal object NativePlayerBridge {
     external fun seekTo(handle: Long, positionMs: Long)
     external fun seekBy(handle: Long, offsetMs: Long)
     external fun setSpeed(handle: Long, speed: Float)
+    // DEADCODE: declared and exported in player_bridge.cpp:2321 but never called;
+    // NativePlayerController uses setVolume() exclusively. See DEADCODE.md §5.
     external fun adjustVolume(handle: Long, delta: Float)
     external fun setVolume(handle: Long, level: Float)
     external fun volume(handle: Long): Float
@@ -62,6 +65,10 @@ internal object NativePlayerBridge {
     /** Enables the JDK's non-reparenting-WM code path via setenv(3). Must run
      *  before the first AWT/X11 toolkit access (see AwtNonReparentingSupport). */
     external fun setAwtNonReparenting()
+
+    /** Prints NVIDIA diagnostics to stderr and returns. No-op if no NVIDIA GPU.
+     *  Called when --nvidia-diag flag is passed at startup. */
+    external fun nvidiaDiag()
 
     private fun loadNativeLibrary() {
         val platform = DesktopHostOs.current

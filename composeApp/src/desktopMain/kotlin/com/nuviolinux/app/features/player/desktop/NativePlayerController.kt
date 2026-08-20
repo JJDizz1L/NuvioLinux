@@ -46,6 +46,7 @@ internal class NativePlayerController(
 
     fun attach(
         sourceUrl: String,
+        sourceAudioUrl: String?,
         sourceHeaders: Map<String, String>,
         playWhenReady: Boolean,
         initialPositionMs: Long,
@@ -56,6 +57,7 @@ internal class NativePlayerController(
     ) {
         val pending = PendingSource(
             sourceUrl = sourceUrl,
+            sourceAudioUrl = sourceAudioUrl?.takeIf(String::isNotBlank),
             headerLines = sourceHeaders.toHeaderLines(),
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs.coerceAtLeast(0L),
@@ -66,8 +68,9 @@ internal class NativePlayerController(
         )
         pendingSource = pending
         log.d {
-            "attach requested source=${sourceUrl.toPlaybackLogKey()} headers=${sourceHeaders.size} " +
-                "playWhenReady=$playWhenReady initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority"
+            "attach requested source=${sourceUrl.toPlaybackLogKey()} audio=${!sourceAudioUrl.isNullOrBlank()} " +
+                "headers=${sourceHeaders.size} playWhenReady=$playWhenReady " +
+                "initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority"
         }
         attachPending()
     }
@@ -113,6 +116,7 @@ internal class NativePlayerController(
                 NativePlayerBridge.create(
                     hostViewPtr = 0L,
                     sourceUrl = resolvedSource,
+                    sourceAudioUrl = pending.sourceAudioUrl,
                     headerLines = pending.headerLines.toTypedArray(),
                     playWhenReady = pending.playWhenReady,
                     initialPositionMs = pending.initialPositionMs,
@@ -239,7 +243,11 @@ internal class NativePlayerController(
     }
 
     override fun setMuted(muted: Boolean) {
-        setFallbackVolume(if (muted) 0f else (rememberedVolumeLevel.takeIf { it > 0f } ?: 1f))
+        val current = handle
+        if (current == 0L) return
+        val level = if (muted) 0f else (rememberedVolumeLevel.takeIf { it > 0f } ?: 1f)
+        NativePlayerBridge.setVolume(current, level)
+        controlsState = controlsState.copy(volumeLevel = level)
     }
 
     /** Renders the latest video frame into [buffer] (RGB0, stride = width * 4). */
@@ -302,6 +310,7 @@ internal class NativePlayerController(
         val pending = pendingSource ?: return
         attach(
             sourceUrl = pending.sourceUrl,
+            sourceAudioUrl = pending.sourceAudioUrl,
             sourceHeaders = pending.headerLines.toHeaderMap(),
             playWhenReady = pending.playWhenReady,
             initialPositionMs = pending.initialPositionMs,
@@ -506,6 +515,7 @@ private fun Int.toHexByte(): String {
 
 private data class PendingSource(
     val sourceUrl: String,
+    val sourceAudioUrl: String?,
     val headerLines: List<String>,
     val playWhenReady: Boolean,
     val initialPositionMs: Long,

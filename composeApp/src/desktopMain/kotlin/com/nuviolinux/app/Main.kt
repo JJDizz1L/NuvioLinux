@@ -25,6 +25,7 @@ import com.nuviolinux.app.core.deeplink.handleAppUrl
 import com.nuviolinux.app.features.p2p.P2pStreamingEngine
 import com.nuviolinux.app.features.plugins.configureDesktopQuickJsLibrary
 import com.nuviolinux.app.features.player.PlatformPlayerSurface
+import com.nuviolinux.app.features.player.desktop.NativePlayerBridge
 import com.nuviolinux.app.features.player.desktop.DesktopAppFullscreenController
 import com.nuviolinux.app.features.player.desktop.DesktopWindowGeometry
 import com.nuviolinux.app.features.player.desktop.DesktopWindowModeStorage
@@ -218,6 +219,16 @@ private fun installDesktopOpenUriHandler() {
 }
 
 private fun handleDesktopLaunchArgs(args: Array<String>) {
+    // Check for --nvidia-diag flag before any other processing
+    if (args.any { it == "--nvidia-diag" || it == "-nvdiag" }) {
+        // Force enable debug logging for native diagnostics
+        System.setProperty("NUVIO_MPV_DEBUG", "1")
+        // Load native library and call diagnostics
+        runCatching { NativePlayerBridge.nvidiaDiag() }
+            .onFailure { e -> System.err.println("Failed to run nvidia diagnostics: $e") }
+        // Exit after printing diagnostics
+        kotlin.system.exitProcess(0)
+    }
     args.asSequence()
         .map(String::trim)
         .filter(::isDesktopAppUrl)

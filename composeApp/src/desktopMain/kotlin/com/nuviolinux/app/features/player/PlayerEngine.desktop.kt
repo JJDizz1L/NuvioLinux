@@ -36,7 +36,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
@@ -69,6 +71,7 @@ actual fun PlatformPlayerSurface(
 ) {
     NativePlayerSurface(
         sourceUrl = sourceUrl,
+        sourceAudioUrl = sourceAudioUrl,
         sourceHeaders = sourceHeaders,
         modifier = modifier,
         playWhenReady = playWhenReady,
@@ -87,6 +90,7 @@ actual fun PlatformPlayerSurface(
 @Composable
 private fun NativePlayerSurface(
     sourceUrl: String,
+    sourceAudioUrl: String?,
     sourceHeaders: Map<String, String>,
     modifier: Modifier,
     playWhenReady: Boolean,
@@ -161,6 +165,7 @@ private fun NativePlayerSurface(
     LaunchedEffect(
         controller,
         sourceUrl,
+        sourceAudioUrl,
         playbackHeaders,
         decoderPriority,
         streamCacheSize,
@@ -171,6 +176,7 @@ private fun NativePlayerSurface(
         log.d { "calling controller.attach" }
         controller.attach(
             sourceUrl = sourceUrl,
+            sourceAudioUrl = sourceAudioUrl,
             sourceHeaders = playbackHeaders,
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs,
@@ -257,51 +263,133 @@ private fun ComposeVideoSurface(
 
     LaunchedEffect(controller) {
         val log = Logger.withTag("ComposeVideoSurface")
-        val directBuffers = Array(2) { java.nio.ByteBuffer.allocateDirect(0) }
-        val pixelRows = Array(3) { ByteArray(0) }
-        /* Fixed bitmap pool: allocating a fresh skia Bitmap per frame churns
-         * native objects through Cleaners and grows the allocator watermark.
-         * Reuse one bitmap per pixel buffer instead. */
-        val bitmaps = Array(3) { Bitmap() }
-        var directIndex = 0
-        var rowIndex = 0
+        /* Fixed pool of 3 render slots: one is being filled by the producer,
+         * one holds the newest completed frame waiting for the next Compose
+         * frame, and one holds the frame currently on screen. Rendering (the
+         * blocking renderFrame JNI + glReadPixels + pixel copy) runs on a
+         * background dispatcher so a 4K readback can never stall the UI
+         * thread, and Compose only draws the newest completed frame. */
+        val slots = Array(3) { RenderSlot() }
+        val slotLock = Any()
+        val free = ArrayDeque(List(slots.size) { it })
+        val newestSlot = AtomicInteger(-1)
+        var drawingSlot = -1
         var lastWidth = 0
         var lastHeight = 0
+        var cadenceStartNs = 0L
+        var cadenceFrames = 0
 
+        /* Allocate a slot's buffers for the current size if they don't match.
+         * Must be called with slotLock held. Deliberately does NOT touch other
+         * slots: a slot that is published or currently on screen keeps its
+         * valid bitmap until the consumer recycles it. Blanking every slot on
+         * resize (the old resizeSlots) left the consumer drawing a fresh empty
+         * Bitmap with no pixel data -> Image::makeFromBitmap crash.
+         *
+         * Buffers are grow-only: as long as the new frame fits the existing
+         * capacity they are reused (installPixels rebinds size per frame), so
+         * shrinking a window or moving between surfaces doesn't churn native
+         * memory through Cleaners/GC. */
+        fun ensureSlotSize(slot: RenderSlot, width: Int, height: Int, needed: Int) {
+            if (slot.width == width && slot.height == height) return
+            if (needed > slot.capacity) {
+                val capacity = maxOf(needed, slot.capacity * 2)
+                slot.directBuffer = java.nio.ByteBuffer.allocateDirect(capacity)
+                slot.pixels = ByteArray(capacity)
+                slot.bitmap = Bitmap()
+                slot.capacity = capacity
+                log.d { "resized slot to ${width}x${height}, buffer=$capacity bytes" }
+            }
+            slot.width = width
+            slot.height = height
+        }
+
+        /* Producer: renders into a free slot and publishes the newest
+         * completed frame. renderFrame returns true exactly when mpv signals a
+         * new frame, so the produce cadence tracks the video FPS; between
+         * frames it polls cheaply. */
+        launch(Dispatchers.Default) {
+            while (coroutineContext.isActive) {
+                val size = awtWindowSize ?: surfaceSize
+                if (size.width <= 0 || size.height <= 0) {
+                    delay(16L)
+                    continue
+                }
+                val needed = size.width * size.height * 4
+                if (lastWidth != size.width || lastHeight != size.height) {
+                    lastWidth = size.width
+                    lastHeight = size.height
+                }
+
+                /* Wait for the consumer to pick up the previous frame before
+                 * producing another — the pool only has one spare slot. */
+                if (newestSlot.get() != -1) {
+                    delay(1L)
+                    continue
+                }
+                val index = synchronized(slotLock) { free.removeFirstOrNull() }
+                    ?: run { delay(1L); continue }
+                val slot = slots[index]
+                synchronized(slotLock) { ensureSlotSize(slot, size.width, size.height, needed) }
+                slot.directBuffer.rewind()
+                val rendered = controller.renderFrame(size.width, size.height, slot.directBuffer)
+                if (!rendered) {
+                    synchronized(slotLock) { free.addLast(index) }
+                    /* No new frame yet; poll cheaply instead of busy-spinning. */
+                    delay(1L)
+                    continue
+                }
+                slot.directBuffer.rewind()
+                slot.directBuffer.get(slot.pixels, 0, needed)
+                if (!slot.bitmap.installPixels(
+                        ImageInfo(size.width, size.height, ColorType.RGB_888X, ColorAlphaType.OPAQUE),
+                        slot.pixels,
+                        size.width * 4,
+                    )
+                ) {
+                    log.w { "installPixels failed for ${size.width}x${size.height}" }
+                    synchronized(slotLock) { free.addLast(index) }
+                    continue
+                }
+                /* Publish the filled slot. The producer is the only writer and
+                 * only renders while newestSlot == -1, so the CAS always
+                 * succeeds here; the bitmap re-store keeps the published slot
+                 * filled even if a resize swapped the slot fields mid-render. */
+                if (newestSlot.compareAndSet(-1, index)) {
+                    synchronized(slotLock) { slots[index].bitmap = slot.bitmap }
+                    /* 1 Hz cadence line so a reporter can confirm the pump
+                     * produces at the video FPS (not the Compose frame rate). */
+                    val nowNs = System.nanoTime()
+                    if (cadenceStartNs == 0L) cadenceStartNs = nowNs
+                    cadenceFrames++
+                    val cadenceMs = (nowNs - cadenceStartNs) / 1_000_000L
+                    if (cadenceMs >= 1000L) {
+                        log.d {
+                            "render cadence: $cadenceFrames frames in ${cadenceMs}ms (" +
+                                "%.1f fps".format(cadenceFrames * 1000.0 / cadenceMs) + ")"
+                        }
+                        cadenceStartNs = nowNs
+                        cadenceFrames = 0
+                    }
+                } else {
+                    synchronized(slotLock) { free.addLast(index) }
+                }
+            }
+        }
+
+        /* Consumer: on every Compose frame, draw the newest completed frame. */
         while (coroutineContext.isActive) {
             withFrameNanos { }
-            val size = awtWindowSize ?: surfaceSize
-            if (size.width <= 0 || size.height <= 0) continue
-            val needed = size.width * size.height * 4
-            if (lastWidth != size.width || lastHeight != size.height) {
-                lastWidth = size.width
-                lastHeight = size.height
-                for (i in directBuffers.indices) {
-                    directBuffers[i] = java.nio.ByteBuffer.allocateDirect(needed)
+            val index = newestSlot.get()
+            if (index < 0) continue
+            if (newestSlot.compareAndSet(index, -1)) {
+                /* The slot drawn in the previous frame has finished drawing,
+                 * so it can be recycled. */
+                if (drawingSlot >= 0) {
+                    synchronized(slotLock) { free.addLast(drawingSlot) }
                 }
-                for (i in pixelRows.indices) {
-                    pixelRows[i] = ByteArray(needed)
-                }
-                log.d { "resized surface to ${size.width}x${size.height}, buffer=${needed} bytes" }
-            }
-            val buffer = directBuffers[directIndex]
-            directIndex = (directIndex + 1) % directBuffers.size
-            buffer.rewind()
-            if (!controller.renderFrame(size.width, size.height, buffer)) continue
-            buffer.rewind()
-            val pixels = pixelRows[rowIndex]
-            val bitmap = bitmaps[rowIndex]
-            rowIndex = (rowIndex + 1) % pixelRows.size
-            buffer.get(pixels, 0, needed)
-            if (bitmap.installPixels(
-                    ImageInfo(size.width, size.height, ColorType.RGB_888X, ColorAlphaType.OPAQUE),
-                    pixels,
-                    size.width * 4,
-                )
-            ) {
-                frameImage = bitmap.asComposeImageBitmap()
-            } else {
-                log.w { "installPixels failed for ${size.width}x${size.height}" }
+                drawingSlot = index
+                frameImage = synchronized(slotLock) { slots[index].bitmap.asComposeImageBitmap() }
             }
         }
     }
@@ -335,3 +423,17 @@ private fun findPlayerWindow(): java.awt.Window? =
         .firstOrNull { it.isVisible && it.isDisplayable && it.isShowing }
         ?: java.awt.Window.getWindows()
             .firstOrNull { it.isVisible && it.isDisplayable && it.isShowing }
+
+/**
+ * One reusable video frame buffer. Allocating a fresh skia Bitmap per frame
+ * churns native objects through Cleaners and grows the allocator watermark, so
+ * the frame pump reuses a fixed pool of these instead.
+ */
+private class RenderSlot {
+    var directBuffer: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(0)
+    var pixels: ByteArray = ByteArray(0)
+    var bitmap: Bitmap = Bitmap()
+    var capacity: Int = 0
+    var width: Int = 0
+    var height: Int = 0
+}
