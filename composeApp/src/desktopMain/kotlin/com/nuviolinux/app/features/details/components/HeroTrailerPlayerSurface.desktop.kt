@@ -15,10 +15,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import com.nuviolinux.app.features.player.PlayerEngineController
 import com.nuviolinux.app.features.player.PlatformPlayerSurface
 import com.nuviolinux.app.features.player.PlayerPlaybackSnapshot
 import com.nuviolinux.app.features.player.PlayerResizeMode
 import com.nuviolinux.app.features.trailer.TrailerExtractionPlatform
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -72,6 +74,7 @@ private fun DesktopTrailerPlayerSession(
     var mediaReady by remember { mutableStateOf(false) }
     var terminalReported by remember { mutableStateOf(false) }
     var lastSnapshot by remember { mutableStateOf<PlayerPlaybackSnapshot?>(null) }
+    var trailerController by remember { mutableStateOf<PlayerEngineController?>(null) }
 
     LaunchedEffect(sourceUrl, sourceAudioUrl, startPositionMillis) {
         mediaReady = false
@@ -109,6 +112,24 @@ private fun DesktopTrailerPlayerSession(
         }
     }
 
+    /* Honor the caller's mute preference (hover "Play with Sound" off, hero
+     * audio toggle) once the player handle exists, and re-apply on toggle.
+     * setMuted is a no-op until the native handle exists, so poll for it:
+     * playback now starts as soon as the source is passed (playWhenReady is
+     * no longer gated on mediaReady — mpv never reports duration for a paused
+     * DVR-HLS stream), and a muted trailer must not leak audio while opening. */
+    LaunchedEffect(trailerController, muted, terminalReported) {
+        val controller = trailerController ?: return@LaunchedEffect
+        if (terminalReported) return@LaunchedEffect
+        while (true) {
+            if (controller.currentVolume() != null) {
+                controller.setMuted(muted)
+                break
+            }
+            delay(50)
+        }
+    }
+
     Box(modifier = modifier.clipToBounds()) {
         PlatformPlayerSurface(
             sourceUrl = sourceUrl,
@@ -121,12 +142,16 @@ private fun DesktopTrailerPlayerSession(
                         scaleY = TrailerFillFrameScale
                     }
                 },
-            playWhenReady = playWhenReady && mediaReady,
+            /* Always open playing so mpv reports duration for the DVR-HLS
+             * stream (paused opens never report it → ready-timeout); apply
+             * the caller's pause preference once ready via the surface's
+             * play/pause effect (muting handles audio during the open). */
+            playWhenReady = if (mediaReady) playWhenReady else true,
             initialPositionMs = startPositionMillis.takeIf { it > 0L },
             initialPositionRequestKey = "trailer:$sourceUrl",
             resizeMode = if (fillFrame) PlayerResizeMode.Fill else PlayerResizeMode.Fit,
             useNativeController = false,
-            onControllerReady = {},
+            onControllerReady = { controller -> trailerController = controller },
             onSnapshot = { snap -> lastSnapshot = snap },
             onError = { error ->
                 if (!terminalReported) {

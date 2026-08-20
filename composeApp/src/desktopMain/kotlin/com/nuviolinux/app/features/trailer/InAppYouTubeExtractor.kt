@@ -2,6 +2,8 @@ package com.nuviolinux.app.features.trailer
 
 import co.touchlab.kermit.Logger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -16,9 +18,17 @@ internal const val TRAILER_REQUEST_TIMEOUT_MS = 20_000L
 private const val EXTRACTOR_TIMEOUT_MS = 30_000L
 private const val PREFERRED_SEPARATE_CLIENT = "visionos"
 
+/* Public web-client INNERTUBE key (stable; embedded in every YouTube page).
+ * Hardcoded because the watch-page HTML that normally carries it is behind
+ * YouTube's bot gate (HTTP 429) for non-browser clients. */
+private const val FALLBACK_INNERTUBE_API_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+
+/* Serialize visitor-token fetches so concurrent trailer extractions (hover
+ * preview + hero + popup) share one fetch instead of hammering YouTube with
+ * parallel requests. */
+private val watchConfigMutex = Mutex()
+
 private val VIDEO_ID_REGEX = Regex("^[a-zA-Z0-9_-]{11}$")
-private val API_KEY_REGEX = Regex("\"INNERTUBE_API_KEY\":\"([^\"]+)\"")
-private val VISITOR_DATA_REGEX = Regex("\"VISITOR_DATA\":\"([^\"]+)\"")
 private val QUALITY_LABEL_REGEX = Regex("(\\d{2,4})p")
 
 private data class YouTubeClient(
@@ -28,11 +38,6 @@ private data class YouTubeClient(
     val userAgent: String,
     val context: JsonObject,
     val priority: Int,
-)
-
-private data class WatchConfig(
-    val apiKey: String?,
-    val visitorData: String?,
 )
 
 internal data class StreamCandidate(
@@ -178,22 +183,7 @@ class InAppYouTubeExtractor {
         }
         TrailerExtractionPlatform.diagnostic("extract start videoId=$videoId")
 
-        val watchUrl = "https://www.youtube.com/watch?v=$videoId&hl=en"
-        val watchResponse = TrailerExtractionPlatform.performRequest(
-            url = watchUrl,
-            method = "GET",
-            headers = TrailerExtractionPlatform.defaultHeaders,
-            body = null,
-            timeoutMillis = TRAILER_REQUEST_TIMEOUT_MS,
-        )
-        if (!watchResponse.ok) {
-            throw IllegalStateException("Failed to fetch watch page (${watchResponse.status})")
-        }
-        TrailerExtractionPlatform.diagnostic(
-            "watch ok status=${watchResponse.status} bytes=${watchResponse.body.length}",
-        )
-
-        val watchConfig = getWatchConfig(watchResponse.body)
+        val watchConfig = fetchWatchConfig(videoId)
         val apiKey = watchConfig.apiKey
             ?: throw IllegalStateException("Unable to extract INNERTUBE_API_KEY")
 
@@ -503,10 +493,38 @@ class InAppYouTubeExtractor {
         return null
     }
 
-    private fun getWatchConfig(html: String): WatchConfig {
-        val apiKey = API_KEY_REGEX.find(html)?.groupValues?.getOrNull(1)
-        val visitorData = VISITOR_DATA_REGEX.find(html)?.groupValues?.getOrNull(1)
-        return WatchConfig(apiKey = apiKey, visitorData = visitorData)
+    /* The INNERTUBE key is hardcoded (public) and the visitor token is
+     * session-wide, so obtain it once and reuse it. YouTube's bot gate blocks
+     * the watch-page HTML for non-browser clients (HTTP 429), so the visitor
+     * token is instead harvested from an ANDROID player-API response, which
+     * works without one and echoes it back in responseContext. */
+    private suspend fun fetchWatchConfig(videoId: String): WatchConfig = watchConfigMutex.withLock {
+        TrailerExtractionPlatform.cachedWatchConfig()?.let { cached ->
+            TrailerExtractionPlatform.diagnostic("watch config cache hit")
+            return@withLock cached
+        }
+        val config = runCatching {
+            val android = CLIENTS.first { it.key == "android" }
+            val playerResponse = fetchPlayerResponse(
+                apiKey = FALLBACK_INNERTUBE_API_KEY,
+                videoId = videoId,
+                client = android,
+                visitorData = null,
+            )
+            val visitorData = playerResponse
+                .objectValue("responseContext")
+                ?.stringValue("visitorData")
+            TrailerExtractionPlatform.diagnostic(
+                "visitor data via android client: " +
+                    if (visitorData.isNullOrBlank()) "missing" else "ok",
+            )
+            WatchConfig(apiKey = FALLBACK_INNERTUBE_API_KEY, visitorData = visitorData)
+        }.getOrElse { error ->
+            TrailerExtractionPlatform.diagnostic("visitor data fetch failed: ${error.message}")
+            WatchConfig(apiKey = FALLBACK_INNERTUBE_API_KEY, visitorData = null)
+        }
+        TrailerExtractionPlatform.cacheWatchConfig(config)
+        return@withLock config
     }
 
     private fun parseHlsAttributeList(line: String): Map<String, String> {

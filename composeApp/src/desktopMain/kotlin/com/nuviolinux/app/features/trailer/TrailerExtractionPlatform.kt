@@ -7,12 +7,22 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Cookie
+import okhttp3.CookieJar
 import okhttp3.Headers
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+
+/** API key + visitor session token extracted from a YouTube watch page. */
+internal data class WatchConfig(
+    val apiKey: String?,
+    val visitorData: String?,
+)
 
 internal object TrailerExtractionPlatform {
     val diagnosticsEnabled: Boolean = System.getenv("NUVIO_TRAILER_DEBUG")
@@ -27,12 +37,39 @@ internal object TrailerExtractionPlatform {
             "(KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
     )
 
+    /* YouTube rate-limits headless watch-page fetches (HTTP 429) when they lack
+     * cookies / arrive in quick succession. Keep cookies between requests and
+     * seed the GDPR consent cookie so subsequent player-API calls (which need
+     * the visitor session token) don't get flagged as a bot. */
+    private val cookieJar = object : CookieJar {
+        private val cookies = mutableMapOf<String, List<Cookie>>()
+
+        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            if (cookies.isEmpty()) return
+            synchronized(this) {
+                this.cookies[url.host] = this.cookies[url.host].orEmpty() + cookies
+            }
+        }
+
+        override fun loadForRequest(url: HttpUrl): List<Cookie> {
+            val stored = synchronized(this) { cookies[url.host].orEmpty() }
+            val consent = Cookie.Builder()
+                .name("SOCS")
+                .value("CAI")
+                .domain("youtube.com")
+                .path("/")
+                .build()
+            return (stored + consent).filter { it.matches(url) }
+        }
+    }
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(TRAILER_REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .readTimeout(TRAILER_REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .writeTimeout(TRAILER_REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .cookieJar(cookieJar)
         .build()
 
     private val probeClient = OkHttpClient.Builder()
@@ -41,6 +78,18 @@ internal object TrailerExtractionPlatform {
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
+
+    /* The INNERTUBE_API_KEY + VISITOR_DATA are session-wide, not video-specific.
+     * Cache them so a watch page is fetched at most once per session — repeated
+     * fetches (hover preview + hero + popup) are what trigger YouTube's 429. */
+    private val watchConfigRef = AtomicReference<WatchConfig?>(null)
+
+    fun cachedWatchConfig(): WatchConfig? = watchConfigRef.get()
+
+    fun cacheWatchConfig(config: WatchConfig) {
+        if (config.apiKey.isNullOrBlank()) return
+        watchConfigRef.compareAndSet(null, config)
+    }
 
     fun supportsSeparateVideo(candidate: StreamCandidate): Boolean = candidate.ext == "mp4"
 
@@ -56,6 +105,23 @@ internal object TrailerExtractionPlatform {
         val parsed = url.toHttpUrlOrNull()
         return "host=${parsed?.host ?: "unknown"} itag=${parsed?.queryParameter("itag") ?: "unknown"}"
     }
+
+    /* Derived clients per non-default timeout (shared pools); avoids building
+     * a fresh OkHttpClient on every request. */
+    private val timeoutClients = java.util.concurrent.ConcurrentHashMap<Long, OkHttpClient>()
+
+    private fun clientForTimeout(timeoutMillis: Long): OkHttpClient =
+        if (timeoutMillis == TRAILER_REQUEST_TIMEOUT_MS) {
+            httpClient
+        } else {
+            timeoutClients.getOrPut(timeoutMillis) {
+                httpClient.newBuilder()
+                    .connectTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
+                    .readTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
+                    .writeTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
+                    .build()
+            }
+        }
 
     suspend fun performRequest(
         url: String,
@@ -75,11 +141,7 @@ internal object TrailerExtractionPlatform {
             else -> requestBuilder.get()
         }
 
-        httpClient.newBuilder()
-            .connectTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
-            .readTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
-            .writeTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
-            .build()
+        clientForTimeout(timeoutMillis)
             .newCall(requestBuilder.build())
             .execute().use { response ->
                 TrailerRequestResponse(
