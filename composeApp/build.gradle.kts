@@ -75,6 +75,8 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
             )
         }
 
+        // DEADCODE: SentryConfig DSN generated but never consumed — SentrySettingsPlatform
+        // crashReportsSupported=false, no Sentry.init() call anywhere. See DEADCODE.md §3.
         outDir.resolve("com/nuviolinux/app/core/diagnostics").apply {
             mkdirs()
             resolve("SentryConfig.kt").writeText(
