@@ -46,13 +46,13 @@ check_binary() {
 
 check_binary "${APP_DIR}/lib/runtime/lib/server/libjvm.so"
 check_binary "${APP_DIR}/lib/runtime/lib/libawt.so"
-check_binary "${APP_DIR}/lib/app/libapplauncher.so"
+check_binary "${APP_DIR}/lib/libapplauncher.so"
 check_binary "${APP_DIR}/bin/nuvio-linux"
 
 # The C++ mpv bridge ships inside the application jar at native/linux/.
 TMP_BRIDGE="$(mktemp "${TMPDIR:-/tmp}/libplayer_bridge.XXXXXX.so")"
 trap 'rm -f "${TMP_BRIDGE}"' EXIT
-jar_path="$(ls "${APP_DIR}"/lib/app/*.jar 2>/dev/null | head -n 1 || true)"
+jar_path="$(ls "${APP_DIR}"/lib/app/composeApp-desktop*.jar 2>/dev/null | head -n 1 || true)"
 if [[ -n "${jar_path}" ]]; then
     if unzip -p "${jar_path}" native/linux/libplayer_bridge.so > "${TMP_BRIDGE}" 2>/dev/null \
         && [[ -s "${TMP_BRIDGE}" ]]; then

@@ -7,13 +7,13 @@
 
 pkgname=nuvio-linux
 pkgver=0.1.20alpha
-pkgrel=1
+pkgrel=2
 pkgdesc="Nuvio Linux desktop media player — Linux native mpv playback"
 arch=('x86_64')
 url="https://github.com/JJDizz1L/NuvioLinux"
 license=('custom:commercial')
 depends=('mpv' 'glibc' 'gcc-libs' 'libstdc++' 'libx11' 'libxext' 'libxrender' 'libxi' 'libxtst')
-makedepends=('jdk21-openjdk' 'gcc')
+makedepends=('jdk25-temurin' 'gcc')
 install=nuvio-linux.install
 provides=("${pkgname}")
 conflicts=("${pkgname}")
@@ -24,10 +24,11 @@ sha256sums=()
 export GRADLE_OPTS="-Dorg.gradle.parallel=false"
 # Release signing key (Omarchy). makepkg signs with --sign when GPGKEY is set.
 export GPGKEY="${GPGKEY:-6702DBAB3E41EDE1}"
-# Build with a baseline x86-64 JDK (e.g. Temurin) so the bundled JRE is
-# portable. Distro JDKs built with -march=native/-march=x86-64-v3/v4 (e.g.
-# CachyOS) produce a runtime that only runs on those CPUs.
-export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
+# Build with a baseline x86-64 JDK so the bundled JRE is portable; distro JDKs
+# built with -march=native/-march=x86-64-v3/v4 (e.g. Arch's official jdk25-openjdk
+# is built for x86-64-v4/AVX-512 and would NOT run on older CPUs) break that.
+# Temurin builds are baseline x86-64 — use jdk25-temurin (current LTS).
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-25-temurin}"
 echo "[nuvio-linux-pkg] Using JAVA_HOME=${JAVA_HOME}"
 
 build() {

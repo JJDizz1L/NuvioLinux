@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
 
-export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-25-temurin}"
 
 APP_IMAGE="composeApp/build/compose/binaries/main-release/app/nuvio-linux"
 VERSION="$(grep -E '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties | cut -d= -f2)"
