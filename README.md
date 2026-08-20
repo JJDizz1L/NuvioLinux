@@ -93,6 +93,11 @@ read-only. P2P/TorrServer works via the bundled binary. Updates are delivered
 through the bundle (the in-app updater is disabled in the sandbox); a toast in
 the app points to new releases on GitHub.
 
+> **Flatpak NVIDIA requirement:** NVDEC requires the `org.freedesktop.Platform.GL.nvidia-*` extension matching the Flatpak's runtime version (currently **25.08**). Flatpak auto-installs this when an NVIDIA GPU is detected on the host (`flatpak --gl-drivers` shows the driver). If not auto-installed, run:
+> ```bash
+> flatpak install flathub org.freedesktop.Platform.GL.nvidia-<host-driver-version>//1.4
+> ```
+
 > **HDR limitation:** HDR tone-mapping/passthrough is **not available in the
 > Flatpak** — the sandboxed runtime can't access the display's HDR output path.
 > Use the native Arch/RPM/DEB/AppImage packages for HDR content.

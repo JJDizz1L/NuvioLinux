@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
 
-export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-25-temurin}"
 
 MANIFEST="dist/flatpak/io.github.jjdizz1l.NuvioLinux.yml"
 BUILD_DIR="dist/flatpak/build"
@@ -31,11 +31,18 @@ cp -a composeApp/build/compose/binaries/main-release/app/nuvio-linux "${SRC}/nuv
 cat > "${SRC}/nuvio-linux" <<EOF
 #!/bin/sh
 # Point libva at the VA-API drivers:
-#  - Mesa GL extension's dri dir (radeonsi etc. for AMD, nouveau)
+#  - Mesa GL extension's dri dir (radeonsi for AMD, nouveau)
 #  - the app-mounted VAAPI.Intel extension dir (iHD for Intel iGPUs)
+#  - the runtime-mounted VAAPI.nvidia extension dir (nvidia_drv_video.so -> NVDEC)
 #  - libva's default dir
 # None of these are in libva's default search path.
-export LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/GL/default/lib/dri:/app/lib/intel-vaapi-driver:/usr/lib/x86_64-linux-gnu/dri"
+export LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/GL/default/lib/dri:/app/lib/intel-vaapi-driver:/usr/lib/x86_64-linux-gnu/dri/nvidia-vaapi-driver:/usr/lib/x86_64-linux-gnu/dri"
+# The nvidia-vaapi-driver shim is named "nvidia" and is NOT auto-detected by
+# libva — but LIBVA_DRIVER_NAME allows NO fallback, so it must be set ONLY on
+# NVIDIA systems (on AMD/Intel it would break VAAPI entirely).
+if [ -e /dev/nvidiactl ] || [ -d /sys/module/nvidia ]; then
+  export LIBVA_DRIVER_NAME=nvidia
+fi
 exec /app/nuvio/bin/nuvio-linux "\$@"
 EOF
 chmod +x "${SRC}/nuvio-linux"

@@ -1,7 +1,7 @@
 id: io.github.jjdizz1l.NuvioLinux
-runtime: org.freedesktop.Platform
-runtime-version: '25.08'
-sdk: org.freedesktop.Sdk
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
 command: nuvio-linux
 rename-desktop-file: nuvio-linux.desktop
 rename-icon: nuvio-linux
@@ -15,12 +15,14 @@ add-extensions:
     enable-if: have-intel-gpu
 
 finish-args:
+  - --share=ipc
   - --share=network
   - --socket=x11
   - --socket=wayland
   - --socket=pulseaudio
   - --device=dri
   - --device=all
+  - --persist=.nuvio-linux
   - --talk-name=org.freedesktop.ScreenSaver
   - --talk-name=org.freedesktop.PowerManagement
   - --talk-name=org.kde.Solid.PowerManagement
@@ -32,6 +34,8 @@ finish-args:
   - --filesystem=xdg-run/vesktop-ipc-0:ro
   - --filesystem=xdg-run/app/com.discordapp.Discord/discord-ipc-0:ro
   - --filesystem=xdg-run/snap.discord/discord-ipc-0:ro
+  - --env=ANV_DEBUG=video-decode,video-encode
+  - --env=MESA_VK_DEVICE_SELECT=force-intel:10de
 
 build-options:
   arch:
@@ -56,11 +60,11 @@ modules:
     config-opts:
       - -Dasm=disabled
       - -Dfontconfig=enabled
-      - -Dtest=false
+      - -Dtest=disabled
     sources:
       - type: archive
-        url: https://github.com/libass/libass/releases/download/0.17.3/libass-0.17.3.tar.xz
-        sha256: eae425da50f0015c21f7b3a9c7262a910f0218af469e22e2931462fed3c50959
+        url: https://github.com/libass/libass/releases/download/0.17.4/libass-0.17.4.tar.xz
+        sha256: 78f1179b838d025e9c26e8fef33f8092f65611444ffa1bfc0cfac6a33511a05a
 
   - name: openssl
     buildsystem: simple
@@ -79,7 +83,7 @@ modules:
       - ./configure --prefix=/app --disable-doc --disable-debug
         --disable-postproc --disable-everything
         --enable-shared --enable-network --enable-openssl
-        --enable-cuda --enable-nvdec --enable-ffnvcodec
+        --enable-vaapi --enable-vdpau
         --enable-protocol=file,http,https,tcp,tls,crypto
         --enable-demuxer=matroska,webm,avi,mp4,mov,m4v,mpegts,mpeg,mpegvideo,flv,webm_dash_manifest,hls,ogg,wav,w64,aiff,ac3,eac3,dts,dtshd,truehd,aac,asf,asf_o,mp3,flac,ape,wv,caf,gif,subreader,ass,srt,webvtt
         --enable-parser=h264,hevc,vp9,av1,vp8,mpeg4video,mpegvideo,aac,aac_latm,ac3,dca,eac3,flac,mpegaudio,opus,ogg,vorbis,truehd,mlp,vc1
@@ -87,9 +91,7 @@ modules:
         --enable-decoder=aac,aac_fixed,aac_latm,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp1,mp1float,mp2,mp2float,mp3,mp3float,mp3adu,flac,alac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice
         --enable-decoder=pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_f64le,pcm_u8,pcm_s8,pcm_alaw,pcm_mulaw,adpcm_ima_wav,adpcm_ms,adpcm_yamaha,gsm,gsm_ms,speex
         --enable-decoder=mov_text,ass,subrip,webvtt
-        --enable-decoder=h264_nvdec,hevc_nvdec,vp9_nvdec,av1_nvdec
         --enable-hwaccel=h264_vaapi,hevc_vaapi,vp9_vaapi,av1_vaapi
-        --enable-hwaccel=h264_nvdec,hevc_nvdec,vp9_nvdec,av1_nvdec
         --enable-encoder=png --enable-ffmpeg --disable-ffplay --disable-ffprobe
         --enable-pthreads --enable-gpl --enable-version3 --disable-x86asm
       - make -j${FLATPAK_BUILDER_N_JOBS}
@@ -160,8 +162,6 @@ modules:
       - -Dvaapi-drm=enabled
       - -Dvaapi-x11=enabled
       - -Dvaapi-wayland=enabled
-      - -Dcuda-hwaccel=enabled
-      - -Dcuda-interop=enabled
       - -Dgbm=enabled
       - -Dpipewire=enabled
       - -Dpulse=enabled
