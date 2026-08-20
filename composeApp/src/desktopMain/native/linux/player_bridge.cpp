@@ -38,6 +38,7 @@ static int g_debug = -1; /* -1 = uninitialized */
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
 
 /* ------------------------------------------------------------------ */
 /*  mpv function pointer typedefs                                      */
@@ -177,6 +178,7 @@ enum {
     MPV_RENDER_PARAM_OPENGL_INIT_PARAMS = 2,
     MPV_RENDER_PARAM_OPENGL_FBO = 3,
     MPV_RENDER_PARAM_FLIP_Y     = 4,
+    MPV_RENDER_PARAM_NEXT_FRAME_INFO = 11,
     MPV_RENDER_PARAM_DRM_DISPLAY_V2 = 16,
     MPV_RENDER_PARAM_SW_SIZE    = 17,
     MPV_RENDER_PARAM_SW_FORMAT  = 18,
@@ -215,6 +217,16 @@ typedef struct mpv_opengl_drm_params_v2 {
     void **atomic_request_ptr;
     int render_fd;
 } mpv_opengl_drm_params_v2;
+
+/* MPV_RENDER_PARAM_NEXT_FRAME_INFO (mirrors mpv/render.h ABI). The caller
+ * supplies the absolute time (mpv_get_time_us base) at which the rendered
+ * frame will be presented; mpv then selects the frame matching that display
+ * time and paces cadence with video-sync=display-resample, instead of just
+ * handing back whatever frame happens to be current at call time. */
+typedef struct mpv_render_frame_info {
+    uint64_t flags;
+    int64_t target_time;
+} mpv_render_frame_info;
 
 #define MPV_RENDER_API_TYPE_OPENGL "opengl"
 
@@ -709,6 +721,137 @@ static bool nvidia_driver_present() {
     return (stat("/sys/module/nvidia", &st) == 0) || (stat("/dev/nvidiactl", &st) == 0);
 }
 
+/* Read NVIDIA driver version from /proc/driver/nvidia/version.
+ * Returns malloc'd string (caller must free) or nullptr on failure. */
+static char* nvidia_read_driver_version() {
+    FILE *f = fopen("/proc/driver/nvidia/version", "r");
+    if (!f) return nullptr;
+    char line[256];
+    char *version = nullptr;
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, "NVRM version:")) {
+            char *colon = strchr(line, ':');
+            if (colon) {
+                colon++;
+                while (*colon == ' ' || *colon == '\t') colon++;
+                char *end = colon + strlen(colon) - 1;
+                while (end > colon && (*end == '\n' || *end == '\r' || *end == ' ')) *end-- = '\0';
+                version = strdup(colon);
+                break;
+            }
+        }
+    }
+    fclose(f);
+    return version;
+}
+
+/* Read GPU name from nvidia-smi (if available) or /proc/driver/nvidia/gpus/<id>/information.
+ * Returns malloc'd string (caller must free) or nullptr on failure. */
+static char* nvidia_read_gpu_name() {
+    /* Try nvidia-smi first (most reliable) */
+    FILE *f = popen("nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1", "r");
+    if (f) {
+        char line[256];
+        if (fgets(line, sizeof(line), f)) {
+            char *end = line + strlen(line) - 1;
+            while (end > line && (*end == '\n' || *end == '\r')) *end-- = '\0';
+            pclose(f);
+            if (line[0]) return strdup(line);
+        }
+        pclose(f);
+    }
+    /* Fallback: parse /proc/driver/nvidia/gpus/<id>/information */
+    struct dirent *entry;
+    DIR *dp = opendir("/proc/driver/nvidia/gpus");
+    if (dp) {
+        while ((entry = readdir(dp))) {
+            if (entry->d_name[0] == '.') continue;
+            char path[512];
+            snprintf(path, sizeof(path), "/proc/driver/nvidia/gpus/%s/information", entry->d_name);
+            FILE *gf = fopen(path, "r");
+            if (gf) {
+                char line[256];
+                while (fgets(line, sizeof(line), gf)) {
+                    if (strstr(line, "Model:")) {
+                        char *colon = strchr(line, ':');
+                        if (colon) {
+                            colon++;
+                            while (*colon == ' ' || *colon == '\t') colon++;
+                            char *end = colon + strlen(colon) - 1;
+                            while (end > colon && (*end == '\n' || *end == '\r' || *end == ' ')) *end-- = '\0';
+                            fclose(gf);
+                            closedir(dp);
+                            return strdup(colon);
+                        }
+                    }
+                }
+                fclose(gf);
+            }
+        }
+        closedir(dp);
+    }
+    return nullptr;
+}
+
+/* Try to get CUDA runtime version via libcuda.so.1 (driver API).
+ * Returns version as int (e.g., 12020 for 12.2) or 0 on failure. */
+static int nvidia_get_cuda_driver_version() {
+    void *cudaLib = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!cudaLib) return 0;
+    typedef int (*cuDriverGetVersion_t)(int*);
+    cuDriverGetVersion_t cuDriverGetVersion = (cuDriverGetVersion_t)dlsym(cudaLib, "cuDriverGetVersion");
+    int version = 0;
+    if (cuDriverGetVersion) {
+        cuDriverGetVersion(&version);
+    }
+    dlclose(cudaLib);
+    return version;
+}
+
+/* Detect Optimus/Prime offload environment.
+ * Returns true if running on an Optimus system with NVIDIA GPU as render offload. */
+static bool nvidia_detect_optimus() {
+    const char *primeOffload = getenv("__NV_PRIME_RENDER_OFFLOAD");
+    const char *glxVendor = getenv("__GLX_VENDOR_LIBRARY_NAME");
+    const char *vkLayer = getenv("VK_LAYER_NV_optimus");
+    return (primeOffload && strcmp(primeOffload, "1") == 0) ||
+           (glxVendor && strcmp(glxVendor, "nvidia") == 0) ||
+           (vkLayer && vkLayer[0] != '\0');
+}
+
+/* Log comprehensive NVIDIA diagnostics. Called once at startup. */
+static void nvidia_log_diagnostics() {
+    if (!nvidia_driver_present()) return;
+
+    char *driverVer = nvidia_read_driver_version();
+    char *gpuName = nvidia_read_gpu_name();
+    int cudaVer = nvidia_get_cuda_driver_version();
+    bool optimus = nvidia_detect_optimus();
+
+    LOG("=== NVIDIA Diagnostics ===");
+    if (driverVer) {
+        LOG("Driver version: %s", driverVer);
+        free(driverVer);
+    } else {
+        LOG("Driver version: unknown (no /proc/driver/nvidia/version)");
+    }
+    if (gpuName) {
+        LOG("GPU: %s", gpuName);
+        free(gpuName);
+    } else {
+        LOG("GPU: unknown (nvidia-smi not available)");
+    }
+    if (cudaVer) {
+        LOG("CUDA driver version: %d.%d", cudaVer / 1000, (cudaVer % 1000) / 10);
+    } else {
+        LOG("CUDA driver version: unknown (libcuda.so.1 not loaded or cuDriverGetVersion missing)");
+    }
+    if (optimus) {
+        LOG("Optimus/Prime offload detected: __NV_PRIME_RENDER_OFFLOAD=1 or __GLX_VENDOR_LIBRARY_NAME=nvidia");
+    }
+    LOG("=========================");
+}
+
 /* No-op X error handler installed only for the GLX setup window: failed GLX
  * setup calls would otherwise hit Xlib's default handler, which calls exit()
  * (fatal inside the JVM). The previous handler (the JDK's) is restored right
@@ -985,6 +1128,9 @@ static bool gl_init(GlRenderer *gl) {
      * same GLX API family as the UI; on other vendors EGL is preferred (it
      * needs no X display and is the modern path). */
     bool nvidiaDriver = nvidia_driver_present();
+    if (nvidiaDriver) {
+        nvidia_log_diagnostics();
+    }
     bool ok = false;
     if (nvidiaDriver) {
         LOG("[gl-init] NVIDIA driver detected; preferring GLX render path");
@@ -1208,7 +1354,7 @@ static std::string buildTrackListJsonFromNode(const mpv_node *root, const char *
 
 /* Opens the first available DRM render node (used for VAAPI zero-copy
  * interop). Falls back to card nodes; returns -1 if none is accessible. */
-static int openDrmRenderNode() {
+static int openDrmRenderNode(char *outPath, size_t outPathLen) {
     static const char *paths[] = {
         "/dev/dri/renderD128",
         "/dev/dri/renderD129",
@@ -1221,9 +1367,48 @@ static int openDrmRenderNode() {
     };
     for (int i = 0; paths[i]; i++) {
         int fd = open(paths[i], O_RDWR | O_CLOEXEC);
-        if (fd >= 0) return fd;
+        if (fd >= 0) {
+            if (outPath) snprintf(outPath, outPathLen, "%s", paths[i]);
+            return fd;
+        }
     }
     return -1;
+}
+
+/* Find the path of the first accessible DRM render node without keeping an fd.
+ * Used to set mpv --vaapi-device before mpv_initialize (the fd itself is
+ * opened/owned later on the render thread). */
+static bool findDrmRenderNodePath(char *outPath, size_t outPathLen) {
+    static const char *paths[] = {
+        "/dev/dri/renderD128",
+        "/dev/dri/renderD129",
+        "/dev/dri/renderD130",
+        "/dev/dri/renderD131",
+        "/dev/dri/card0",
+        "/dev/dri/card1",
+        "/dev/dri/card2",
+        nullptr
+    };
+    for (int i = 0; paths[i]; i++) {
+        if (access(paths[i], R_OK | W_OK) == 0) {
+            snprintf(outPath, outPathLen, "%s", paths[i]);
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Check if an mpv render error is likely an nvdec/CUDA failure.
+ * Common nvdec failure error codes from mpv_render_context_render:
+ * - MPV_ERROR_GENERIC (-1): generic failure (often CUDA context lost)
+ * - MPV_ERROR_UNSUPPORTED (-2): unsupported operation (CUDA interop not available)
+ * - Other negative codes may indicate CUDA resource exhaustion or context loss.
+ * This is a heuristic; mpv doesn't expose detailed CUDA error codes here. */
+static bool is_nvdec_failure(int ret) {
+    /* mpv error codes are negative. Common nvdec-related failures: */
+    return ret == -1 ||  /* MPV_ERROR_GENERIC - often CUDA context lost */
+           ret == -2 ||  /* MPV_ERROR_UNSUPPORTED - CUDA interop unavailable */
+           ret == -3;    /* MPV_ERROR_INVALID_PARAMETER - sometimes CUDA resource issue */
 }
 
 struct MpvPlayer {
@@ -1239,6 +1424,10 @@ struct MpvPlayer {
      * vaapi interop can build a VA display for zero-copy EGL/dmabuf decode.
      * Owned here (mpv only copies the struct, not the fd). */
     int           drmRenderFd = -1;
+    /* Path of the opened DRM render node (e.g. /dev/dri/renderD128), used for
+     * mpv --vaapi-device so the nvidia-vaapi-driver shim can open a VA
+     * display in the Flatpak sandbox. */
+    char          drmRenderPath[64] = {0};
 
     /* Dedicated render thread: owns the GL context (never switched between
      * threads) and all mpv_render_* calls. Kotlin requests frames via the
@@ -1281,6 +1470,10 @@ struct MpvPlayer {
     bool          warnedSoftwareDecode = false;
     int64_t       lastDropFrameCount = -1;
     int64_t       lastVoDropFrameCount = -1;
+
+    /* nvdec failure tracking for dynamic fallback */
+    std::atomic<int> nvdecFailCount{0};
+    std::atomic<bool> nvdecFallbackRequested{false};
 
     /* Initial seek applied deterministically on MPV_EVENT_FILE_LOADED. A seek
      * issued immediately after loadfile can be dropped before the file is
@@ -1359,18 +1552,20 @@ struct MpvPlayer {
              * open a VA display and import decoded surfaces as EGL dma-buf
              * images (zero-copy decode under vo=libmpv). Without it the
              * vaapi interop can't init and hwdec falls back to copy modes.
-             * NVIDIA is excluded on purpose: its render node would also make
-             * mpv probe the drmprime-overlay hwdec, which needs a DRM
-             * atomic/modeset context that does not exist in a desktop
-             * session (nvdec needs no native resource, so nothing is lost). */
+             * NVIDIA is excluded on ALL builds: its render node makes mpv
+             * probe the drmprime-overlay hwdec (needs a DRM atomic/modeset
+             * context that does not exist in a desktop session), and in the
+             * Flatpak sandbox decode goes through the nvidia-vaapi-driver
+             * shim in copy mode anyway — --vaapi-device (set at initialize)
+             * gives libva its device, so the render param is not needed. */
             mpv_opengl_drm_params_v2 drmParams = {};
             drmParams.fd = -1;
             drmParams.render_fd = -1;
             if (!gl.nvidiaVendor) {
-                drmRenderFd = openDrmRenderNode();
+                drmRenderFd = openDrmRenderNode(drmRenderPath, sizeof(drmRenderPath));
                 if (drmRenderFd >= 0) {
                     drmParams.render_fd = drmRenderFd;
-                    DBG("DRM render node fd=%d available for vaapi interop", drmRenderFd);
+                    DBG("DRM render node fd=%d path=%s available for vaapi interop", drmRenderFd, drmRenderPath);
                 } else {
                     DBG("No DRM render node accessible; vaapi zero-copy interop disabled");
                 }
@@ -1434,6 +1629,13 @@ struct MpvPlayer {
 
 
             bool result = false;
+            /* Present-time hint for mpv's frame selection / video-sync pacing.
+             * Without MPV_RENDER_PARAM_NEXT_FRAME_INFO, mpv renders whatever
+             * frame is current at call time, so the caller's render cadence
+             * (here: the Compose frame clock) overrides mpv's own display
+             * sync — the source of the judder/stutter on 24fps and 4K. */
+            mpv_render_frame_info frameInfo = {};
+            frameInfo.target_time = p_mpv_get_time_us(mpv);
             if (useGl) {
                 /* Context is already current on this thread (bound in gl_init
                  * and never released or switched). */
@@ -1450,6 +1652,7 @@ struct MpvPlayer {
                     mpv_render_param renderParams[] = {
                         { MPV_RENDER_PARAM_OPENGL_FBO, &fbo },
                         { MPV_RENDER_PARAM_FLIP_Y, &flipY },
+                        { MPV_RENDER_PARAM_NEXT_FRAME_INFO, &frameInfo },
                         { MPV_RENDER_PARAM_INVALID, nullptr }
                     };
                     int ret = p_mpv_render_context_render(renderCtx, renderParams);
@@ -1460,8 +1663,19 @@ struct MpvPlayer {
                         gl.glBindFramebuffer(GL_FRAMEBUFFER, gl.fbo);
                         gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
                         result = true;
+                        /* Reset failure counter on success */
+                        nvdecFailCount.store(0);
                     } else {
                         DBG("mpv_render_context_render(GL) failed: %d", ret);
+                        /* Detect nvdec/CUDA failures and request fallback */
+                        if (gl.nvidiaVendor && is_nvdec_failure(ret)) {
+                            int fails = nvdecFailCount.fetch_add(1) + 1;
+                            LOG("nvdec render failure #%d (ret=%d); will fallback to nvdec-copy after 3 consecutive failures", fails, ret);
+                            if (fails >= 3) {
+                                nvdecFallbackRequested.store(true);
+                                p_mpv_wakeup(mpv); /* wake event thread to handle fallback */
+                            }
+                        }
                     }
                 }
             } else {
@@ -1472,6 +1686,7 @@ struct MpvPlayer {
                     { MPV_RENDER_PARAM_SW_FORMAT,  (void*)"rgb0" },
                     { MPV_RENDER_PARAM_SW_STRIDE,  &stride },
                     { MPV_RENDER_PARAM_SW_POINTER, pixels },
+                    { MPV_RENDER_PARAM_NEXT_FRAME_INFO, &frameInfo },
                     { MPV_RENDER_PARAM_INVALID, nullptr }
                 };
                 int ret = p_mpv_render_context_render(renderCtx, renderParams);
@@ -1512,16 +1727,17 @@ struct MpvPlayer {
     }
 
     int initialize(int64_t windowId, const char *sourceUrl,
+                   const char *sourceAudioUrl,
                    const char * const *headers, int numHeaders,
                    int playWhenReady, int64_t initialPositionMs,
                    int decoderPriority, int64_t streamCacheBytes,
                    bool streamCacheOnDisk)
     {
-        LOG("initialize: url=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
-            sourceUrl, numHeaders, playWhenReady,
+        LOG("initialize: url=%s audioUrl=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
+            sourceUrl, sourceAudioUrl ? sourceAudioUrl : "(none)", numHeaders, playWhenReady,
             (long long)initialPositionMs, decoderPriority);
 
-        /* mpv requires LC_NUMERIC=C for proper float parsing */
+/* mpv requires LC_NUMERIC=C for proper float parsing */
         setlocale(LC_NUMERIC, "C");
 
         if (!load_libmpv()) {
@@ -1555,6 +1771,11 @@ struct MpvPlayer {
             p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
             p_mpv_set_option_string(mpv, "video-sync", "display-resample");
             p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+            /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
+            p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
+            p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
+            p_mpv_set_option_string(mpv, "vd-queue-max-samples", "30");
+            p_mpv_set_option_string(mpv, "vd-queue-min-bytes", "10000000");
         }
 
         /* Embedding-critical options: applied AFTER any user config so they
@@ -1564,14 +1785,22 @@ struct MpvPlayer {
         p_mpv_set_option_string(mpv, "force-window", "no");
 
         /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
-         * read-ahead and the network cache) and optional on-disk cache. */
+         * read-ahead and the network cache) and optional on-disk cache. The
+         * back-buffer gets a small fixed slice — mpv's back buffer is
+         * ADDITIONAL to the forward buffer, so mirroring the full value here
+         * doubled the configured cache (the "setting ignored" ballooning). */
         if (streamCacheBytes > 0) {
             char cacheSize[64];
             snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
+            long long backBytes = streamCacheBytes / 4;
+            if (backBytes > 67108864LL) backBytes = 67108864LL;   /* cap 64 MiB */
+            if (backBytes < 8388608LL) backBytes = 8388608LL;     /* floor 8 MiB */
+            char backSize[64];
+            snprintf(backSize, sizeof(backSize), "%lld", backBytes);
             p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
-            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", cacheSize);
-            DBG("stream cache = %lld bytes, on-disk=%d",
-                (long long)streamCacheBytes, streamCacheOnDisk ? 1 : 0);
+            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", backSize);
+            DBG("stream cache = %lld bytes (back=%lld), on-disk=%d",
+                (long long)streamCacheBytes, backBytes, streamCacheOnDisk ? 1 : 0);
         }
         if (streamCacheOnDisk) {
             p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
@@ -1588,6 +1817,210 @@ struct MpvPlayer {
             DBG("set %d headers", numHeaders);
         }
 
+        /* hwdec is vendor-aware and set before mpv_initialize so the decoder
+         * picks it up. Zero-copy vaapi (AMD/Intel) and nvdec (NVIDIA) work with
+         * the GL render API because we hand mpv a DRM render node and the
+         * vaapi/cuda interops import decoded surfaces into GL textures. We avoid
+         * the generic "auto"/"auto-copy" lists so mpv never probes
+         * drmprime-overlay (needs a DRM atomic/modeset context that does not
+         * exist in a desktop session) nor libcuda on non-NVIDIA hardware.
+         * Flatpak exception (GNOME Platform 50 runtime): the sandbox ffmpeg is
+         * built VA-API-only (no --enable-cuda/--enable-nvdec), so on NVIDIA we
+         * use vaapi via the nvidia-vaapi-driver shim instead of nvdec.
+         * NOTE: gl.nvidiaVendor is not available here — gl_init() runs later on
+         * the render thread — so we use nvidia_driver_present() (filesystem
+         * /dev/nvidiactl or /sys/module/nvidia) for the init-time decision. */
+        bool inFlatpakHwdec = getenv("FLATPAK_ID") != nullptr;
+        bool nvidiaAtInit = nvidia_driver_present();
+        const char *hwdecOpt = "no";
+        if (decoderPriority < 2) {
+            if (nvidiaAtInit) {
+                hwdecOpt = inFlatpakHwdec ? "vaapi,vaapi-copy" : "nvdec,nvdec-copy";
+                if (inFlatpakHwdec) {
+                    DBG("Flatpak runtime detected; using vaapi hwdec on NVIDIA (nvidia-vaapi-driver shim)");
+                }
+            } else {
+                hwdecOpt = "vaapi,vaapi-copy";
+            }
+        }
+        /* Tester escape hatch: NUVIO_MPV_HWDEC overrides the computed value
+         * (e.g. NUVIO_MPV_HWDEC=auto-copy or =nvdec-copy) without a rebuild.
+         * "auto" probes nvdec availability on NVIDIA (native only); in the
+         * Flatpak sandbox "auto" maps to vaapi because nvdec is not compiled
+         * into the sandbox ffmpeg. */
+        if (const char *overrideHwdec = getenv("NUVIO_MPV_HWDEC")) {
+            if (overrideHwdec[0] != '\0') {
+                if (strcmp(overrideHwdec, "auto") == 0 && nvidiaAtInit) {
+                    if (inFlatpakHwdec) {
+                        hwdecOpt = "vaapi,vaapi-copy";
+                        LOG("NUVIO_MPV_HWDEC=auto mapped to vaapi (Flatpak, no nvdec)");
+                    } else {
+                        /* Probe nvdec availability: try to initialize mpv with
+                         * nvdec, if it fails fall back to nvdec-copy. */
+                        LOG("NUVIO_MPV_HWDEC=auto: probing nvdec availability...");
+                        p_mpv_set_option_string(mpv, "hwdec", "nvdec");
+                        int probeRet = p_mpv_initialize(mpv);
+                        if (probeRet < 0) {
+                            LOG("nvdec probe failed (mpv_initialize=%d), falling back to nvdec-copy", probeRet);
+                            p_mpv_terminate_destroy(mpv);
+                            mpv = p_mpv_create();
+                            if (!mpv) {
+                                LOG("mpv_create failed after nvdec probe");
+                                return -1;
+                            }
+                            /* Re-apply all options up to hwdec */
+                            goto reapply_options_for_probe;
+                        } else {
+                            LOG("nvdec probe succeeded, using zero-copy nvdec");
+                            hwdecOpt = "nvdec";
+                            goto after_hwdec;
+                        }
+                    }
+                } else {
+                    hwdecOpt = overrideHwdec;
+                    LOG("hwdec overridden by NUVIO_MPV_HWDEC = %s", hwdecOpt);
+                }
+            }
+        }
+        p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
+        DBG("hwdec option = %s", hwdecOpt);
+        /* Flatpak + NVIDIA: the nvidia-vaapi-driver shim is not auto-detected
+         * by libva, so point --vaapi-device at the DRM render node explicitly.
+         * The fd itself is opened later on the render thread for
+         * MPV_RENDER_PARAM_DRM_DISPLAY_V2; this only needs the path. */
+        if (inFlatpakHwdec && nvidiaAtInit) {
+            char renderDev[64] = {0};
+            if (findDrmRenderNodePath(renderDev, sizeof(renderDev))) {
+                p_mpv_set_option_string(mpv, "vaapi-device", renderDev);
+                DBG("vaapi-device=%s (Flatpak NVIDIA vaapi shim)", renderDev);
+            } else {
+                DBG("no DRM render node found for Flatpak NVIDIA vaapi-device");
+            }
+        }
+        goto after_hwdec;
+
+reapply_options_for_fallback:
+        /* Re-apply options for dynamic nvdec fallback path */
+        if (!loadUserConfig(mpv)) {
+            p_mpv_set_option_string(mpv, "cache", "yes");
+            p_mpv_set_option_string(mpv, "cache-secs", "300");
+            p_mpv_set_option_string(mpv, "demuxer-max-bytes", "500M");
+            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", "100M");
+            p_mpv_set_option_string(mpv, "keep-open", "no");
+            p_mpv_set_option_string(mpv, "audio-file-auto", "no");
+            p_mpv_set_option_string(mpv, "sub-auto", "no");
+            p_mpv_set_option_string(mpv, "osd-level", "0");
+            p_mpv_set_option_string(mpv, "input-default-bindings", "no");
+            p_mpv_set_option_string(mpv, "input-vo-keyboard", "no");
+            p_mpv_set_option_string(mpv, "terminal", "no");
+            p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
+            p_mpv_set_option_string(mpv, "video-sync", "display-resample");
+            p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+            /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
+            p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
+            p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
+            p_mpv_set_option_string(mpv, "vd-queue-max-samples", "30");
+            p_mpv_set_option_string(mpv, "vd-queue-min-bytes", "10000000");
+        }
+        p_mpv_set_option_string(mpv, "vo", "libmpv");
+        p_mpv_set_option_string(mpv, "force-window", "no");
+        if (streamCacheBytes > 0) {
+            char cacheSize[64];
+            snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
+            long long backBytes = streamCacheBytes / 4;
+            if (backBytes > 67108864LL) backBytes = 67108864LL;   /* cap 64 MiB */
+            if (backBytes < 8388608LL) backBytes = 8388608LL;     /* floor 8 MiB */
+            char backSize[64];
+            snprintf(backSize, sizeof(backSize), "%lld", backBytes);
+            p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
+            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", backSize);
+            DBG("stream cache = %lld bytes (back=%lld), on-disk=%d",
+                (long long)streamCacheBytes, backBytes, streamCacheOnDisk ? 1 : 0);
+        }
+        if (streamCacheOnDisk) {
+            p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
+        }
+        if (numHeaders > 0) {
+            std::string headerStr;
+            for (int i = 0; i < numHeaders; i++) {
+                if (i > 0) headerStr += "\n";
+                headerStr += headers[i];
+            }
+            p_mpv_set_option_string(mpv, "http-header-fields", headerStr.c_str());
+            DBG("set %d headers", numHeaders);
+        }
+        /* Force nvdec-copy for fallback */
+        p_mpv_set_option_string(mpv, "hwdec", "nvdec-copy");
+        DBG("hwdec option (fallback) = nvdec-copy");
+        goto after_hwdec;
+
+reapply_options_for_probe:
+        /* Re-apply options for probe fallback path */
+        if (!loadUserConfig(mpv)) {
+            p_mpv_set_option_string(mpv, "cache", "yes");
+            p_mpv_set_option_string(mpv, "cache-secs", "300");
+            p_mpv_set_option_string(mpv, "demuxer-max-bytes", "500M");
+            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", "100M");
+            p_mpv_set_option_string(mpv, "keep-open", "no");
+            p_mpv_set_option_string(mpv, "audio-file-auto", "no");
+            p_mpv_set_option_string(mpv, "sub-auto", "no");
+            p_mpv_set_option_string(mpv, "osd-level", "0");
+            p_mpv_set_option_string(mpv, "input-default-bindings", "no");
+            p_mpv_set_option_string(mpv, "input-vo-keyboard", "no");
+            p_mpv_set_option_string(mpv, "terminal", "no");
+            p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
+            p_mpv_set_option_string(mpv, "video-sync", "display-resample");
+            p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+            /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
+            p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
+            p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
+            p_mpv_set_option_string(mpv, "vd-queue-max-samples", "30");
+            p_mpv_set_option_string(mpv, "vd-queue-min-bytes", "10000000");
+        }
+        p_mpv_set_option_string(mpv, "vo", "libmpv");
+        p_mpv_set_option_string(mpv, "force-window", "no");
+        if (streamCacheBytes > 0) {
+            char cacheSize[64];
+            snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
+            long long backBytes = streamCacheBytes / 4;
+            if (backBytes > 67108864LL) backBytes = 67108864LL;   /* cap 64 MiB */
+            if (backBytes < 8388608LL) backBytes = 8388608LL;     /* floor 8 MiB */
+            char backSize[64];
+            snprintf(backSize, sizeof(backSize), "%lld", backBytes);
+            p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
+            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", backSize);
+            DBG("stream cache = %lld bytes (back=%lld), on-disk=%d",
+                (long long)streamCacheBytes, backBytes, streamCacheOnDisk ? 1 : 0);
+        }
+        if (streamCacheOnDisk) {
+            p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
+        }
+        if (numHeaders > 0) {
+            std::string headerStr;
+            for (int i = 0; i < numHeaders; i++) {
+                if (i > 0) headerStr += "\n";
+                headerStr += headers[i];
+            }
+            p_mpv_set_option_string(mpv, "http-header-fields", headerStr.c_str());
+            DBG("set %d headers", numHeaders);
+        }
+        p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
+        DBG("hwdec option = %s", hwdecOpt);
+        /* Flatpak + NVIDIA: the nvidia-vaapi-driver shim needs an explicit VA
+         * display device so mpv's vaapi interop can init. Point it at the DRM
+         * render node. The fd itself is opened on the render thread via
+         * MPV_RENDER_PARAM_DRM_DISPLAY_V2, but --vaapi-device takes the path. */
+        if (inFlatpakHwdec && nvidiaAtInit) {
+            char renderDev[64] = {0};
+            if (findDrmRenderNodePath(renderDev, sizeof(renderDev))) {
+                p_mpv_set_option_string(mpv, "vaapi-device", renderDev);
+                DBG("vaapi-device=%s (Flatpak NVIDIA vaapi shim)", renderDev);
+            } else {
+                DBG("no DRM render node found for Flatpak NVIDIA vaapi-device");
+            }
+        }
+
+after_hwdec:
         /* Initialize mpv */
         DBG("calling mpv_initialize...");
         int ret = p_mpv_initialize(mpv);
@@ -1616,30 +2049,6 @@ struct MpvPlayer {
             return -1;
         }
 
-        /* hwdec is vendor-aware and set after the render thread has run gl_init
-         * (startRenderThread blocks until renderInitDone), so gl.nvidiaVendor is
-         * known here. It must be set before loadfile so the decoder picks it up.
-         * Zero-copy vaapi (AMD/Intel) and nvdec (NVIDIA) work with the GL render
-         * API because we hand mpv a DRM render node and the vaapi/cuda interops
-         * import decoded surfaces into GL textures. We avoid the generic
-         * "auto"/"auto-copy" lists so mpv never probes drmprime-overlay (needs a
-         * DRM atomic/modeset context that does not exist in a desktop session)
-         * nor libcuda on non-NVIDIA hardware. */
-        const char *hwdecOpt = "no";
-        if (decoderPriority < 2) {
-            hwdecOpt = gl.nvidiaVendor ? "nvdec,nvdec-copy" : "vaapi,vaapi-copy";
-        }
-        /* Tester escape hatch: NUVIO_MPV_HWDEC overrides the computed value
-         * (e.g. NUVIO_MPV_HWDEC=auto-copy or =nvdec-copy) without a rebuild. */
-        if (const char *overrideHwdec = getenv("NUVIO_MPV_HWDEC")) {
-            if (overrideHwdec[0] != '\0') {
-                hwdecOpt = overrideHwdec;
-                LOG("hwdec overridden by NUVIO_MPV_HWDEC = %s", hwdecOpt);
-            }
-        }
-        p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
-        DBG("hwdec option = %s", hwdecOpt);
-
         /* Request events */
         p_mpv_request_event(mpv, MPV_EVENT_PROPERTY_CHANGE, 1);
         p_mpv_request_event(mpv, MPV_EVENT_LOG_MESSAGE, 1);
@@ -1662,6 +2071,16 @@ struct MpvPlayer {
         /* Load the file. The initial position (if any) is applied once
          * MPV_EVENT_FILE_LOADED arrives — a seek issued immediately after
          * loadfile can be dropped before the file is loaded. */
+        /* Separate audio stream (e.g. DASH trailers resolve to a video-only +
+         * audio-only pair). audio-file makes mpv demux the audio URL alongside
+         * the main video file; it is a per-file option applied by loadfile.
+         * Clearing it with an empty value keeps a fresh player deterministic. */
+        if (sourceAudioUrl && sourceAudioUrl[0] != '\0') {
+            p_mpv_set_option_string(mpv, "audio-file", sourceAudioUrl);
+            DBG("audio-file = %s", sourceAudioUrl);
+        } else {
+            p_mpv_set_option_string(mpv, "audio-file", "");
+        }
         pendingInitialPositionMs = initialPositionMs;
         const char *cmd[] = {"loadfile", sourceUrl, nullptr};
         p_mpv_command(mpv, cmd);
@@ -1676,7 +2095,7 @@ struct MpvPlayer {
         eventThread = std::thread(&MpvPlayer::eventLoop, this);
 
         return 0;
-    }
+}
 
     void eventLoop() {
         while (running) {
@@ -1792,6 +2211,13 @@ struct MpvPlayer {
                     }
                 }
             }
+
+            /* Handle nvdec fallback request from render thread */
+            if (nvdecFallbackRequested.exchange(false)) {
+                LOG("nvdec fallback requested after repeated failures; recommend restart with NUVIO_MPV_HWDEC=nvdec-copy");
+                /* Note: Dynamic fallback requires re-initializing mpv and render context.
+                 * For now, log actionable advice. Full dynamic fallback deferred to Phase 3. */
+            }
         }
     }
 };
@@ -1823,6 +2249,7 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     JNIEnv *env, jclass clazz,
     jlong hostViewPtr,
     jstring sourceUrl,
+    jstring sourceAudioUrl,
     jobjectArray headerLines,
     jboolean playWhenReady,
     jlong initialPositionMs,
@@ -1845,6 +2272,14 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     }
     LOG("create: url=%s", urlChars);
 
+    const char *audioUrlChars = nullptr;
+    if (sourceAudioUrl) {
+        audioUrlChars = env->GetStringUTFChars(sourceAudioUrl, nullptr);
+        if (audioUrlChars) {
+            LOG("create: audioUrl=%s", audioUrlChars);
+        }
+    }
+
     /* Collect headers */
     std::vector<const char*> headers;
     jsize numHeaders = headerLines ? env->GetArrayLength(headerLines) : 0;
@@ -1859,6 +2294,7 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     LOG("create: calling player->initialize...");
     int ret = player->initialize(static_cast<int64_t>(hostViewPtr),
                                   urlChars,
+                                  audioUrlChars,
                                   headers.data(), (int)headers.size(),
                                   playWhenReady, static_cast<int64_t>(initialPositionMs),
                                   decoderPriority,
@@ -1867,6 +2303,9 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     LOG("create: player->initialize returned %d", ret);
 
     env->ReleaseStringUTFChars(sourceUrl, urlChars);
+    if (audioUrlChars) {
+        env->ReleaseStringUTFChars(sourceAudioUrl, audioUrlChars);
+    }
     for (size_t i = 0; i < headers.size(); i++) {
         if (headers[i]) {
             jstring hs = (jstring)env->GetObjectArrayElement(headerLines, i);
@@ -1993,6 +2432,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
     });
 }
 
+// DEADCODE: JNI export for adjustVolume is never called from Kotlin —
+// NativePlayerController uses setVolume() exclusively. See DEADCODE.md §5.
 JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_adjustVolume(
     JNIEnv *env, jclass clazz, jlong handle, jfloat delta)
 {
@@ -2287,6 +2728,14 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
     JNIEnv *env, jclass clazz)
 {
     setenv("_JAVA_AWT_WM_NONREPARENTING", "1", 1);
+}
+
+/** Prints NVIDIA diagnostics to stderr. No-op if no NVIDIA GPU.
+ *  Called when --nvidia-diag flag is passed at startup. */
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_nvidiaDiag(
+    JNIEnv *env, jclass clazz)
+{
+    nvidia_log_diagnostics();
 }
 
 } /* extern "C" */
