@@ -41,6 +41,7 @@ This fork is a hard fork of [NuvioMedia/NuvioDesktop](https://github.com/NuvioMe
 
 - **Native Linux playback via MPV (libmpv).** The old embedded player is replaced by a C++/JNI bridge that embeds mpv using its render API, drawing video straight into the Compose scene — all overlay UI works on X11 and Wayland. The app itself runs under XWayland; the embedded player renders offscreen with a **vendor-aware GL context**: **GLX** on NVIDIA (the same API family as the UI — NVIDIA's GLX and EGL stacks cannot coexist in one process) and **EGL** on Mesa/AMD/Intel (surfaceless). Both render into an FBO that is read back into the Compose scene, so the UI and video are both GPU-accelerated on every vendor.
 - **Hardware acceleration.** Zero-copy decode via **VA-API (Mesa/AMD/Intel)** and **NVDEC (NVIDIA)**, chosen automatically by the app's decoder setting, with a software fallback. AV1 hardware decoding requires: a GeForce **RTX 3000 or newer** (NVIDIA), a Radeon **RX 6000 or newer** or **Ryzen 6000-series processor or newer** (AMD), or **11th-gen Core or newer** or an **Arc discrete GPU** (Intel). H.264/HEVC decode on any card with NVDEC (GTX 750+). Hardware without an AV1 decoder still plays AV1 — on the CPU.
+  - Tested on: **AMD Radeon RX 9070 (Mesa 26.2.1)** and **NVIDIA GeForce RTX 3070 (driver 610.57.04, open kernel module)** — hardware decode verified on both, including 4K HDR10.
 - **HDR support.** The embedded player loads your `mpv.conf` wholesale, so HDR/color configuration — tone-mapping, `target-peak`, inverse-tone-mapping, profiles — applies as-is. (Not available in the Flatpak sandbox — see below.)
 - **Discord Rich Presence.** Show what you're watching or browsing on your Discord profile. Configurable under **Settings → Integrations → Discord Rich Presence**.
 - **Trakt & Simkl tracking.** Connect your Trakt or Simkl account under **Settings → Integrations → Tracking** — library, watch progress, watched history and scrobbling sync across your devices, with a "Sync now" button and automatic refresh.
@@ -60,7 +61,7 @@ sudo dnf install ./nuvio-linux-*.x86_64.rpm
 Install the `.deb` from a [release](https://github.com/JJDizz1L/NuvioLinux/releases) (requires system `mpv`):
 
 ```bash
-sudo apt install ./nuvio-linux_0.1.17-alpha-7_amd64.deb
+sudo apt install ./nuvio-linux_0.1.20-alpha-2_amd64.deb
 ```
 
 The package is self-contained (bundled JRE, no system Java required), installs to
@@ -87,16 +88,25 @@ flatpak run io.github.jjdizz1l.NuvioLinux
 ```
 
 The Flatpak bundles libmpv built from source — no system `mpv` needed, and
-hardware decode is included: **NVDEC (CUDA)** for NVIDIA and **VA-API** for
-AMD/Intel (via the Mesa GL extension). Your `~/.config/mpv/mpv.conf` is honored
-read-only. P2P/TorrServer works via the bundled binary. Updates are delivered
-through the bundle (the in-app updater is disabled in the sandbox); a toast in
-the app points to new releases on GitHub.
+hardware decode is included on every vendor via **VA-API**: AMD/Intel through
+the runtime's VA-API drivers, NVIDIA through the bundled
+**nvidia-vaapi-driver** shim (VA-API → NVDEC translation). Your
+`~/.config/mpv/mpv.conf` is honored read-only. P2P/TorrServer works via the
+bundled binary. Updates are delivered through the bundle (the in-app updater
+is disabled in the sandbox); a toast in the app points to new releases on
+GitHub.
 
-> **Flatpak NVIDIA requirement:** NVDEC requires the `org.freedesktop.Platform.GL.nvidia-*` extension matching the Flatpak's runtime version (currently **25.08**). Flatpak auto-installs this when an NVIDIA GPU is detected on the host (`flatpak --gl-drivers` shows the driver). If not auto-installed, run:
+> **Flatpak NVIDIA requirement:** hardware decoding on NVIDIA requires the
+> `org.freedesktop.Platform.VAAPI.nvidia` extension (branch `25.08`). Flatpak
+> auto-installs it when an NVIDIA GPU is detected; if it's missing, run:
 > ```bash
-> flatpak install flathub org.freedesktop.Platform.GL.nvidia-<host-driver-version>//1.4
+> flatpak install flathub org.freedesktop.Platform.VAAPI.nvidia//25.08
 > ```
+>
+> The same driver is packaged as **`nvidia-vaapi-driver`** on Arch (AUR) and
+> Debian/Ubuntu, and as **`libva-nvidia-driver`** on Fedora (RPM Fusion).
+> Native packages don't need it — they use NVDEC directly through the regular
+> NVIDIA driver.
 
 > **HDR limitation:** HDR tone-mapping/passthrough is **not available in the
 > Flatpak** — the sandboxed runtime can't access the display's HDR output path.
@@ -129,9 +139,10 @@ makepkg -si
 ```
 
 > To keep the bundled JRE portable, build with a **baseline x86-64 JDK** (e.g.
-> Eclipse Temurin 21) — distro JDKs compiled with `-march=native` /
-> `-march=x86-64-v3/v4` (e.g. CachyOS) produce a runtime that only runs on
-> those CPUs. Point `JAVA_HOME` at a generic JDK before running `makepkg`.
+> Eclipse Temurin 25) — distro JDKs compiled with `-march=native` /
+> `-march=x86-64-v3/v4` (e.g. Arch's `extra/jdk25-openjdk`) produce a runtime
+> that only runs on those CPUs. Point `JAVA_HOME` at a generic JDK before
+> running `makepkg`.
 
 ### Launching
 
@@ -254,25 +265,25 @@ normally.
 Desktop versions are set in `composeApp/Configuration/DesktopVersion.properties` — the single source of truth every artifact version derives from. The version is kept **aligned with upstream's desktop version**; when upstream bumps, bump to match.
 
 ```properties
-VERSION_NAME=0.1.17-alpha
-VERSION_CODE=17
+VERSION_NAME=0.1.20-alpha
+VERSION_CODE=20
 ```
 
 Use the version helper when changing desktop release versions:
 
 ```bash
-./scripts/set-version.sh --desktop 0.1.17-alpha --desktop-code 17
+./scripts/set-version.sh --desktop 0.1.20-alpha --desktop-code 20
 ./scripts/set-version.sh --show
 ```
 
-Per-format package names carry the same release counter (Arch `pkgrel` / RPM `Release` / the `-<release>` suffix in DEB, AppImage and Flatpak names), e.g. release 7 of `0.1.17-alpha`:
+Per-format package names carry the same release counter (Arch `pkgrel` / RPM `Release` / the `-<release>` suffix in DEB, AppImage and Flatpak names), e.g. release 2 of `0.1.20-alpha`:
 
 ```
-nuvio-linux-0.1.17alpha-7-x86_64.pkg.tar.zst
-nuvio-linux-0.1.17alpha-7.x86_64.rpm
-nuvio-linux_0.1.17-alpha-7_amd64.deb
-nuvio-linux-0.1.17-alpha-7-x86_64.AppImage
-nuvio-linux-0.1.17-alpha-7.flatpak
+nuvio-linux-0.1.20alpha-2-x86_64.pkg.tar.zst
+nuvio-linux-0.1.20alpha-2.x86_64.rpm
+nuvio-linux_0.1.20-alpha-2_amd64.deb
+nuvio-linux-0.1.20-alpha-2-x86_64.AppImage
+nuvio-linux-0.1.20-alpha-2.flatpak
 ```
 
 ## Legal & DMCA
