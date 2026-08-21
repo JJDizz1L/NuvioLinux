@@ -79,6 +79,11 @@ actual object PluginRepository {
     private var initialized = false
     private var pulledFromServer = false
     private var currentProfileId = 1
+
+    /** Guards [activeRefreshJobs]: dedup check + registration must be atomic
+     *  or concurrent refreshes for the same manifest can double-launch (and a
+     *  plain HashMap can corrupt under concurrent resize). */
+    private val refreshJobsLock = Any()
     private val activeRefreshJobs = mutableMapOf<String, Job>()
     private val persistenceGeneration = atomic(0L)
     private val persistenceRevision = atomic(0L)
@@ -234,56 +239,63 @@ actual object PluginRepository {
         if (ensureInitialized) {
             initialize()
         }
-        val existingJob = activeRefreshJobs[manifestUrl]
-        if (existingJob?.isActive == true) return
+        // Dedup check and job registration are one atomic section: two racing
+        // callers for the same manifestUrl must not both launch (the loser
+        // would orphan a running refresh that double-persists state).
+        synchronized(refreshJobsLock) {
+            val existingJob = activeRefreshJobs[manifestUrl]
+            if (existingJob?.isActive == true) return
 
-        markRefreshing(manifestUrl)
-        var refreshJob: Job? = null
-        refreshJob = scope.launch {
-            try {
-                val result = runCatching {
-                    val previous = _uiState.value.scrapers.associateBy { it.id }
-                    fetchRepositoryData(manifestUrl, previous)
-                }
+            markRefreshing(manifestUrl)
+            var refreshJob: Job? = null
+            refreshJob = scope.launch {
+                try {
+                    val result = runCatching {
+                        val previous = _uiState.value.scrapers.associateBy { it.id }
+                        fetchRepositoryData(manifestUrl, previous)
+                    }
 
-                _uiState.update { state ->
-                    result.fold(
-                        onSuccess = { (repo, scrapers) ->
-                            val updatedRepos = state.repositories.map { existing ->
-                                if (existing.manifestUrl == manifestUrl) repo else existing
-                            }
-                            state.copy(
-                                repositories = updatedRepos,
-                                scrapers = state.scrapers.filterNot { it.repositoryUrl == manifestUrl } + scrapers,
-                            )
-                        },
-                        onFailure = { error ->
-                            state.copy(
-                                repositories = state.repositories.map { existing ->
-                                    if (existing.manifestUrl == manifestUrl) {
-                                        existing.copy(
-                                            isRefreshing = false,
-                                            errorMessage = error.message ?: runBlocking { getString(Res.string.plugins_repository_refresh_failed) },
-                                        )
-                                    } else {
-                                        existing
-                                    }
-                                },
-                            )
-                        },
-                    )
-                }
-                persist()
-                if (pushAfterRefresh) {
-                    pushToServer()
-                }
-            } finally {
-                if (activeRefreshJobs[manifestUrl] === refreshJob) {
-                    activeRefreshJobs.remove(manifestUrl)
+                    _uiState.update { state ->
+                        result.fold(
+                            onSuccess = { (repo, scrapers) ->
+                                val updatedRepos = state.repositories.map { existing ->
+                                    if (existing.manifestUrl == manifestUrl) repo else existing
+                                }
+                                state.copy(
+                                    repositories = updatedRepos,
+                                    scrapers = state.scrapers.filterNot { it.repositoryUrl == manifestUrl } + scrapers,
+                                )
+                            },
+                            onFailure = { error ->
+                                state.copy(
+                                    repositories = state.repositories.map { existing ->
+                                        if (existing.manifestUrl == manifestUrl) {
+                                            existing.copy(
+                                                isRefreshing = false,
+                                                errorMessage = error.message ?: runBlocking { getString(Res.string.plugins_repository_refresh_failed) },
+                                            )
+                                        } else {
+                                            existing
+                                        }
+                                    },
+                                )
+                            },
+                        )
+                    }
+                    persist()
+                    if (pushAfterRefresh) {
+                        pushToServer()
+                    }
+                } finally {
+                    synchronized(refreshJobsLock) {
+                        if (activeRefreshJobs[manifestUrl] === refreshJob) {
+                            activeRefreshJobs.remove(manifestUrl)
+                        }
+                    }
                 }
             }
+            activeRefreshJobs[manifestUrl] = refreshJob
         }
-        activeRefreshJobs[manifestUrl] = refreshJob
     }
 
     actual fun toggleScraper(scraperId: String, enabled: Boolean) {
@@ -547,8 +559,15 @@ actual object PluginRepository {
     }
 
     private fun cancelActiveRefreshes() {
-        activeRefreshJobs.values.forEach(Job::cancel)
-        activeRefreshJobs.clear()
+        // Snapshot + clear under the lock, cancel outside it: cancellation can
+        // run completion handlers that re-enter refreshJobsLock via the
+        // finally-cleanup in refreshRepositoryInternal.
+        val jobs = synchronized(refreshJobsLock) {
+            val snapshot = activeRefreshJobs.values.toList()
+            activeRefreshJobs.clear()
+            snapshot
+        }
+        jobs.forEach(Job::cancel)
     }
 
     private fun ensureStateLoadedForProfile(profileId: Int) {
