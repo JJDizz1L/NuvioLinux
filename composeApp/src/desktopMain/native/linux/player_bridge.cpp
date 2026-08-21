@@ -396,6 +396,7 @@ static int load_libmpv() {
 #define GL_VENDOR                     0x1F00
 #define GL_PIXEL_PACK_BUFFER          0x88EB
 #define GL_STREAM_READ                0x88E0
+#define GL_BUFFER_SIZE                0x8764
 
 typedef void* (*egl_get_proc_address_t)(const char*);
 typedef void* (*egl_get_platform_display_t)(unsigned int, void*, const int*);
@@ -451,6 +452,7 @@ typedef void  (*gl_delete_buffers_t)(int, const unsigned int*);
 typedef void  (*gl_bind_buffer_t)(unsigned int, unsigned int);
 typedef void  (*gl_buffer_data_t)(unsigned int, long long, const void*, unsigned int);
 typedef void  (*gl_get_buffer_sub_data_t)(unsigned int, long long, long long, void*);
+typedef void  (*gl_get_buffer_parameteriv_t)(unsigned int, unsigned int, int*);
 
 struct GlRenderer {
     /* 0 = not initialized, 1 = EGL, 2 = GLX. Determines which cleanup path
@@ -531,6 +533,10 @@ struct GlRenderer {
     gl_bind_buffer_t glBindBuffer = nullptr;
     gl_buffer_data_t glBufferData = nullptr;
     gl_get_buffer_sub_data_t glGetBufferSubData = nullptr;
+    /* Optional: used to verify PBO allocations actually succeeded —
+     * glGenBuffers yields a name even when glBufferData fails (OOM), and a
+     * zero-sized buffer would silently corrupt every async readback. */
+    gl_get_buffer_parameteriv_t glGetBufferParameteriv = nullptr;
 
     /* True when GL_VENDOR is NVIDIA: the DRM render node is then withheld
      * from mpv (see render context creation) so the drmprime-overlay hwdec,
@@ -1210,6 +1216,7 @@ static bool gl_init(GlRenderer *gl) {
     gl->glBindBuffer = (gl_bind_buffer_t)gl_resolve(gl, "glBindBuffer");
     gl->glBufferData = (gl_buffer_data_t)gl_resolve(gl, "glBufferData");
     gl->glGetBufferSubData = (gl_get_buffer_sub_data_t)gl_resolve(gl, "glGetBufferSubData");
+    gl->glGetBufferParameteriv = (gl_get_buffer_parameteriv_t)gl_resolve(gl, "glGetBufferParameteriv");
     if (!gl->glGenBuffers || !gl->glDeleteBuffers || !gl->glBindBuffer ||
         !gl->glBufferData || !gl->glGetBufferSubData) {
         DBG("async readback unavailable: missing buffer entry points");
@@ -1291,6 +1298,27 @@ static bool gl_pbo_ensure(GlRenderer *gl, int w, int h) {
     if (!gl->pbos[0]) {
         DBG("async readback unavailable: PBO allocation failed");
         return false;
+    }
+    /* A buffer NAME can exist with no storage behind it (glBufferData OOM).
+     * Verify each slot really is w*h*4 bytes, else fall back to sync
+     * readback rather than shipping garbage frames. Sizes above INT_MAX are
+     * not representable in GLint — trust the allocation there (a 32k x 32k
+     * RGBA frame would be needed to hit it). */
+    const long long expected = (long long)w * h * 4;
+    if (gl->glGetBufferParameteriv && expected <= 2147483647LL) {
+        for (int i = 0; i < GlRenderer::kPboCount; i++) {
+            int size = 0;
+            gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[i]);
+            gl->glGetBufferParameteriv(GL_PIXEL_PACK_BUFFER, GL_BUFFER_SIZE, &size);
+            if ((long long)size != expected) {
+                DBG("async readback unavailable: PBO %d has %d bytes, expected %lld",
+                    i, size, expected);
+                gl_pbo_destroy(gl);
+                gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                return false;
+            }
+        }
+        gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     }
     gl->pboWidth = w;
     gl->pboHeight = h;
@@ -2301,7 +2329,10 @@ after_hwdec:
                 else if (strcmp(pname, "eof-reached") == 0 && prop->format == MPV_FORMAT_FLAG)
                     cachedEnded = *(int*)pdata;
                 else if (strcmp(pname, "demuxer-cache-time") == 0 && prop->format == MPV_FORMAT_DOUBLE)
-                    cachedBufferedPosition = cachedPosition.load() + *(double*)pdata;
+                    /* Raw absolute buffered-end timestamp (mpv semantics, same
+                     * convention as ExoPlayer's bufferedPosition). Callers
+                     * derive "buffered ahead" as bufferedPositionMs - positionMs. */
+                    cachedBufferedPosition = *(double*)pdata;
                 else if (strcmp(pname, "paused-for-cache") == 0 && prop->format == MPV_FORMAT_FLAG)
                     cachedPausedForCache = *(int*)pdata;
                 else if (strcmp(pname, "speed") == 0 && prop->format == MPV_FORMAT_DOUBLE)
