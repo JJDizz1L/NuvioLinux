@@ -26,10 +26,14 @@ import com.nuviolinux.app.features.settings.ThemeSettingsStorage
 import com.nuviolinux.app.features.settings.ThemeSettingsRepository
 import com.nuviolinux.app.features.streams.StreamBadgeSettingsRepository
 import com.nuviolinux.app.features.streams.StreamBadgeSettingsStorage
+import com.nuviolinux.app.features.tmdb.TmdbMetadataService
 import com.nuviolinux.app.features.tmdb.TmdbSettingsStorage
 import com.nuviolinux.app.features.tmdb.TmdbSettingsRepository
+import com.nuviolinux.app.features.trakt.TraktCommentsRepository
 import com.nuviolinux.app.features.trakt.TraktCommentsStorage
 import com.nuviolinux.app.features.trakt.TraktCommentsSettings
+import com.nuviolinux.app.features.trakt.TraktEpisodeMappingService
+import com.nuviolinux.app.features.trakt.TraktRelatedRepository
 import com.nuviolinux.app.features.trakt.TraktSettingsRepository
 import com.nuviolinux.app.features.trakt.TraktSettingsStorage
 import com.nuviolinux.app.features.trakt.ProfileSettingsWatchSourceOutbox
@@ -335,6 +339,13 @@ object ProfileSettingsSync {
         )
         MdbListMetadataService.clearCache()
         MdbListSettingsRepository.onProfileChanged()
+
+        /* Derived metadata must not leak across profiles: drop resolved
+         * Trakt mappings and TMDB enrichments when the sync target changes. */
+        TmdbMetadataService.clearCaches()
+        TraktEpisodeMappingService.clearCache()
+        TraktRelatedRepository.clearCache()
+        TraktCommentsRepository.clearCache()
 
         MetaScreenSettingsStorage.savePayload(blob.features.metaScreenSettingsPayload)
         MetaScreenSettingsRepository.onProfileChanged()

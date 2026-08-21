@@ -45,6 +45,19 @@ object TmdbMetadataService {
     private val entityHeaderCache = BoundedLruCache<String, TmdbEntityHeader>(maxSize = 100, idleTtl = METADATA_IDLE_TTL)
     private val entityRailCache = BoundedLruCache<String, List<MetaPreview>>(maxSize = 150, idleTtl = METADATA_IDLE_TTL)
 
+    /** Drops all derived metadata (account wipe / profile switch). */
+    fun clearCaches() {
+        enrichmentCache.clear()
+        episodeCache.clear()
+        moreLikeThisCache.clear()
+        collectionCache.clear()
+        trailerCache.clear()
+        personCache.clear()
+        entityBrowseCache.clear()
+        entityHeaderCache.clear()
+        entityRailCache.clear()
+    }
+
     suspend fun fetchPersonDetail(
         personId: Int,
         preferCrewCredits: Boolean? = null,

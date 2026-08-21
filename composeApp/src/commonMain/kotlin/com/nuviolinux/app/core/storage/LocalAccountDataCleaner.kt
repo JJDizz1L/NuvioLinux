@@ -28,8 +28,12 @@ import com.nuviolinux.app.features.streams.StreamContextStore
 import com.nuviolinux.app.features.streams.StreamBadgeSettingsRepository
 import com.nuviolinux.app.features.streams.StreamLaunchStore
 import com.nuviolinux.app.features.streams.StreamsRepository
+import com.nuviolinux.app.features.tmdb.TmdbMetadataService
 import com.nuviolinux.app.features.tracking.TrackingProviderRegistry
 import com.nuviolinux.app.features.tracking.TrackingSettingsRepository
+import com.nuviolinux.app.features.trakt.TraktCommentsRepository
+import com.nuviolinux.app.features.trakt.TraktEpisodeMappingService
+import com.nuviolinux.app.features.trakt.TraktRelatedRepository
 import com.nuviolinux.app.core.ui.CardDepthStyleRepository
 import com.nuviolinux.app.core.ui.PosterCardStyleRepository
 import com.nuviolinux.app.features.watchprogress.ContinueWatchingPreferencesRepository
@@ -82,6 +86,14 @@ internal object LocalAccountDataCleaner {
         PlayerLaunchStore.clear()
         StreamLaunchStore.clear()
         StreamContextStore.clear()
+
+        /* Derived-metadata caches: pure content caches with no persistence,
+         * cleared so a wiped account / profile switch cannot inherit another
+         * profile's resolved Trakt mappings or TMDB enrichments. */
+        TmdbMetadataService.clearCaches()
+        TraktEpisodeMappingService.clearCache()
+        TraktRelatedRepository.clearCache()
+        TraktCommentsRepository.clearCache()
     }
 }
 
