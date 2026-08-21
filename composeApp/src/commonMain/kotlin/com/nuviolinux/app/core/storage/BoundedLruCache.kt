@@ -46,7 +46,8 @@ class BoundedLruCache<K : Any, V : Any>(
     val size: Int
         get() = synchronized(monitor) { map.size }
 
-    fun get(key: K): V? = synchronized(monitor) {
+    /** Map-style read so call sites can migrate from mutableMapOf verbatim. */
+    operator fun get(key: K): V? = synchronized(monitor) {
         sweepIfDue()
         val entry = map[key] ?: return null
         val now = nowMillis()
@@ -60,7 +61,10 @@ class BoundedLruCache<K : Any, V : Any>(
         entry.value
     }
 
-    fun put(key: K, value: V): Unit = synchronized(monitor) {
+    fun put(key: K, value: V): Unit = set(key, value)
+
+    /** Map-style write so call sites can migrate from mutableMapOf verbatim. */
+    operator fun set(key: K, value: V) {
         val now = nowMillis()
         val existing = map.remove(key)
         if (existing != null) {
