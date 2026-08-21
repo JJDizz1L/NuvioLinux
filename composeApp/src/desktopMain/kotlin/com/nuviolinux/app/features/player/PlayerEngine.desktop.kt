@@ -261,6 +261,11 @@ private fun ComposeVideoSurface(
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
     var frameImage by remember { mutableStateOf<ImageBitmap?>(null) }
 
+    /* The pump's LaunchedEffect never restarts (keyed on the stable
+     * controller), so a plain parameter capture would freeze the first
+     * composition's value forever. State holder keeps resizes flowing. */
+    val awtWindowSizeState = rememberUpdatedState(awtWindowSize)
+
     LaunchedEffect(controller) {
         val log = Logger.withTag("ComposeVideoSurface")
         /* Fixed pool of 3 render slots: one is being filled by the producer,
@@ -310,7 +315,7 @@ private fun ComposeVideoSurface(
          * frames it polls cheaply. */
         launch(Dispatchers.Default) {
             while (coroutineContext.isActive) {
-                val size = awtWindowSize ?: surfaceSize
+                val size = awtWindowSizeState.value ?: surfaceSize
                 if (size.width <= 0 || size.height <= 0) {
                     delay(16L)
                     continue
