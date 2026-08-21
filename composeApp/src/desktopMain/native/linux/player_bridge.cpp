@@ -1908,70 +1908,79 @@ struct MpvPlayer {
         }
         DBG("mpv_create OK");
 
-        /* Configure mpv. If the user has an mpv.conf, load it wholesale —
-         * mpv itself ignores whatever it cannot use with the render API
-         * (window options are VO-level, scripts/input.conf never load via
-         * libmpv). Without a config, apply our built-in defaults. */
-        if (!loadUserConfig(mpv)) {
-            p_mpv_set_option_string(mpv, "cache", "yes");
-            p_mpv_set_option_string(mpv, "cache-secs", "300");
-            p_mpv_set_option_string(mpv, "demuxer-max-bytes", "500M");
-            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", "100M");
-            p_mpv_set_option_string(mpv, "keep-open", "no");
-            p_mpv_set_option_string(mpv, "audio-file-auto", "no");
-            p_mpv_set_option_string(mpv, "sub-auto", "no");
-            p_mpv_set_option_string(mpv, "osd-level", "0");
-            p_mpv_set_option_string(mpv, "input-default-bindings", "no");
-            p_mpv_set_option_string(mpv, "input-vo-keyboard", "no");
-            p_mpv_set_option_string(mpv, "terminal", "no");
-            p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
-            p_mpv_set_option_string(mpv, "video-sync", "display-resample");
-            p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
-            /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
-            p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
-            p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
-            p_mpv_set_option_string(mpv, "vd-queue-max-samples", "30");
-            p_mpv_set_option_string(mpv, "vd-queue-min-bytes", "10000000");
-        }
-
-        /* Embedding-critical options: applied AFTER any user config so they
-         * always win. A user vo=gpu-next would otherwise make mpv open its
-         * own window and render there instead of into our FBO. */
-        p_mpv_set_option_string(mpv, "vo", "libmpv");
-        p_mpv_set_option_string(mpv, "force-window", "no");
-
-        /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
-         * read-ahead and the network cache) and optional on-disk cache. The
-         * back-buffer gets a small fixed slice — mpv's back buffer is
-         * ADDITIONAL to the forward buffer, so mirroring the full value here
-         * doubled the configured cache (the "setting ignored" ballooning). */
-        if (streamCacheBytes > 0) {
-            char cacheSize[64];
-            snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
-            long long backBytes = streamCacheBytes / 4;
-            if (backBytes > 67108864LL) backBytes = 67108864LL;   /* cap 64 MiB */
-            if (backBytes < 8388608LL) backBytes = 8388608LL;     /* floor 8 MiB */
-            char backSize[64];
-            snprintf(backSize, sizeof(backSize), "%lld", backBytes);
-            p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
-            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", backSize);
-            DBG("stream cache = %lld bytes (back=%lld), on-disk=%d",
-                (long long)streamCacheBytes, backBytes, streamCacheOnDisk ? 1 : 0);
-        }
-        if (streamCacheOnDisk) {
-            p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
-        }
-
-        /* Apply custom headers if any */
-        if (numHeaders > 0) {
-            std::string headerStr;
-            for (int i = 0; i < numHeaders; i++) {
-                if (i > 0) headerStr += "\n";
-                headerStr += headers[i];
+        /* All pre-init options except hwdec/vaapi-device, in canonical order:
+         * user config (wholesale) or built-in defaults, embedding-critical
+         * overrides, app-controlled stream cache, custom headers. Used by the
+         * normal path and re-used verbatim when the nvdec probe discards the
+         * first handle and creates a fresh one. */
+        auto applyCommonOptions = [&]() {
+            /* If the user has an mpv.conf, load it wholesale — mpv itself
+             * ignores whatever it cannot use with the render API (window
+             * options are VO-level, scripts/input.conf never load via
+             * libmpv). Without a config, apply our built-in defaults. */
+            if (!loadUserConfig(mpv)) {
+                p_mpv_set_option_string(mpv, "cache", "yes");
+                p_mpv_set_option_string(mpv, "cache-secs", "300");
+                p_mpv_set_option_string(mpv, "demuxer-max-bytes", "500M");
+                p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", "100M");
+                p_mpv_set_option_string(mpv, "keep-open", "no");
+                p_mpv_set_option_string(mpv, "audio-file-auto", "no");
+                p_mpv_set_option_string(mpv, "sub-auto", "no");
+                p_mpv_set_option_string(mpv, "osd-level", "0");
+                p_mpv_set_option_string(mpv, "input-default-bindings", "no");
+                p_mpv_set_option_string(mpv, "input-vo-keyboard", "no");
+                p_mpv_set_option_string(mpv, "terminal", "no");
+                p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
+                p_mpv_set_option_string(mpv, "video-sync", "display-resample");
+                p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+                /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
+                p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
+                p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
+                p_mpv_set_option_string(mpv, "vd-queue-max-samples", "30");
+                p_mpv_set_option_string(mpv, "vd-queue-min-bytes", "10000000");
             }
-            p_mpv_set_option_string(mpv, "http-header-fields", headerStr.c_str());
-            DBG("set %d headers", numHeaders);
-        }
+
+            /* Embedding-critical options: applied AFTER any user config so they
+             * always win. A user vo=gpu-next would otherwise make mpv open its
+             * own window and render there instead of into our FBO. */
+            p_mpv_set_option_string(mpv, "vo", "libmpv");
+            p_mpv_set_option_string(mpv, "force-window", "no");
+
+            /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
+             * read-ahead and the network cache) and optional on-disk cache. The
+             * back-buffer gets a small fixed slice — mpv's back buffer is
+             * ADDITIONAL to the forward buffer, so mirroring the full value here
+             * doubled the configured cache (the "setting ignored" ballooning). */
+            if (streamCacheBytes > 0) {
+                char cacheSize[64];
+                snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
+                long long backBytes = streamCacheBytes / 4;
+                if (backBytes > 67108864LL) backBytes = 67108864LL;   /* cap 64 MiB */
+                if (backBytes < 8388608LL) backBytes = 8388608LL;     /* floor 8 MiB */
+                char backSize[64];
+                snprintf(backSize, sizeof(backSize), "%lld", backBytes);
+                p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
+                p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", backSize);
+                DBG("stream cache = %lld bytes (back=%lld), on-disk=%d",
+                    (long long)streamCacheBytes, backBytes, streamCacheOnDisk ? 1 : 0);
+            }
+            if (streamCacheOnDisk) {
+                p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
+            }
+
+            /* Apply custom headers if any */
+            if (numHeaders > 0) {
+                std::string headerStr;
+                for (int i = 0; i < numHeaders; i++) {
+                    if (i > 0) headerStr += "\n";
+                    headerStr += headers[i];
+                }
+                p_mpv_set_option_string(mpv, "http-header-fields", headerStr.c_str());
+                DBG("set %d headers", numHeaders);
+            }
+        };
+
+        applyCommonOptions();
 
         /* hwdec is vendor-aware and set before mpv_initialize so the decoder
          * picks it up. Zero-copy vaapi (AMD/Intel) and nvdec (NVIDIA) work with
@@ -2024,8 +2033,10 @@ struct MpvPlayer {
                                 LOG("mpv_create failed after nvdec probe");
                                 return -1;
                             }
-                            /* Re-apply all options up to hwdec */
-                            goto reapply_options_for_probe;
+                            /* Fresh handle: re-apply every pre-init option,
+                             * then continue into the shared hwdec/vaapi-device
+                             * path below. */
+                            applyCommonOptions();
                         } else {
                             LOG("nvdec probe succeeded, using zero-copy nvdec");
                             hwdecOpt = "nvdec";
@@ -2044,128 +2055,6 @@ struct MpvPlayer {
          * by libva, so point --vaapi-device at the DRM render node explicitly.
          * The fd itself is opened later on the render thread for
          * MPV_RENDER_PARAM_DRM_DISPLAY_V2; this only needs the path. */
-        if (inFlatpakHwdec && nvidiaAtInit) {
-            char renderDev[64] = {0};
-            if (findDrmRenderNodePath(renderDev, sizeof(renderDev))) {
-                p_mpv_set_option_string(mpv, "vaapi-device", renderDev);
-                DBG("vaapi-device=%s (Flatpak NVIDIA vaapi shim)", renderDev);
-            } else {
-                DBG("no DRM render node found for Flatpak NVIDIA vaapi-device");
-            }
-        }
-        goto after_hwdec;
-
-reapply_options_for_fallback:
-        /* Re-apply options for dynamic nvdec fallback path */
-        if (!loadUserConfig(mpv)) {
-            p_mpv_set_option_string(mpv, "cache", "yes");
-            p_mpv_set_option_string(mpv, "cache-secs", "300");
-            p_mpv_set_option_string(mpv, "demuxer-max-bytes", "500M");
-            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", "100M");
-            p_mpv_set_option_string(mpv, "keep-open", "no");
-            p_mpv_set_option_string(mpv, "audio-file-auto", "no");
-            p_mpv_set_option_string(mpv, "sub-auto", "no");
-            p_mpv_set_option_string(mpv, "osd-level", "0");
-            p_mpv_set_option_string(mpv, "input-default-bindings", "no");
-            p_mpv_set_option_string(mpv, "input-vo-keyboard", "no");
-            p_mpv_set_option_string(mpv, "terminal", "no");
-            p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
-            p_mpv_set_option_string(mpv, "video-sync", "display-resample");
-            p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
-            /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
-            p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
-            p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
-            p_mpv_set_option_string(mpv, "vd-queue-max-samples", "30");
-            p_mpv_set_option_string(mpv, "vd-queue-min-bytes", "10000000");
-        }
-        p_mpv_set_option_string(mpv, "vo", "libmpv");
-        p_mpv_set_option_string(mpv, "force-window", "no");
-        if (streamCacheBytes > 0) {
-            char cacheSize[64];
-            snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
-            long long backBytes = streamCacheBytes / 4;
-            if (backBytes > 67108864LL) backBytes = 67108864LL;   /* cap 64 MiB */
-            if (backBytes < 8388608LL) backBytes = 8388608LL;     /* floor 8 MiB */
-            char backSize[64];
-            snprintf(backSize, sizeof(backSize), "%lld", backBytes);
-            p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
-            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", backSize);
-            DBG("stream cache = %lld bytes (back=%lld), on-disk=%d",
-                (long long)streamCacheBytes, backBytes, streamCacheOnDisk ? 1 : 0);
-        }
-        if (streamCacheOnDisk) {
-            p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
-        }
-        if (numHeaders > 0) {
-            std::string headerStr;
-            for (int i = 0; i < numHeaders; i++) {
-                if (i > 0) headerStr += "\n";
-                headerStr += headers[i];
-            }
-            p_mpv_set_option_string(mpv, "http-header-fields", headerStr.c_str());
-            DBG("set %d headers", numHeaders);
-        }
-        /* Force nvdec-copy for fallback */
-        p_mpv_set_option_string(mpv, "hwdec", "nvdec-copy");
-        DBG("hwdec option (fallback) = nvdec-copy");
-        goto after_hwdec;
-
-reapply_options_for_probe:
-        /* Re-apply options for probe fallback path */
-        if (!loadUserConfig(mpv)) {
-            p_mpv_set_option_string(mpv, "cache", "yes");
-            p_mpv_set_option_string(mpv, "cache-secs", "300");
-            p_mpv_set_option_string(mpv, "demuxer-max-bytes", "500M");
-            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", "100M");
-            p_mpv_set_option_string(mpv, "keep-open", "no");
-            p_mpv_set_option_string(mpv, "audio-file-auto", "no");
-            p_mpv_set_option_string(mpv, "sub-auto", "no");
-            p_mpv_set_option_string(mpv, "osd-level", "0");
-            p_mpv_set_option_string(mpv, "input-default-bindings", "no");
-            p_mpv_set_option_string(mpv, "input-vo-keyboard", "no");
-            p_mpv_set_option_string(mpv, "terminal", "no");
-            p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
-            p_mpv_set_option_string(mpv, "video-sync", "display-resample");
-            p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
-            /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
-            p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
-            p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
-            p_mpv_set_option_string(mpv, "vd-queue-max-samples", "30");
-            p_mpv_set_option_string(mpv, "vd-queue-min-bytes", "10000000");
-        }
-        p_mpv_set_option_string(mpv, "vo", "libmpv");
-        p_mpv_set_option_string(mpv, "force-window", "no");
-        if (streamCacheBytes > 0) {
-            char cacheSize[64];
-            snprintf(cacheSize, sizeof(cacheSize), "%lld", (long long)streamCacheBytes);
-            long long backBytes = streamCacheBytes / 4;
-            if (backBytes > 67108864LL) backBytes = 67108864LL;   /* cap 64 MiB */
-            if (backBytes < 8388608LL) backBytes = 8388608LL;     /* floor 8 MiB */
-            char backSize[64];
-            snprintf(backSize, sizeof(backSize), "%lld", backBytes);
-            p_mpv_set_option_string(mpv, "demuxer-max-bytes", cacheSize);
-            p_mpv_set_option_string(mpv, "demuxer-max-back-bytes", backSize);
-            DBG("stream cache = %lld bytes (back=%lld), on-disk=%d",
-                (long long)streamCacheBytes, backBytes, streamCacheOnDisk ? 1 : 0);
-        }
-        if (streamCacheOnDisk) {
-            p_mpv_set_option_string(mpv, "cache-on-disk", "yes");
-        }
-        if (numHeaders > 0) {
-            std::string headerStr;
-            for (int i = 0; i < numHeaders; i++) {
-                if (i > 0) headerStr += "\n";
-                headerStr += headers[i];
-            }
-            p_mpv_set_option_string(mpv, "http-header-fields", headerStr.c_str());
-            DBG("set %d headers", numHeaders);
-        }
-        p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
-        DBG("hwdec option = %s", hwdecOpt);
-        /* Flatpak + NVIDIA: the nvidia-vaapi-driver shim needs an explicit VA
-         * display device so mpv's vaapi interop can init. Point it at the DRM
-         * render node. The fd itself is opened on the render thread via
-         * MPV_RENDER_PARAM_DRM_DISPLAY_V2, but --vaapi-device takes the path. */
         if (inFlatpakHwdec && nvidiaAtInit) {
             char renderDev[64] = {0};
             if (findDrmRenderNodePath(renderDev, sizeof(renderDev))) {
