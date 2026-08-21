@@ -351,6 +351,7 @@ static int load_libmpv() {
 #define EGL_PLATFORM_WAYLAND_EXT      0x31D8
 #define EGL_PLATFORM_DEVICE_EXT       0x313F
 #define EGL_VENDOR                    0x3053
+#define EGL_DRM_DEVICE_FILE_EXT       0x3234
 
 /* GLX offscreen (pbuffer) context tokens. The bridge falls back to a GLX
  * context when EGL cannot initialize — on NVIDIA, GLX and EGL cannot coexist
@@ -407,9 +408,10 @@ typedef void* (*egl_create_context_t)(void*, void*, void*, const int*);
 typedef void* (*egl_create_pbuffer_surface_t)(void*, void*, const int*);
 typedef int   (*egl_make_current_t)(void*, void*, void*, void*);
 typedef int   (*egl_destroy_surface_t)(void*, void*);
-typedef int         (*egl_query_devices_ext_t)(int, void*, int*);
+typedef int   (*egl_query_devices_ext_t)(int, void*, int*);
 typedef void*       (*egl_get_platform_display_ext_t)(unsigned int, void*, const int*);
 typedef const char* (*egl_query_string_t)(void*, int);
+typedef const char* (*egl_query_device_string_t)(void*, int);
 typedef int   (*egl_destroy_context_t)(void*, void*);
 typedef int   (*egl_terminate_t)(void*);
 typedef int   (*egl_get_error_t)(void);
@@ -493,6 +495,15 @@ struct GlRenderer {
     egl_bind_api_t eglBindAPI = nullptr;
     void *(*eglGetCurrentContext)(void) = nullptr;
 
+    /* EGL device enumeration (EGL_EXT_device_enumeration / _drm): used to
+     * learn which DRM nodes belong to the GPU our GL context runs on, so
+     * hybrid-GPU systems hand mpv a render node that actually matches the
+     * GL device (cross-GPU dmabuf imports fail). */
+    egl_query_devices_ext_t eglQueryDevicesEXT = nullptr;
+    egl_query_device_string_t eglQueryDeviceStringEXT = nullptr;
+    char drmDeviceFiles[8][64] = {};
+    int drmDeviceFileCount = 0;
+
     glx_get_proc_address_t glxGetProcAddressARB = nullptr;
     glx_make_current_t glxMakeCurrent = nullptr;
     glx_destroy_pbuffer_t glxDestroyPbuffer = nullptr;
@@ -542,6 +553,9 @@ struct GlRenderer {
      * from mpv (see render context creation) so the drmprime-overlay hwdec,
      * which requires a DRM atomic/modeset context, can never be probed. */
     bool nvidiaVendor = false;
+    /* First token of GL_VENDOR (e.g. "AMD", "Intel"), used to match DRM
+     * nodes by kernel driver on hybrid-GPU systems. */
+    char glVendor[16] = {0};
 };
 
 static void *gl_resolve(GlRenderer *gl, const char *name) {
@@ -928,7 +942,8 @@ static bool gl_try_egl(GlRenderer *gl) {
 
     /* Display candidates, tried in order. Each one goes through
      * gl_try_display() (initialize, config, context, make-current). */
-    auto eglQueryDevicesEXT = (egl_query_devices_ext_t)gl->eglGetProcAddress("eglQueryDevicesEXT");
+    gl->eglQueryDevicesEXT = (egl_query_devices_ext_t)gl->eglGetProcAddress("eglQueryDevicesEXT");
+    gl->eglQueryDeviceStringEXT = (egl_query_device_string_t)gl->eglGetProcAddress("eglQueryDeviceStringEXT");
     auto eglGetPlatformDisplayEXT = (egl_get_platform_display_ext_t)gl->eglGetProcAddress("eglGetPlatformDisplayEXT");
 
     /* 1. Surfaceless MESA platform (implemented by both Mesa and NVIDIA). */
@@ -957,10 +972,10 @@ static bool gl_try_egl(GlRenderer *gl) {
 
     /* 3. GPU device platform (EGL_EXT_platform_device) — NVIDIA's supported
      * headless path when windowing-platform displays reject make-current. */
-    if (eglQueryDevicesEXT && eglGetPlatformDisplayEXT) {
+    if (gl->eglQueryDevicesEXT && eglGetPlatformDisplayEXT) {
         void *devices[8];
         int num = 0;
-        if (eglQueryDevicesEXT(8, devices, &num) && num > 0) {
+        if (gl->eglQueryDevicesEXT(8, devices, &num) && num > 0) {
             LOG("[gl-init] device platform: %d device(s)", num);
             for (int i = 0; i < num; i++) {
                 char label[32];
@@ -1155,6 +1170,65 @@ glx_fail:
     return false;
 }
 
+/* Kernel driver behind a DRM node, e.g. "/dev/dri/renderD128" -> "amdgpu".
+ * The devfs node carries no sysfs attrs; resolve via its /sys/class/drm
+ * entry, which shares the basename. */
+static bool drm_node_driver_is(const char *path, const char *want) {
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    char link[192];
+    snprintf(link, sizeof(link), "/sys/class/drm/%.60s/device/driver", base);
+    char buf[256];
+    ssize_t n = readlink(link, buf, sizeof(buf) - 1);
+    if (n <= 0) return false;
+    buf[n] = '\0';
+    const char *slash = strrchr(buf, '/');
+    const char *drv = slash ? slash + 1 : buf;
+    return strcmp(drv, want) == 0;
+}
+
+static void add_drm_device_file(GlRenderer *gl, const char *path) {
+    for (int i = 0; i < gl->drmDeviceFileCount; i++)
+        if (strcmp(gl->drmDeviceFiles[i], path) == 0)
+            return;
+    if (gl->drmDeviceFileCount >= 8) return;
+    snprintf(gl->drmDeviceFiles[gl->drmDeviceFileCount++], 64, "%s", path);
+}
+
+/* Fallback when EGL_EXT_device_drm is unavailable (Mesa surfaceless devices
+ * often don't implement it): match render nodes by the kernel driver implied
+ * by our GL vendor — AMD→amdgpu, Intel→i915/xe. Deterministic on hybrid
+ * laptops where the node lottery can hand mpv the wrong GPU. */
+static void populate_drm_nodes_by_gl_vendor(GlRenderer *gl) {
+    const char *drivers[3] = {nullptr, nullptr, nullptr};
+    if (strncmp(gl->glVendor, "AMD", 3) == 0) {
+        drivers[0] = "amdgpu";
+    } else if (strncmp(gl->glVendor, "Intel", 5) == 0) {
+        drivers[0] = "i915";
+        drivers[1] = "xe";
+    } else {
+        return;
+    }
+
+    DIR *dp = opendir("/dev/dri");
+    if (!dp) return;
+    struct dirent *entry;
+    while ((entry = readdir(dp))) {
+        if (strncmp(entry->d_name, "renderD", 7) != 0) continue;
+        char path[64];
+        snprintf(path, sizeof(path), "/dev/dri/%s", entry->d_name);
+        for (int v = 0; v < 3 && drivers[v]; v++) {
+            if (drm_node_driver_is(path, drivers[v])) {
+                add_drm_device_file(gl, path);
+                DBG("DRM node matched via GL vendor '%s' -> %s (%s)",
+                    gl->glVendor, path, drivers[v]);
+                break;
+            }
+        }
+    }
+    closedir(dp);
+}
+
 static bool gl_init(GlRenderer *gl) {
     /* NVIDIA's GLX and EGL stacks cannot coexist in one process: once
      * Skiko/Compose has a GLX context current (the default UI renderer), the
@@ -1242,9 +1316,32 @@ static bool gl_init(GlRenderer *gl) {
         const unsigned char *vendor = gl->glGetString(GL_VENDOR);
         if (vendor) {
             gl->nvidiaVendor = strstr((const char*)vendor, "NVIDIA") != nullptr;
+            snprintf(gl->glVendor, sizeof(gl->glVendor), "%.15s", (const char*)vendor);
             DBG("GL vendor: %s (nvidia=%d)", (const char*)vendor, gl->nvidiaVendor ? 1 : 0);
         }
     }
+
+    /* Learn which DRM nodes belong to the GPU our context runs on, so the
+     * render fd handed to mpv matches the GL device on hybrid systems. */
+    if (gl->provider == 1 && gl->eglQueryDevicesEXT && gl->eglQueryDeviceStringEXT) {
+        void *devices[8] = {nullptr};
+        int num = 0;
+        if (gl->eglQueryDevicesEXT(8, devices, &num) && num > 0) {
+            for (int i = 0; i < num && gl->drmDeviceFileCount < 8; i++) {
+                const char *df = gl->eglQueryDeviceStringEXT(devices[i], EGL_DRM_DEVICE_FILE_EXT);
+                if (df && df[0]) {
+                    add_drm_device_file(gl, df);
+                    DBG("EGL device[%d] drm file: %s", i, df);
+                }
+            }
+        }
+    }
+    if (gl->provider == 1 && gl->drmDeviceFileCount == 0 && !gl->nvidiaVendor) {
+        populate_drm_nodes_by_gl_vendor(gl);
+    }
+    DBG("DRM node matching: %d candidate(s)", gl->drmDeviceFileCount);
+    for (int i = 0; i < gl->drmDeviceFileCount; i++)
+        DBG("DRM candidate[%d] = %s", i, gl->drmDeviceFiles[i]);
 
     gl->ready = true;
     /* NOTE: keep the context current on this thread — mpv_render_context_create
@@ -1515,6 +1612,24 @@ static int openDrmRenderNode(char *outPath, size_t outPathLen) {
     return -1;
 }
 
+/* GL-device-aware variant: prefers nodes reported by EGL for the very device
+ * our context runs on, so hybrid systems never cross GPUs between decode and
+ * import (cross-GPU dmabuf imports fail at runtime). Falls back to the legacy
+ * lottery when enumeration is unavailable. */
+static int openDrmRenderNodeMatching(GlRenderer *gl, char *outPath, size_t outPathLen) {
+    if (gl && gl->drmDeviceFileCount > 0) {
+        for (int d = 0; d < gl->drmDeviceFileCount; d++) {
+            int fd = open(gl->drmDeviceFiles[d], O_RDWR | O_CLOEXEC);
+            if (fd >= 0) {
+                if (outPath) snprintf(outPath, outPathLen, "%s", gl->drmDeviceFiles[d]);
+                DBG("DRM node matched via EGL device: %s", gl->drmDeviceFiles[d]);
+                return fd;
+            }
+        }
+    }
+    return openDrmRenderNode(outPath, outPathLen);
+}
+
 /* Find the path of the first accessible DRM render node without keeping an fd.
  * Used to set mpv --vaapi-device before mpv_initialize (the fd itself is
  * opened/owned later on the render thread). */
@@ -1610,6 +1725,16 @@ struct MpvPlayer {
     bool          warnedSoftwareDecode = false;
     int64_t       lastDropFrameCount = -1;
     int64_t       lastVoDropFrameCount = -1;
+
+    /* Runtime hwdec fallback (event-thread only). When mpv repeatedly fails
+     * to map zero-copy surfaces ("Mapping hardware decoded surface failed" —
+     * broken VAAPI dmabuf import on new GPUs, driver quirks, hybrid mismatches),
+     * it retries EVERY frame forever. After HWDEC_FAIL_THRESHOLD failures in a
+     * row we flip hwdec to the vendor's copy mode ourselves. */
+    int           hwdecFailStreak = 0;
+    double        lastHwdecFailMonotonic = 0;
+    std::string   currentHwdecName;
+    bool          copyFallbackApplied = false;
 
     /* nvdec failure tracking for dynamic fallback */
     std::atomic<int> nvdecFailCount{0};
@@ -1712,7 +1837,7 @@ struct MpvPlayer {
             drmParams.fd = -1;
             drmParams.render_fd = -1;
             if (!gl.nvidiaVendor) {
-                drmRenderFd = openDrmRenderNode(drmRenderPath, sizeof(drmRenderPath));
+                drmRenderFd = openDrmRenderNodeMatching(&gl, drmRenderPath, sizeof(drmRenderPath));
                 if (drmRenderFd >= 0) {
                     drmParams.render_fd = drmRenderFd;
                     DBG("DRM render node fd=%d path=%s available for vaapi interop", drmRenderFd, drmRenderPath);
@@ -2142,6 +2267,59 @@ after_hwdec:
         return 0;
 }
 
+    /* Runs on the event thread (from the LOG_MESSAGE handler). Counts
+     * consecutive zero-copy surface-mapping failures and switches hwdec to
+     * the vendor's copy mode once mpv is clearly stuck retrying every frame.
+     * Copy mode re-imports through libavutil's transfer path instead of EGL
+     * dmabuf, which works where the interop does not. NUVIO_MPV_NO_AUTOFALLBACK=1
+     * disables this for triage. */
+    void noteHwdecMappingFailure(const char *text) {
+        if (!text || !strstr(text, "Mapping hardware decoded surface failed"))
+            return;
+        if (copyFallbackApplied)
+            return;
+
+        double now = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        /* A gap > 2s means playback recovered; start a fresh streak. */
+        if (lastHwdecFailMonotonic > 0 && now - lastHwdecFailMonotonic > 2.0)
+            hwdecFailStreak = 0;
+        lastHwdecFailMonotonic = now;
+        hwdecFailStreak++;
+        if (hwdecFailStreak < HWDEC_FAIL_THRESHOLD)
+            return;
+
+        const char *env = getenv("NUVIO_MPV_NO_AUTOFALLBACK");
+        if (env && env[0] == '1') {
+            DBG("hwdec autofallback suppressed by NUVIO_MPV_NO_AUTOFALLBACK");
+            return;
+        }
+
+        /* Pick the copy variant matching what was actually in use. */
+        std::string fallback = "vaapi-copy";
+        if (currentHwdecName.find("nvdec") != std::string::npos ||
+            currentHwdecName.find("cuda") != std::string::npos ||
+            currentHwdecName.find("vulkan") != std::string::npos) {
+            if (currentHwdecName.find("nvdec") == std::string::npos &&
+                currentHwdecName.find("vulkan") != std::string::npos)
+                fallback = "auto-copy";
+            else
+                fallback = "nvdec-copy";
+        } else if (currentHwdecName.empty() || currentHwdecName == "no") {
+            fallback = "auto-copy";
+        }
+
+        LOG("runtime fallback: %d consecutive surface-mapping failures "
+            "(hwdec-current=%s); switching hwdec to %s",
+            hwdecFailStreak, currentHwdecName.c_str(), fallback.c_str());
+        char cmdStr[64];
+        snprintf(cmdStr, sizeof(cmdStr), "%s", fallback.c_str());
+        p_mpv_set_property_string(mpv, "hwdec", cmdStr);
+        copyFallbackApplied = true;
+    }
+
+    static constexpr int HWDEC_FAIL_THRESHOLD = 8;
+
     void eventLoop() {
         while (running) {
             drainCommands();
@@ -2170,6 +2348,11 @@ after_hwdec:
                 warnedSoftwareDecode = false;
                 lastDropFrameCount = -1;
                 lastVoDropFrameCount = -1;
+                /* Fresh file = fresh mapping attempt; the applied fallback
+                 * itself stays sticky for this player instance so we never
+                 * flap between zero-copy and copy mid-session. */
+                hwdecFailStreak = 0;
+                lastHwdecFailMonotonic = 0;
                 int64_t pending = pendingInitialPositionMs.load();
                 if (pending > 0) {
                     pendingInitialPositionMs.store(0);
@@ -2196,6 +2379,7 @@ after_hwdec:
                     } else {
                         DBG("[mpv/%s] %s", prefix, msg->text);
                     }
+                    noteHwdecMappingFailure(msg->text);
                 }
             }
 
@@ -2235,6 +2419,7 @@ after_hwdec:
                 }
                 else if (strcmp(pname, "hwdec-current") == 0 && prop->format == MPV_FORMAT_STRING) {
                     const char *hwdec = pdata ? *(const char**)pdata : nullptr;
+                    currentHwdecName = hwdec ? hwdec : "";
                     DBG("hwdec-current = %s", hwdec ? hwdec : "(null)");
                     if (hwdec && strcmp(hwdec, "no") == 0 && !warnedSoftwareDecode) {
                         warnedSoftwareDecode = true;
