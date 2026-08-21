@@ -102,11 +102,25 @@ object TraktProgressRepository {
     private val episodeProgressFetchedAtMsByContentId = mutableMapOf<String, Long>()
     private val episodeProgressLastAttemptAtMsByContentId = mutableMapOf<String, Long>()
     private val inFlightEpisodeProgressContentIds = mutableSetOf<String>()
-    private var watchedShowEpisodesById: Map<String, Set<Pair<Int, Int>>> = emptyMap()
-    private var showIdToTraktPathId: Map<String, String> = emptyMap()
-    private var showIdSiblingsMap: Map<String, Set<String>> = emptyMap()
+    /**
+     * Immutable snapshot of Trakt's show-keyed progress state. The three maps
+     * describe a single watch-progress fetch and must be coherent for readers:
+     * published through ONE @Volatile reference so cross-thread readers (badge
+     * resolvers on other dispatchers) get safe publication per JMM semantics —
+     * volatile write happens-before later volatile read, and the holder is
+     * deeply immutable. Independent @Volatile fields would allow readers to
+     * observe mixed versions from different fetches.
+     */
+    private data class ShowProgressState(
+        val watchedEpisodesById: Map<String, Set<Pair<Int, Int>>> = emptyMap(),
+        val traktPathIdByKey: Map<String, String> = emptyMap(),
+        val siblingsByKey: Map<String, Set<String>> = emptyMap(),
+    )
 
-    fun getShowIdSiblings(): Map<String, Set<String>> = showIdSiblingsMap
+    @Volatile
+    private var showProgressState = ShowProgressState()
+
+    fun getShowIdSiblings(): Map<String, Set<String>> = showProgressState.siblingsByKey
 
     init {
         scope.launch {
@@ -148,7 +162,7 @@ object TraktProgressRepository {
             parsed.imdb?.takeIf { it.isNotBlank() }?.let { add(it) }
             parsed.tmdb?.let { add("tmdb:$it") }
             parsed.trakt?.let { add("trakt:$it") }
-            showIdSiblingsMap[contentId]?.forEach { add(it) }
+            showProgressState.siblingsByKey[contentId]?.forEach { add(it) }
         }
         return keys.any { ids.contains(it) }
     }
@@ -318,9 +332,7 @@ object TraktProgressRepository {
     }
 
     private fun resetShowProgressCaches() {
-        watchedShowEpisodesById = emptyMap()
-        showIdToTraktPathId = emptyMap()
-        showIdSiblingsMap = emptyMap()
+        showProgressState = ShowProgressState()
         episodeProgressFetchedAtMsByContentId.clear()
         episodeProgressLastAttemptAtMsByContentId.clear()
         inFlightEpisodeProgressContentIds.clear()
@@ -872,15 +884,20 @@ object TraktProgressRepository {
             }
         }
 
-        watchedShowEpisodesById = episodesByKey.mapValues { (_, episodes) -> episodes.toSet() }
-        showIdToTraktPathId = pathIdsByKey
-        showIdSiblingsMap = siblingsMap.mapValues { (_, siblings) -> siblings.toSet() }
+        // One atomic publication: readers never see episodes from one fetch
+        // combined with siblings/path-ids from another.
+        showProgressState = ShowProgressState(
+            watchedEpisodesById = episodesByKey.mapValues { (_, episodes) -> episodes.toSet() },
+            traktPathIdByKey = pathIdsByKey,
+            siblingsByKey = siblingsMap.mapValues { (_, siblings) -> siblings.toSet() },
+        )
     }
 
     private fun fixAmbiguousWatchedShowSeeds(
         seeds: List<WatchProgressEntry>,
     ): List<WatchProgressEntry> {
-        val ambiguousIds = showIdSiblingsMap.entries
+        val state = showProgressState
+        val ambiguousIds = state.siblingsByKey.entries
             .filter { (_, siblings) -> AMBIGUOUS_ID_MARKER in siblings }
             .mapTo(mutableSetOf()) { (key, _) -> key }
         if (ambiguousIds.isEmpty()) return seeds
@@ -889,7 +906,7 @@ object TraktProgressRepository {
             if (!seed.parentMetaId.startsWith("tt") || seed.parentMetaId !in ambiguousIds) {
                 seed
             } else {
-                val tmdbSibling = showIdSiblingsMap[seed.parentMetaId]
+                val tmdbSibling = state.siblingsByKey[seed.parentMetaId]
                     ?.firstOrNull { it.startsWith("tmdb:") }
                 if (tmdbSibling == null) {
                     seed
@@ -965,7 +982,7 @@ object TraktProgressRepository {
 
         val tmdb = parsed.tmdb
         if (tmdb != null) {
-            showIdToTraktPathId["tmdb:$tmdb"]?.let { return it }
+            showProgressState.traktPathIdByKey["tmdb:$tmdb"]?.let { return it }
             runCatching {
                 TmdbService.tmdbToImdb(tmdbId = tmdb, mediaType = "series")
                     ?: TmdbService.tmdbToImdb(tmdbId = tmdb, mediaType = "movie")
@@ -1058,10 +1075,13 @@ object TraktProgressRepository {
     ) {
         val key = contentId.trim()
         if (key.isBlank()) return
-        val keysToUpdate = showIdSiblingsMap[key]
+        // Single consistent snapshot read: siblings and episodes come from the
+        // same published state, and the update republishes atomically.
+        val state = showProgressState
+        val keysToUpdate = state.siblingsByKey[key]
             ?.let { siblings -> (siblings + key).filter { it != AMBIGUOUS_ID_MARKER && !it.startsWith("trakt:") } }
             ?: listOf(key)
-        val updated = watchedShowEpisodesById.toMutableMap()
+        val updated = state.watchedEpisodesById.toMutableMap()
         var changed = false
         keysToUpdate.forEach { lookupKey ->
             val current = updated[lookupKey].orEmpty()
@@ -1073,7 +1093,7 @@ object TraktProgressRepository {
             }
         }
         if (changed) {
-            watchedShowEpisodesById = updated
+            showProgressState = state.copy(watchedEpisodesById = updated)
         }
     }
 
