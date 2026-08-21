@@ -47,12 +47,21 @@ internal object TrailerExtractionPlatform {
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
             if (cookies.isEmpty()) return
             synchronized(this) {
-                this.cookies[url.host] = this.cookies[url.host].orEmpty() + cookies
+                /* RFC 6265 semantics: a cookie is identified by name+path, so
+                 * an incoming cookie REPLACES the stored one instead of being
+                 * appended (the old append-merge accumulated stale duplicates
+                 * for the process lifetime). */
+                val retained = this.cookies[url.host].orEmpty()
+                    .filter { old -> cookies.none { it.name == old.name && it.path == old.path } }
+                this.cookies[url.host] = retained + cookies
             }
         }
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val stored = synchronized(this) { cookies[url.host].orEmpty() }
+            val now = System.currentTimeMillis()
+            val stored = synchronized(this) {
+                this.cookies[url.host].orEmpty().filter { it.expiresAt > now }
+            }
             val consent = Cookie.Builder()
                 .name("SOCS")
                 .value("CAI")
