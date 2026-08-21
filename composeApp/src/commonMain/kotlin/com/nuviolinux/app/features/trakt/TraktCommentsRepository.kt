@@ -1,6 +1,7 @@
 package com.nuviolinux.app.features.trakt
 
 import co.touchlab.kermit.Logger
+import com.nuviolinux.app.core.storage.BoundedLruCache
 import com.nuviolinux.app.features.addons.httpGetTextWithHeaders
 import com.nuviolinux.app.features.addons.httpRequestRaw
 import com.nuviolinux.app.features.details.MetaDetails
@@ -10,10 +11,14 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import nuviolinux.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val COMMENTS_SORT = "likes"
 private const val COMMENTS_LIMIT = 100
 private const val COMMENTS_CACHE_TTL_MS = 10 * 60_000L
+/** Per-key page retention: browsing deep comment threads used to accumulate
+ *  every fetched page for the process lifetime. */
+private const val COMMENTS_MAX_PAGES_PER_KEY = 10
 private val INLINE_SPOILER_REGEX = Regex(
     "(?is)\\[spoiler\\].*?\\[/spoiler\\]"
 )
@@ -32,7 +37,10 @@ object TraktCommentsRepository {
     )
 
     private val cacheMutex = Mutex()
-    private val cache = mutableMapOf<String, TimedCache>()
+    private val cache = BoundedLruCache<String, TimedCache>(
+        maxSize = 150,
+        maxAge = COMMENTS_CACHE_TTL_MS.milliseconds,
+    )
 
     suspend fun getCommentsPage(
         meta: MetaDetails,
@@ -106,8 +114,15 @@ object TraktCommentsRepository {
 
         cacheMutex.withLock {
             val cached = cache[cacheKey]
+            /* Retain only the newest pages per key so deep pagination cannot
+             * grow the entry without bound. */
+            val retainedPages = ((cached?.pages.orEmpty()) + (page to selected))
+                .entries
+                .sortedByDescending { it.key }
+                .take(COMMENTS_MAX_PAGES_PER_KEY)
+                .associate { it.key to it.value }
             cache[cacheKey] = TimedCache(
-                pages = (cached?.pages.orEmpty()) + (page to selected),
+                pages = retainedPages,
                 pageCount = pageCount,
                 itemCount = itemCount,
                 updatedAtMs = currentTimeMillis(),

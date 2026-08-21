@@ -1,6 +1,7 @@
 package com.nuviolinux.app.features.trakt
 
 import co.touchlab.kermit.Logger
+import com.nuviolinux.app.core.storage.BoundedLruCache
 import com.nuviolinux.app.features.addons.httpRequestRaw
 import com.nuviolinux.app.features.details.MetaDetails
 import com.nuviolinux.app.features.home.MetaPreview
@@ -13,6 +14,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val BASE_URL = "https://api.trakt.tv"
 private const val RELATED_LIMIT = 20
@@ -22,7 +24,13 @@ object TraktRelatedRepository {
     private val log = Logger.withTag("TraktRelated")
     private val json = Json { ignoreUnknownKeys = true }
     private val cacheMutex = Mutex()
-    private val cache = mutableMapOf<String, TimedCache>()
+    /* Bounded + age-expiring: expired entries used to linger until their exact
+     * key was re-requested; maxAge frees them on the sweep cadence instead,
+     * and LRU caps long browsing sessions. */
+    private val cache = BoundedLruCache<String, TimedCache>(
+        maxSize = 200,
+        maxAge = RELATED_CACHE_TTL_MS.milliseconds,
+    )
 
     suspend fun getRelated(
         meta: MetaDetails,

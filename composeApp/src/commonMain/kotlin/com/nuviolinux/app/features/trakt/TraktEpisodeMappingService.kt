@@ -16,6 +16,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import com.nuviolinux.app.core.storage.BoundedLruCache
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.TimeSource
 
 private const val BASE_URL = "https://api.trakt.tv"
@@ -23,7 +25,7 @@ private const val BASE_URL = "https://api.trakt.tv"
 private val NON_ALPHANUMERIC = Regex("[^a-z0-9]+")
 private val COLLAPSED_SPACES = Regex("\\s+")
 private val titleMutex = Mutex()
-private val normalizedTitleCache = mutableMapOf<String, String>()
+private val normalizedTitleCache = BoundedLruCache<String, String>(maxSize = 2_000, idleTtl = 30.minutes)
 
 /**
  * Handles episode number remapping between addon metadata (which may use multi-season
@@ -39,11 +41,13 @@ object TraktEpisodeMappingService {
     private val json = Json { ignoreUnknownKeys = true }
 
     private val cacheMutex = Mutex()
-    private val mappingCache = mutableMapOf<String, EpisodeMappingEntry>()
-    private val reverseMappingCache = mutableMapOf<String, EpisodeMappingEntry>()
-    private val addonEpisodesCache = mutableMapOf<String, List<EpisodeMappingEntry>>()
-    private val traktEpisodesCache = mutableMapOf<String, List<EpisodeMappingEntry>>()
-    // In-flight dedup: prevents multiple concurrent coroutines from fetching
+    /* Bounded + idle-expiring (30 min): previously unbounded maps that kept
+     * every resolved show for the process lifetime. Index syntax unchanged. */
+    private val CACHE_IDLE_TTL = 30.minutes
+    private val mappingCache = BoundedLruCache<String, EpisodeMappingEntry>(maxSize = 500, idleTtl = CACHE_IDLE_TTL)
+    private val reverseMappingCache = BoundedLruCache<String, EpisodeMappingEntry>(maxSize = 500, idleTtl = CACHE_IDLE_TTL)
+    private val addonEpisodesCache = BoundedLruCache<String, List<EpisodeMappingEntry>>(maxSize = 200, idleTtl = CACHE_IDLE_TTL)
+    private val traktEpisodesCache = BoundedLruCache<String, List<EpisodeMappingEntry>>(maxSize = 200, idleTtl = CACHE_IDLE_TTL)
     // In-flight dedup: prevents multiple concurrent coroutines from fetching
     // the same show's addon episodes simultaneously.
     private val addonEpisodesInFlight = mutableMapOf<String, CompletableDeferred<List<EpisodeMappingEntry>>>()
