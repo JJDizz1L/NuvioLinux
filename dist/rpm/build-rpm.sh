@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Builds a Fedora RPM package from the local source tree.
-# Requires: rpmbuild (Arch: `pacman -S rpm-tools`, Fedora: `dnf install rpm-build`),
+# Requires: Docker (rpmbuild runs inside a Fedora container — Arch's rpm-tools
+#           writes empty header digests that Fedora's rpm rejects, issue #15),
 #           a baseline x86-64 JDK (e.g. Temurin 25) as JAVA_HOME.
 #
 # Usage: ./dist/rpm/build-rpm.sh
@@ -12,8 +13,9 @@ cd "${ROOT_DIR}"
 
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-25-temurin}"
 
-command -v rpmbuild >/dev/null || {
-  echo "error: rpmbuild not found. Install rpm-tools (Arch) or rpm-build (Fedora)." >&2
+docker info >/dev/null 2>&1 || {
+  echo "error: Docker daemon not reachable. The RPM is built inside a Fedora" >&2
+  echo "       container (host rpmbuild produces packages Fedora rejects)." >&2
   exit 1
 }
 

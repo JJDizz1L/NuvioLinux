@@ -441,14 +441,23 @@ if (isLinuxHost) {
     }
 
     val rpmOutputDir = layout.buildDirectory.dir("compose/binaries/main-release/rpm")
+    // rpmbuild must run inside a Fedora container: Arch's rpm-tools writes
+    // empty header digests (hash-of-empty-string) that Fedora's rpm rejects at
+    // install time ("Header SHA3-256 digest: BAD", issue #15). The container's
+    // `rpm -K` gate fails the task if digests don't verify.
+    val rpmContainerImage = "nuvio-fedora-rpmbuild"
+    val hostUid = providers.exec { commandLine("id", "-u") }.standardOutput.asText.get().trim()
+    val hostGid = providers.exec { commandLine("id", "-g") }.standardOutput.asText.get().trim()
     val packageReleaseRpm = tasks.register<Exec>("packageReleaseRpm") {
         group = "distribution"
         description = "Builds a Fedora RPM (Requires: mpv) with desktop integration."
-        notCompatibleWithConfigurationCache("Invokes rpmbuild for RPM packaging.")
+        notCompatibleWithConfigurationCache("Invokes docker/rpmbuild for RPM packaging.")
         dependsOn("createReleaseDistributable", buildLinuxPlayerBridge)
         inputs.dir(layout.buildDirectory.dir("compose/binaries/main-release/app"))
         inputs.dir(desktopAssetsDir)
         inputs.file(rootProject.file("dist/rpm/nuvio-linux.spec"))
+        inputs.file(rootProject.file("dist/rpm/docker/Dockerfile"))
+        inputs.file(rootProject.file("dist/rpm/docker/build-inside.sh"))
         outputs.dir(rpmOutputDir)
         val stagingDir = layout.buildDirectory.dir("native/rpm-staging").get().asFile
         val topDir = layout.buildDirectory.dir("native/rpmbuild").get().asFile
@@ -476,20 +485,33 @@ if (isLinuxHost) {
                 projectDir,
             )
             outDir.mkdirs()
+            // Build the Fedora rpmbuild image once (reused across builds/CI).
+            val existingImage = runCommand(
+                listOf("docker", "images", "-q", rpmContainerImage),
+                projectDir,
+            ).trim()
+            if (existingImage.isEmpty()) {
+                logger.lifecycle("Building ${rpmContainerImage} image (one-time)...")
+                runCommand(
+                    listOf(
+                        "docker", "build", "-t", rpmContainerImage,
+                        rootProject.file("dist/rpm/docker").absolutePath,
+                    ),
+                    projectDir,
+                )
+            }
         }
         commandLine(
-            "rpmbuild",
-            "-bb",
-            "--define", "_topdir ${topDir.absolutePath}",
-            "--define", "_sourcedir ${topDir.absolutePath}/SOURCES",
-            "--define", "_specdir ${topDir.absolutePath}/SPECS",
-            "--define", "_builddir ${topDir.absolutePath}/BUILD",
-            "--define", "_buildrootdir ${topDir.absolutePath}/BUILDROOT",
-            "--define", "_rpmdir ${topDir.absolutePath}/RPMS",
-            "--define", "_srcrpmdir ${topDir.absolutePath}/SRPMS",
-             "--define", "appversion ${desktopRpmReleaseVersion}",
-             "--define", "apprelease ${desktopPackageRelease}",
-            rootProject.file("dist/rpm/nuvio-linux.spec").absolutePath,
+            "docker", "run", "--rm",
+            "-u", "${hostUid}:${hostGid}",
+            "-e", "HOME=/tmp",
+            "-e", "APPVERSION=${desktopRpmReleaseVersion}",
+            "-e", "APPRELEASE=${desktopPackageRelease}",
+            "-v", "${topDir}:/rpmbuild",
+            "-v", rootProject.file("dist/rpm/docker/build-inside.sh").absolutePath + ":/build-inside.sh:ro",
+            "-v", rootProject.file("dist/rpm/nuvio-linux.spec").absolutePath + ":/spec:ro",
+            rpmContainerImage,
+            "bash", "/build-inside.sh",
         )
         doLast {
             val rpmFile = topDir.resolve("RPMS/x86_64")
@@ -537,7 +559,7 @@ if (isLinuxHost) {
     }
 }
 
-fun runCommand(command: List<String>, workingDir: File) {
+fun runCommand(command: List<String>, workingDir: File): String {
     val process = ProcessBuilder(command)
         .directory(workingDir)
         .redirectErrorStream(true)
@@ -547,6 +569,7 @@ fun runCommand(command: List<String>, workingDir: File) {
     if (exitCode != 0) {
         error("Command failed (exit $exitCode): ${command.joinToString(" ")}\n$output")
     }
+    return output
 }
 
 tasks.withType<KotlinCompilationTask<*>>().configureEach {
