@@ -1,6 +1,7 @@
 package com.nuviolinux.app.features.tmdb
 
 import co.touchlab.kermit.Logger
+import com.nuviolinux.app.core.storage.BoundedLruCache
 import com.nuviolinux.app.features.addons.httpGetText
 import com.nuviolinux.app.features.details.MetaCompany
 import com.nuviolinux.app.features.details.MetaDetails
@@ -20,6 +21,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlin.time.Duration.Companion.minutes
 import nuviolinux.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.getString
 
@@ -27,15 +29,21 @@ object TmdbMetadataService {
     private val log = Logger.withTag("TmdbMetadata")
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val enrichmentCache = mutableMapOf<String, TmdbEnrichment>()
-    private val episodeCache = mutableMapOf<String, Map<Pair<Int, Int>, TmdbEpisodeEnrichment>>()
-    private val moreLikeThisCache = mutableMapOf<String, List<MetaPreview>>()
-    private val collectionCache = mutableMapOf<String, Pair<String?, List<MetaPreview>>>()
-    private val trailerCache = mutableMapOf<String, List<MetaTrailer>>()
-    private val personCache = mutableMapOf<String, PersonDetail>()
-    private val entityBrowseCache = mutableMapOf<String, TmdbEntityBrowseData>()
-    private val entityHeaderCache = mutableMapOf<String, TmdbEntityHeader>()
-    private val entityRailCache = mutableMapOf<String, List<MetaPreview>>()
+    /* Metadata caches are bounded and idle-expiring (30 min untouched ->
+     * released; refetch on next request). Previously plain mutableMaps that
+     * grew with every browsed title/person for the lifetime of the process.
+     * Index syntax is unchanged: BoundedLruCache has operator get/set. */
+    private val METADATA_IDLE_TTL = 30.minutes
+
+    private val enrichmentCache = BoundedLruCache<String, TmdbEnrichment>(maxSize = 300, idleTtl = METADATA_IDLE_TTL)
+    private val episodeCache = BoundedLruCache<String, Map<Pair<Int, Int>, TmdbEpisodeEnrichment>>(maxSize = 200, idleTtl = METADATA_IDLE_TTL)
+    private val moreLikeThisCache = BoundedLruCache<String, List<MetaPreview>>(maxSize = 200, idleTtl = METADATA_IDLE_TTL)
+    private val collectionCache = BoundedLruCache<String, Pair<String?, List<MetaPreview>>>(maxSize = 150, idleTtl = METADATA_IDLE_TTL)
+    private val trailerCache = BoundedLruCache<String, List<MetaTrailer>>(maxSize = 200, idleTtl = METADATA_IDLE_TTL)
+    private val personCache = BoundedLruCache<String, PersonDetail>(maxSize = 150, idleTtl = METADATA_IDLE_TTL)
+    private val entityBrowseCache = BoundedLruCache<String, TmdbEntityBrowseData>(maxSize = 100, idleTtl = METADATA_IDLE_TTL)
+    private val entityHeaderCache = BoundedLruCache<String, TmdbEntityHeader>(maxSize = 100, idleTtl = METADATA_IDLE_TTL)
+    private val entityRailCache = BoundedLruCache<String, List<MetaPreview>>(maxSize = 150, idleTtl = METADATA_IDLE_TTL)
 
     suspend fun fetchPersonDetail(
         personId: Int,
