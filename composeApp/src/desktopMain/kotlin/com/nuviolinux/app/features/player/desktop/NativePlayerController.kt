@@ -34,6 +34,14 @@ internal class NativePlayerController(
     @Volatile
     private var handle: Long = 0L
 
+    /**
+     * Set before teardown begins so the frame pump stops entering JNI against a
+     * player that dispose is tearing down. Reset on [attach] because the same
+     * controller instance is reused when the source changes mid-session.
+     */
+    @Volatile
+    private var disposed = false
+
     /** Native teardown of the previous player, if one is still running. */
     @Volatile
     private var disposeInFlight: Thread? = null
@@ -82,6 +90,9 @@ internal class NativePlayerController(
         }
         log.d { "attachPending — disposing previous handle" }
         disposePlayerHandle()
+        /* Previous teardown (if any) is now tracked; the bridge-side lifecycle
+         * guard makes any residual in-flight call safe. Allow the pump again. */
+        disposed = false
         val teardown = disposeInFlight
         if (teardown == null || !teardown.isAlive) {
             log.d { "attachPending — no teardown in flight, calling createPlayer directly" }
@@ -252,6 +263,7 @@ internal class NativePlayerController(
 
     /** Renders the latest video frame into [buffer] (RGB0, stride = width * 4). */
     fun renderFrame(width: Int, height: Int, buffer: java.nio.ByteBuffer): Boolean {
+        if (disposed) return false
         val current = handle
         if (current == 0L) return false
         return runCatching { NativePlayerBridge.renderFrame(current, width, height, buffer) }
@@ -275,8 +287,9 @@ internal class NativePlayerController(
 
     private fun disposePlayerHandle() {
         val current = handle
-        handle = 0L
         if (current == 0L) return
+        disposed = true
+        handle = 0L
         // Native shutdown blocks: it joins the player's render/event threads. Tear
         // down off the calling thread and track it so the next attach can wait for
         // it rather than racing it.

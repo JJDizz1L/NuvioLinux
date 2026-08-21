@@ -1592,6 +1592,16 @@ struct MpvPlayer {
      * loaded, silently starting playback from 0. */
     std::atomic<int64_t> pendingInitialPositionMs;
 
+    /* Lifecycle guard for JNI entry points. Every JNI call that dereferences
+     * `this` registers itself via PlayerUse; dispose() marks disposeStarted
+     * and waits for the count to drain before destroy()+delete. Without this,
+     * a caller blocked inside a long renderFrame wait can touch freed memory
+     * when an async teardown deletes the player under it. */
+    std::mutex    lifecycleMutex;
+    std::condition_variable lifecycleCv;
+    int           activeJniCalls = 0;
+    bool          disposeStarted = false;
+
     MpvPlayer() : mpv(nullptr), running(false),
                   renderCtx(nullptr), framePending(false),
                   cachedDuration(0), cachedPosition(0), cachedBufferedPosition(0),
@@ -2348,6 +2358,31 @@ static MpvPlayer* get_player(jlong handle) {
     return reinterpret_cast<MpvPlayer*>(static_cast<uintptr_t>(handle));
 }
 
+/* RAII registration for JNI calls that dereference a MpvPlayer. Fails closed
+ * (ok=false) once dispose() has begun, so no new call can enter teardown;
+ * dispose() in turn waits for live registrations to drain before freeing. */
+struct PlayerUse {
+    MpvPlayer *player;
+    bool ok;
+    explicit PlayerUse(MpvPlayer *p) : player(p), ok(false) {
+        if (!p) return;
+        std::lock_guard<std::mutex> lock(p->lifecycleMutex);
+        if (p->disposeStarted) return;
+        p->activeJniCalls++;
+        ok = true;
+    }
+    ~PlayerUse() {
+        if (!ok) return;
+        {
+            std::lock_guard<std::mutex> lock(player->lifecycleMutex);
+            player->activeJniCalls--;
+        }
+        player->lifecycleCv.notify_all();
+    }
+    PlayerUse(const PlayerUse&) = delete;
+    PlayerUse& operator=(const PlayerUse&) = delete;
+};
+
 static void throw_jni_error(JNIEnv *env, const char *msg) {
     jclass exClass = env->FindClass("java/lang/RuntimeException");
     if (exClass) {
@@ -2447,6 +2482,26 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+
+    /* Close the door on new JNI calls, then wait for in-flight ones (a
+     * renderFrame can legally block for up to its 2 s wait timeout) to
+     * drain before freeing anything. */
+    {
+        std::unique_lock<std::mutex> lock(player->lifecycleMutex);
+        player->disposeStarted = true;
+        bool drained = player->lifecycleCv.wait_for(lock, std::chrono::seconds(5),
+            [&] { return player->activeJniCalls == 0; });
+        if (!drained) {
+            /* A caller is still inside this player past the wait budget.
+             * Deleting now would be a guaranteed use-after-free; leaking one
+             * player object is strictly safer. This should never happen —
+             * renderFrame's own wait caps at 2 s — but log loudly if it does. */
+            LOG("dispose: %d JNI call(s) still active after 5s; leaking player instead of freeing",
+                player->activeJniCalls);
+            return;
+        }
+    }
+
     player->destroy();
     delete player;
 }
@@ -2464,6 +2519,8 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     MpvPlayer *player = get_player(handle);
     if (!player || !player->renderCtx) return JNI_FALSE;
     if (width <= 0 || height <= 0) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
 
 
 
@@ -2501,6 +2558,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, paused]() {
         if (player->mpv) {
             p_mpv_set_property_string(player->mpv, "pause", paused ? "yes" : "no");
@@ -2513,6 +2572,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, positionMs]() {
         if (!player->mpv) return;
         char seekStr[32];
@@ -2527,6 +2588,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, offsetMs]() {
         if (!player->mpv) return;
         char seekStr[32];
@@ -2541,6 +2604,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->cachedSpeed = speed;
     player->enqueueCommand([player, speed]() {
         if (!player->mpv) return;
@@ -2557,6 +2622,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, delta]() {
         if (!player->mpv) return;
         double vol = player->cachedVolume.load();
@@ -2574,6 +2641,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->cachedVolume = level * 100.0f;
     player->enqueueCommand([player, level]() {
         if (!player->mpv) return;
@@ -2588,6 +2657,8 @@ JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativeP
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return 0.0f;
+    PlayerUse use(player);
+    if (!use.ok) return 0.0f;
     return (jfloat)(player->cachedVolume.load() / 100.0);
 }
 
@@ -2596,6 +2667,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, mode]() {
         if (!player->mpv) return;
         switch (mode) {
@@ -2629,6 +2702,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
     return (jlong)(player->cachedDuration * 1000.0);
 }
 
@@ -2637,6 +2712,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
     double pos = player->cachedPosition;
     return pos < 0 ? 0 : (jlong)(pos * 1000.0);
 }
@@ -2646,6 +2723,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
     return (jlong)(player->cachedBufferedPosition * 1000.0);
 }
 
@@ -2654,6 +2733,8 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
     return player->cachedPausedForCache ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -2662,6 +2743,8 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
     return player->cachedEnded ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -2670,6 +2753,8 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return JNI_TRUE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_TRUE;
     return player->cachedPaused ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -2678,6 +2763,8 @@ JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativeP
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return 1.0f;
+    PlayerUse use(player);
+    if (!use.ok) return 1.0f;
     return (jfloat)player->cachedSpeed.load();
 }
 
@@ -2686,6 +2773,8 @@ JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_Native
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return env->NewStringUTF("[]");
+    PlayerUse use(player);
+    if (!use.ok) return env->NewStringUTF("[]");
     std::lock_guard<std::mutex> _l(player->mutex);
     return env->NewStringUTF(player->cachedAudioTracksJson.c_str());
 }
@@ -2695,6 +2784,8 @@ JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_Native
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return env->NewStringUTF("[]");
+    PlayerUse use(player);
+    if (!use.ok) return env->NewStringUTF("[]");
     std::lock_guard<std::mutex> _l(player->mutex);
     return env->NewStringUTF(player->cachedSubtitleTracksJson.c_str());
 }
@@ -2704,6 +2795,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, trackId]() {
         if (!player->mpv) return;
         char idStr[16];
@@ -2717,6 +2810,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, trackId]() {
         if (!player->mpv) return;
         char idStr[16];
@@ -2735,6 +2830,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     const char *urlChars = env->GetStringUTFChars(url, nullptr);
     if (!urlChars) return;
     std::string urlCopy(urlChars);
@@ -2751,6 +2848,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player]() {
         if (!player->mpv) return;
         const char *cmd[] = {"sub-remove", nullptr};
@@ -2763,6 +2862,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, trackId]() {
         if (!player->mpv) return;
         const char *cmd[] = {"sub-remove", nullptr};
@@ -2783,6 +2884,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     player->enqueueCommand([player, delayMs]() {
         if (!player->mpv) return;
         char delayStr[16];
@@ -2798,6 +2901,8 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 {
     MpvPlayer *player = get_player(handle);
     if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
     const char *c_textColor = env->GetStringUTFChars(textColor, nullptr);
     const char *c_bgColor = env->GetStringUTFChars(backgroundColor, nullptr);
     const char *c_outlineColor = env->GetStringUTFChars(outlineColor, nullptr);
