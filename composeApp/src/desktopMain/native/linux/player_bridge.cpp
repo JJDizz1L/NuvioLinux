@@ -25,6 +25,7 @@ static int g_debug = -1; /* -1 = uninitialized */
 #include <mutex>
 #include <atomic>
 #include <thread>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 #include <cstdio>
@@ -393,6 +394,8 @@ static int load_libmpv() {
 #define GL_TEXTURE_WRAP_T             0x2803
 #define GL_COLOR_BUFFER_BIT           0x4000
 #define GL_VENDOR                     0x1F00
+#define GL_PIXEL_PACK_BUFFER          0x88EB
+#define GL_STREAM_READ                0x88E0
 
 typedef void* (*egl_get_proc_address_t)(const char*);
 typedef void* (*egl_get_platform_display_t)(unsigned int, void*, const int*);
@@ -443,6 +446,11 @@ typedef void (*gl_read_pixels_t)(int, int, int, int, unsigned int, unsigned int,
 typedef void (*gl_clear_color_t)(float, float, float, float);
 typedef void (*gl_clear_t)(unsigned int);
 typedef const unsigned char* (*gl_get_string_t)(unsigned int);
+typedef void  (*gl_gen_buffers_t)(int, unsigned int*);
+typedef void  (*gl_delete_buffers_t)(int, const unsigned int*);
+typedef void  (*gl_bind_buffer_t)(unsigned int, unsigned int);
+typedef void  (*gl_buffer_data_t)(unsigned int, long long, const void*, unsigned int);
+typedef void  (*gl_get_buffer_sub_data_t)(unsigned int, long long, long long, void*);
 
 struct GlRenderer {
     /* 0 = not initialized, 1 = EGL, 2 = GLX. Determines which cleanup path
@@ -504,6 +512,26 @@ struct GlRenderer {
     gl_clear_color_t glClearColor = nullptr;
     gl_clear_t glClear = nullptr;
     gl_get_string_t glGetString = nullptr;
+
+    /* Async readback ring (pixel buffer objects). Reading into a PBO only
+     * ISSUES the GPU→CPU transfer; the PREVIOUS frame's PBO is copied out one
+     * request later, when its DMA has long finished. A direct glReadPixels
+     * instead blocks the pipeline every frame — the difference between ~17 fps
+     * and full cadence on weak iGPUs (issue #13, UHD 620 @ 1080p24). */
+    static constexpr int kPboCount = 3;
+    unsigned int pbos[kPboCount] = {0, 0, 0};
+    int pboIndex = 0;          /* next slot to fill */
+    bool pboHasPrev = false;   /* a completed transfer is waiting for copy-out */
+    bool pboActive = false;    /* ring allocated for pboWidth/pboHeight */
+    int pboWidth = 0;
+    int pboHeight = 0;
+
+    gl_gen_buffers_t glGenBuffers = nullptr;
+    gl_delete_buffers_t glDeleteBuffers = nullptr;
+    gl_bind_buffer_t glBindBuffer = nullptr;
+    gl_buffer_data_t glBufferData = nullptr;
+    gl_get_buffer_sub_data_t glGetBufferSubData = nullptr;
+
     /* True when GL_VENDOR is NVIDIA: the DRM render node is then withheld
      * from mpv (see render context creation) so the drmprime-overlay hwdec,
      * which requires a DRM atomic/modeset context, can never be probed. */
@@ -1175,6 +1203,18 @@ static bool gl_init(GlRenderer *gl) {
         return false;
     }
 
+    /* Optional async-readback entry points; if any is missing the render loop
+     * falls back to a synchronous glReadPixels. */
+    gl->glGenBuffers = (gl_gen_buffers_t)gl_resolve(gl, "glGenBuffers");
+    gl->glDeleteBuffers = (gl_delete_buffers_t)gl_resolve(gl, "glDeleteBuffers");
+    gl->glBindBuffer = (gl_bind_buffer_t)gl_resolve(gl, "glBindBuffer");
+    gl->glBufferData = (gl_buffer_data_t)gl_resolve(gl, "glBufferData");
+    gl->glGetBufferSubData = (gl_get_buffer_sub_data_t)gl_resolve(gl, "glGetBufferSubData");
+    if (!gl->glGenBuffers || !gl->glDeleteBuffers || !gl->glBindBuffer ||
+        !gl->glBufferData || !gl->glGetBufferSubData) {
+        DBG("async readback unavailable: missing buffer entry points");
+    }
+
     gl->glGenFramebuffers(1, &gl->fbo);
     gl->glBindFramebuffer(GL_FRAMEBUFFER, gl->fbo);
     gl->glGenTextures(1, &gl->texture);
@@ -1218,7 +1258,79 @@ static bool gl_ensure_size(GlRenderer *gl, int width, int height) {
     return true;
 }
 
+/* ---- Async pixel readback (PBO ring) ---- */
+
+static void gl_pbo_destroy(GlRenderer *gl) {
+    if (gl->pbos[0] && gl->glDeleteBuffers) {
+        gl->glDeleteBuffers(GlRenderer::kPboCount, gl->pbos);
+    }
+    for (int i = 0; i < GlRenderer::kPboCount; i++) gl->pbos[i] = 0;
+    gl->pboIndex = 0;
+    gl->pboHasPrev = false;
+    gl->pboActive = false;
+    gl->pboWidth = 0;
+    gl->pboHeight = 0;
+}
+
+/* Ensures the ring is allocated for w*h*4 bytes. Returns false when async
+ * readback cannot be used (missing entry points or allocation failure), so
+ * the caller falls back to a synchronous glReadPixels for this frame. */
+static bool gl_pbo_ensure(GlRenderer *gl, int w, int h) {
+    if (!gl->glGenBuffers || !gl->glDeleteBuffers || !gl->glBindBuffer ||
+        !gl->glBufferData || !gl->glGetBufferSubData) {
+        return false;
+    }
+    if (gl->pboActive && gl->pboWidth == w && gl->pboHeight == h) return true;
+    gl_pbo_destroy(gl);
+    for (int i = 0; i < GlRenderer::kPboCount; i++) {
+        gl->glGenBuffers(1, &gl->pbos[i]);
+        gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[i]);
+        gl->glBufferData(GL_PIXEL_PACK_BUFFER, (long long)w * h * 4, nullptr, GL_STREAM_READ);
+    }
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    if (!gl->pbos[0]) {
+        DBG("async readback unavailable: PBO allocation failed");
+        return false;
+    }
+    gl->pboWidth = w;
+    gl->pboHeight = h;
+    gl->pboActive = true;
+    DBG("async readback ring ready (%dx%d)", w, h);
+    return true;
+}
+
+/* Copies out the previous request's completed transfer and issues this
+ * frame's readback into the ring. glGetBufferSubData implicitly waits for the
+ * slot's DMA — issued a full frame period ago, so this is normally
+ * instantaneous. Returns false only when no completed frame exists yet (first
+ * request after create/resize); the caller then reports "no new frame" and
+ * the producer simply polls again. */
+static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
+    const long long bytes = (long long)w * h * 4;
+    bool got = false;
+    if (gl->pboHasPrev) {
+        int outSlot = (gl->pboIndex + GlRenderer::kPboCount - 1) % GlRenderer::kPboCount;
+        gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[outSlot]);
+        auto t0 = std::chrono::steady_clock::now();
+        gl->glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, bytes, pixels);
+        double ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count();
+        if (ms > 4.0) DBG("readback waited %.1fms for GPU transfer", ms);
+        gl->pboHasPrev = false;
+        got = true;
+    }
+    /* Issue this frame's transfer into the next slot — never the one just
+     * read out (ring size >= 2). */
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[gl->pboIndex]);
+    gl->glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, reinterpret_cast<void*>(0));
+    gl->pboIndex = (gl->pboIndex + 1) % GlRenderer::kPboCount;
+    gl->pboHasPrev = true;
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    return got;
+}
+
 static void gl_destroy_textures(GlRenderer *gl) {
+    gl_pbo_destroy(gl);
     if (gl->glDeleteFramebuffers && gl->fbo) {
         gl->glDeleteFramebuffers(1, &gl->fbo);
         gl->fbo = 0;
@@ -1661,8 +1773,14 @@ struct MpvPlayer {
                          * rendering (its GL state-restore contract), so re-bind
                          * our FBO before reading the pixels back. */
                         gl.glBindFramebuffer(GL_FRAMEBUFFER, gl.fbo);
-                        gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-                        result = true;
+                        if (gl_pbo_ensure(&gl, w, h)) {
+                            /* Async: issue this frame's transfer, deliver the
+                             * previous request's completed one. */
+                            result = gl_readback_async(&gl, w, h, pixels);
+                        } else {
+                            gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                            result = true;
+                        }
                         /* Reset failure counter on success */
                         nvdecFailCount.store(0);
                     } else {
