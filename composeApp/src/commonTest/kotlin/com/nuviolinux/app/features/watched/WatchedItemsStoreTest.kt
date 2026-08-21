@@ -40,9 +40,11 @@ class WatchedItemsStoreTest {
                     repeat(500) {
                         store.read { nuvioItems, providerItems, dirtyNuvioKeys, dirtyProviderKeys ->
                             val nuvioKeys = nuvioItems.keys.toSet()
+                            /* .orEmpty(): a reader scheduled before the first
+                             * write legitimately observes absent provider keys. */
                             assertEquals(nuvioKeys, providerItems[TrackingProviderId.TRAKT].orEmpty().keys)
                             assertEquals(nuvioKeys, dirtyNuvioKeys)
-                            assertEquals(nuvioKeys, dirtyProviderKeys[TrackingProviderId.TRAKT])
+                            assertEquals(nuvioKeys, dirtyProviderKeys[TrackingProviderId.TRAKT].orEmpty())
                         }
                     }
                 }
