@@ -335,32 +335,29 @@ class InAppYouTubeExtractor {
             }
         }
 
-        val bestProgressive = sortCandidates(progressive).firstOrNull()
+        /* Ordered lists (preferred client first, then score) so
+         * buildPlaybackSource can fall back down the chain when a URL fails
+         * its reachability probe instead of having exactly one shot. */
         val supportedVideo = adaptiveVideo.filter(TrailerExtractionPlatform::supportsSeparateVideo)
         val supportedAudio = adaptiveAudio.filter(TrailerExtractionPlatform::supportsSeparateAudio)
-        val bestVideo = pickBestForClient(
-            supportedVideo,
-            PREFERRED_SEPARATE_CLIENT,
-        )
-        val bestAudio = pickBestForClient(
-            supportedAudio,
-            PREFERRED_SEPARATE_CLIENT,
-        )
+        val orderedProgressive = sortCandidates(progressive)
+        val orderedVideo = orderSeparate(supportedVideo)
+        val orderedAudio = orderSeparate(supportedAudio)
         TrailerExtractionPlatform.diagnostic(
             "candidates progressive=${progressive.size} adaptiveVideo=${adaptiveVideo.size} " +
                 "adaptiveAudio=${adaptiveAudio.size} hls=${manifestUrls.size} " +
                 "supportedVideo=${supportedVideo.size} supportedAudio=${supportedAudio.size}",
         )
-        TrailerExtractionPlatform.diagnostic("best video=${bestVideo.diagnosticSummary()}")
-        TrailerExtractionPlatform.diagnostic("best audio=${bestAudio.diagnosticSummary()}")
-        TrailerExtractionPlatform.diagnostic("best progressive=${bestProgressive.diagnosticSummary()}")
+        TrailerExtractionPlatform.diagnostic("best video=${orderedVideo.firstOrNull().diagnosticSummary()}")
+        TrailerExtractionPlatform.diagnostic("best audio=${orderedAudio.firstOrNull().diagnosticSummary()}")
+        TrailerExtractionPlatform.diagnostic("best progressive=${orderedProgressive.firstOrNull().diagnosticSummary()}")
         TrailerExtractionPlatform.diagnostic("best hls=${bestManifest.diagnosticSummary()}")
 
         return TrailerExtractionPlatform.buildPlaybackSource(
             bestManifest = bestManifest,
-            bestProgressive = bestProgressive,
-            bestVideo = bestVideo,
-            bestAudio = bestAudio,
+            progressiveCandidates = orderedProgressive,
+            videoCandidates = orderedVideo,
+            audioCandidates = orderedAudio,
         )
     }
 
@@ -609,12 +606,13 @@ class InAppYouTubeExtractor {
         )
     }
 
-    private fun pickBestForClient(items: List<StreamCandidate>, clientKey: String): StreamCandidate? {
-        val sameClient = items.filter { it.client == clientKey }
-        if (sameClient.isNotEmpty()) {
-            return sortCandidates(sameClient).firstOrNull()
-        }
-        return sortCandidates(items).firstOrNull()
+    /* Preferred extraction client first (visionos yields the cleanest
+     * googlevideo URLs), then global score — gives the playback-source builder
+     * an ordered fallback chain per stream category. */
+    private fun orderSeparate(items: List<StreamCandidate>): List<StreamCandidate> {
+        val preferred = items.filter { it.client == PREFERRED_SEPARATE_CLIENT }
+        val rest = items.filter { it.client != PREFERRED_SEPARATE_CLIENT }
+        return sortCandidates(preferred) + sortCandidates(rest)
     }
 
     private fun containerPreference(ext: String): Int {
