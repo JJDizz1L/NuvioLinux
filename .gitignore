@@ -46,3 +46,6 @@ dist/arch/*.pkg.tar.zst
 release-notes.md
 
 DEADCODE.md
+
+# Code review working notes
+REVIEW-NOTES.md
