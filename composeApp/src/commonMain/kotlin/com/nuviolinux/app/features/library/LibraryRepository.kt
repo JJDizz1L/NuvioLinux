@@ -105,11 +105,21 @@ object LibraryRepository {
         TrackingProviderRegistry.ensureLoaded()
         TrackingSettingsRepository.ensureLoaded()
         TrackingProviderRegistry.libraryProviders().forEach(TrackingLibraryProvider::ensureLoaded)
+        // Bounded convergence: loadFromDisk returns false without progress when
+        // the active profile flips mid-load or decoding fails; retrying a few
+        // times rides out the flip race, but never spin hot on the caller's
+        // thread (ensureLoaded is reachable from composition paths).
+        var stalledAttempts = 0
         while (true) {
             val activeProfileId = ProfileRepository.activeProfileId
             val snapshot = localState.snapshot()
             if (snapshot.hasLoaded && snapshot.token.profileId == activeProfileId) break
-            loadFromDisk(activeProfileId)
+            if (loadFromDisk(activeProfileId)) {
+                stalledAttempts = 0
+            } else if (++stalledAttempts >= 3) {
+                log.w { "ensureLoaded: no progress after $stalledAttempts attempts (profileId=$activeProfileId); continuing unloaded" }
+                break
+            }
         }
         TrackingProviderRegistry.connectedLibraryProviders().forEach(TrackingLibraryProvider::prepare)
         activeLibraryProvider()?.let(::refreshLibraryProviderAsync)

@@ -997,10 +997,11 @@ private fun MainAppContent(
             AddonRepository.initialize()
             AddonRepository.uiState
         }.collectAsStateWithLifecycle()
-        val libraryUiState by remember {
-            LibraryRepository.ensureLoaded()
-            LibraryRepository.uiState
-        }.collectAsStateWithLifecycle()
+        /* No ensureLoaded() here: the Loading gate already awaits
+         * warmProfileBoundRepositories() (which runs it on Dispatchers.Default)
+         * before this screen composes, and profile switches re-warm. Calling it
+         * synchronously in composition would run disk I/O on the UI thread. */
+        val libraryUiState by LibraryRepository.uiState.collectAsStateWithLifecycle()
         val authState by AuthRepository.state.collectAsStateWithLifecycle()
         val openPosterActions: (PosterActionTarget) -> Unit = { target ->
             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
