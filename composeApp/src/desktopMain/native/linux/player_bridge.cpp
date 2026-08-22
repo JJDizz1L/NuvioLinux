@@ -1476,6 +1476,27 @@ static int    g_rbSkipCount = 0;
 static std::chrono::steady_clock::time_point g_rbStatsWindow =
     std::chrono::steady_clock::now();
 
+/* Readback strategy, selected once via NUVIO_READBACK (diagnostic knob):
+ *   fence  (default) — fence-guarded non-blocking ring copy-out
+ *   legacy           — pre-c2c5cf12 behavior: unconditional blocking
+ *                      glGetBufferSubData of the previous slot every frame
+ *   sync             — no PBO ring at all: synchronous glReadPixels straight
+ *                      into the Kotlin buffer
+ * Exists to bisect a user-reported presentation-jitter regression whose
+ * measurements all look healthy (cadence locked, copies ~2.7ms avg, 0 skips)
+ * — the strategy itself becomes the variable. */
+static int readbackMode() {
+    static int mode = -1;
+    if (mode < 0) {
+        const char *env = getenv("NUVIO_READBACK");
+        if (env && strcmp(env, "legacy") == 0) mode = 1;
+        else if (env && strcmp(env, "sync") == 0) mode = 2;
+        else mode = 0;
+        DBG("readback mode = %s", mode == 1 ? "legacy" : mode == 2 ? "sync" : "fence");
+    }
+    return mode;
+}
+
 /* Copies out the previous request's transfer and issues this frame's
  * readback into the ring.
  *
@@ -1493,7 +1514,11 @@ static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
     if (gl->pboHasPrev) {
         int outSlot = (gl->pboIndex + GlRenderer::kPboCount - 1) % GlRenderer::kPboCount;
         bool ready = true;
-        if (gl->glFenceSync && gl->pboFences[outSlot]) {
+        if (readbackMode() == 1) {
+            /* legacy: unconditional blocking copy — the implicit sync that
+             * existed before the fence change. */
+            ready = true;
+        } else if (gl->glFenceSync && gl->pboFences[outSlot]) {
             /* GL_SYNC_FLUSH_COMMANDS_BIT: glFenceSync does NOT imply a
              * flush, and our context otherwise idles between requests —
              * without this bit the fence would never signal (the old
@@ -2040,7 +2065,14 @@ struct MpvPlayer {
                          * rendering (its GL state-restore contract), so re-bind
                          * our FBO before reading the pixels back. */
                         gl.glBindFramebuffer(GL_FRAMEBUFFER, gl.fbo);
-                        if (gl_pbo_ensure(&gl, w, h)) {
+                        if (readbackMode() == 2) {
+                            /* sync: straight read into the Kotlin buffer —
+                             * blocks the GL pipeline every frame (the issue
+                             * #13 behavior) but is the maximal-simplicity
+                             * reference for jitter bisection. */
+                            gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                            result = true;
+                        } else if (gl_pbo_ensure(&gl, w, h)) {
                             /* Async: issue this frame's transfer, deliver the
                              * previous request's completed one. */
                             result = gl_readback_async(&gl, w, h, pixels);
