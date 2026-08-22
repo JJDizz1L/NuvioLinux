@@ -1,5 +1,5 @@
-name: Desktop bug report
-description: Report a reproducible desktop app bug (one per issue).
+name: Bug report
+description: Report a reproducible app bug (one per issue).
 title: "[Bug]: short summary here"
 labels:
   - bug
@@ -7,19 +7,16 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a desktop bug.
+        Thanks for testing Nuvio Linux (alpha) and taking the time to report.
 
-        If we can reproduce it, we can usually fix it. Please describe the bug in enough detail that someone else can understand what failed without watching a video or guessing from the title.
+        **Reports with data get fixed; reports without data usually can't be reproduced.** Please fill this out with real information from your system — not just a sentence describing the problem. If we can reproduce it, we can usually fix it.
+
         Please replace the default title with a short summary of the actual problem.
-
         Vague reports such as "not working", "broken", or "same issue" may be labeled `needs-info` and closed after 1 day if the missing details are not added.
-        Bug reports left open for more than 30 days may be closed as stale.
-        If the desktop app crashes or closes unexpectedly, logs are required. Crash reports without logs will be closed.
+        Reports left open for more than 30 days may be closed as stale.
 
-  - type: markdown
-    attributes:
-      value: |
-        ## Quick checks
+        > **Using a Nuvio online account and seeing login/library/sync weirdness?**
+        > **Log out and sign back in first** (Settings → Account → Account and Sync Status → Sign Out). It rebuilds credentials and re-syncs library state, and resolves most account-related reports on its own.
 
   - type: checkboxes
     id: checks
@@ -28,8 +25,8 @@ body:
       options:
         - label: I searched existing issues and this is not a duplicate.
           required: true
-        - label: I can reproduce this on the latest desktop release or latest main build.
-          required: false
+        - label: I can reproduce this on the latest release.
+          required: true
         - label: This issue is limited to a single bug (not multiple unrelated problems).
           required: true
         - label: This is not a source/stream-specific error (the issue happens regardless of which source is used).
@@ -38,53 +35,71 @@ body:
   - type: markdown
     attributes:
       value: |
-        ## Version & desktop environment
+        ## Your setup
 
   - type: input
     id: app_version
     attributes:
-      label: App version / commit
-      description: Desktop release version (e.g. 0.1.1-alpha) or commit hash. If unsure, say where you got the build from.
-      placeholder: "e.g. 0.1.1-alpha, or main@abc1234"
+      label: App version
+      description: Shown in About, or the release tag you installed.
+      placeholder: "e.g. 0.1.20-alpha-4"
     validations:
       required: true
 
   - type: dropdown
     id: install_method
     attributes:
-      label: Install method
+      label: Package format
       options:
-        - GitHub Release desktop installer/package
-        - CI build / Nightly
+        - Arch / AUR (nuvio-linux-bin)
+        - Arch / AUR (nuvio-linux-git)
+        - DEB (.deb)
+        - RPM (.rpm)
+        - AppImage
+        - Flatpak
         - Built from source
         - Other (please describe below)
     validations:
       required: true
 
   - type: dropdown
-    id: platform
+    id: gpu_vendor
     attributes:
-      label: Platform
+      label: GPU vendor
+      description: Hardware decode and rendering paths differ per vendor.
       options:
-        - Linux (desktop)
-        - Other (please describe below)
+        - AMD
+        - NVIDIA
+        - Intel (integrated)
+        - Intel (discrete Arc)
+        - Multiple GPUs (laptop hybrid — please describe below)
+        - Other / unknown
     validations:
       required: true
 
   - type: input
-    id: desktop_hardware
+    id: gpu_driver
     attributes:
-      label: Desktop hardware
-      description: "Example: custom PC CPU/GPU, ThinkPad X1, Steam Deck, etc."
-      placeholder: "e.g. AMD Ryzen 7 / Radeon RX 6800 XT"
+      label: GPU model & driver
+      description: "`nvidia-smi`, `lspci | grep -i vga`, or `glxinfo | grep renderer` output."
+      placeholder: "e.g. RTX 3060 Ti, driver 610.57.04 / RX 9070 XT, Mesa 26.2.1"
+    validations:
+      required: true
+
+  - type: input
+    id: desktop_environment
+    attributes:
+      label: Desktop environment & session type
+      description: Whether you run X11 or Wayland matters a lot for windowing/rendering bugs.
+      placeholder: "e.g. KDE Plasma 6 (Wayland) / Hyprland (Wayland) / GNOME (X11)"
     validations:
       required: true
 
   - type: input
     id: os_version
     attributes:
-      label: OS version
-      placeholder: "e.g. Arch Linux (kernel 6.10), Ubuntu 24.04, Fedora 40"
+      label: Distro & kernel
+      placeholder: "e.g. CachyOS (kernel 7.2) / Fedora 42 / Ubuntu 24.04"
     validations:
       required: true
 
@@ -96,24 +111,27 @@ body:
   - type: dropdown
     id: area
     attributes:
-      label: Area (tag)
+      label: Area
       description: Pick the closest match. It helps triage.
       options:
-        - Playback (start/stop/buffering)
+        - Playback (stutter / judder / lag / frame drops)
+        - Playback (start/stop/buffering/errors)
+        - Hardware decoding (hwdec, VA-API/NVDEC)
         - Streams / Sources (selection, loading, errors)
-        - Next Episode / Auto-play
+        - Trailer previews (hero/hover)
+        - P2P / Torrent playback
         - Watch Progress (resume, watched state, history)
         - Subtitles (download, styling, sync)
         - Audio tracks
-        - Windowing / Fullscreen
+        - Windowing / Fullscreen / Tiling WM
         - Keyboard / Mouse input
-        - Navigation
-        - UI / Layout
+        - Navigation / UI layout
         - Settings
-        - Sync (Trakt / remote)
+        - Sync (Nuvio account / Trakt / Simkl)
         - Downloads / Offline
         - Installer / Updater
-        - Platform-specific (Linux)
+        - Discord Rich Presence
+        - Crash (app closes unexpectedly)
         - Other
     validations:
       required: true
@@ -158,7 +176,7 @@ body:
     id: actual
     attributes:
       label: Actual behavior
-      placeholder: "What actually happened? Include any on-screen error text/codes and whether the app froze, crashed, ignored input, showed the wrong content, etc."
+      placeholder: "What actually happened? Include any on-screen error text/codes and whether the app froze, crashed, ignored input, showed the wrong content, stuttered, dropped frames, etc."
     validations:
       required: true
 
@@ -181,7 +199,7 @@ body:
       label: Did this work before?
       options:
         - Not sure
-        - Yes, it used to work
+        - Yes, it used to work (please name the version that worked)
         - No, it never worked
     validations:
       required: true
@@ -189,7 +207,33 @@ body:
   - type: markdown
     attributes:
       value: |
-        ## Extra context (optional)
+        ## Debug log
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug log
+      description: |
+        **Required for crashes and playback problems (stutter/lag/frame drops) — these reports cannot be diagnosed without it.**
+
+        Launch the app from a terminal with debug logging, reproduce the problem (~30 seconds for playback issues, without seeking), quit, and paste the output:
+
+        ```
+        # Native packages (Arch/deb/rpm/AppImage):
+        NUVIO_MPV_DEBUG=1 nuvio-linux > ~/nuvio-debug.log 2>&1
+
+        # Flatpak:
+        flatpak run --env=NUVIO_MPV_DEBUG=1 io.github.jjdizz1l.NuvioLinux > ~/nuvio-debug.log 2>&1
+        ```
+
+        For **crashes**, also run `coredumpctl info nuvio-linux` after the crash and include its stack trace.
+
+        The most valuable lines: `readback stats[...]`, `render cadence: ...`, `consumer stats:`, `hwdec-current = ...`, `render context created (...)`, `[gl-init] ...`.
+      render: shell
+      placeholder: |
+        Paste the debug log here
+    validations:
+      required: true
 
   - type: textarea
     id: media_details
@@ -199,23 +243,8 @@ body:
       placeholder: |
         - Content type: series/movie
         - Season/Episode: S1E2
-        - Stream/source: (addon name / source label)
-        - Video format: (if known)
-    validations:
-      required: false
-
-  - type: textarea
-    id: logs
-    attributes:
-      label: Logs (required for crash reports)
-      description: |
-        Required if the desktop app crashes or closes unexpectedly. Crash reports without logs will be closed.
-        For other bug reports, logs are optional but still helpful.
-
-        Useful logs include terminal/console output, installer logs, updater logs, or crash reports from around the time the issue occurred.
-      render: shell
-      placeholder: |
-        Paste logs here
+        - Stream/source: (addon name / source label, torrent vs direct link)
+        - Video format/resolution: (if known, e.g. HEVC 1080p24)
     validations:
       required: false
 
@@ -223,6 +252,6 @@ body:
     id: extra
     attributes:
       label: Anything else? (optional)
-      description: Screenshots/recordings, related issues, workarounds, etc.
+      description: Screenshots/screen recordings, related issues, workarounds you tried, custom mpv.conf settings.
     validations:
       required: false

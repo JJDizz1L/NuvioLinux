@@ -1,5 +1,5 @@
-name: Desktop feature request
-description: Suggest a desktop app improvement or new feature.
+name: Feature request
+description: Suggest an app improvement or new feature.
 title: "[Feature]: "
 labels:
   - enhancement
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        One desktop feature request per issue, please. The more real-world your use case is, the easier it is to evaluate.
+        One feature request per issue, please. The more real-world your use case is, the easier it is to evaluate.
 
         Feature requests are reviewed as product proposals first.
         Please do not open a pull request for a new feature, major UX change, or broad cosmetic update unless a maintainer has explicitly approved it first.
@@ -19,23 +19,25 @@ body:
   - type: dropdown
     id: area
     attributes:
-      label: Area (tag)
+      label: Area
       options:
-        - Playback
+        - Playback (rendering, sync, performance)
+        - Hardware decoding (hwdec, VA-API/NVDEC)
         - Streams / Sources
-        - Next Episode / Auto-play
+        - Trailer previews (hero/hover)
+        - P2P / Torrent playback
         - Watch Progress
         - Subtitles
         - Audio
-        - Windowing / Fullscreen
+        - Windowing / Fullscreen / Tiling WM
         - Keyboard / Mouse input
-        - Navigation
-        - UI / Layout
+        - Navigation / UI layout
         - Settings
-        - Sync (Trakt / remote)
+        - Sync (Nuvio account / Trakt / Simkl)
         - Downloads / Offline
         - Installer / Updater
-        - Platform-specific (Linux)
+        - Discord Rich Presence
+        - Packaging (Arch/deb/rpm/AppImage/Flatpak)
         - Other
     validations:
       required: true
