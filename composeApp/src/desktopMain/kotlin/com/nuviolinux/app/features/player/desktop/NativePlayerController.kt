@@ -45,6 +45,9 @@ internal class NativePlayerController(
     /** Native teardown of the previous player, if one is still running. */
     @Volatile
     private var disposeInFlight: Thread? = null
+    /** Written on the UI thread (attach/dispose), identity-checked from
+     *  create/attach background threads — needs safe cross-thread visibility. */
+    @Volatile
     private var pendingSource: PendingSource? = null
     private var controlsState = PlayerControlsState()
     private var pendingSubtitleDelayMs: Int? = null
