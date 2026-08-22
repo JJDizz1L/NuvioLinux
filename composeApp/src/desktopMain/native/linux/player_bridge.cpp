@@ -1476,26 +1476,38 @@ static int    g_rbSkipCount = 0;
 static std::chrono::steady_clock::time_point g_rbStatsWindow =
     std::chrono::steady_clock::now();
 
-/* Readback strategy, selected once via NUVIO_READBACK (diagnostic knob):
- *   fence  (default) — fence-guarded non-blocking ring copy-out
- *   legacy           — pre-c2c5cf12 behavior: unconditional blocking
- *                      glGetBufferSubData of the previous slot every frame
- *   sync             — no PBO ring at all: synchronous glReadPixels straight
- *                      into the Kotlin buffer
- * Exists to bisect a user-reported presentation-jitter regression whose
- * measurements all look healthy (cadence locked, copies ~2.7ms avg, 0 skips)
- * — the strategy itself becomes the variable. */
+/* Readback strategy selection.
+ *   auto (default) — start SYNCHRONOUS (deterministic presentation: fixed
+ *                    per-frame cost, no DMA race). Escalate ONCE to the
+ *                    blocking PBO ring if sync demonstrably cannot keep pace
+ *                    (slow iGPU, issue #13) — measured by sustained publish
+ *                    deficit vs incoming-frame pressure or oversized copies.
+ *   sync           — forced synchronous glReadPixels.
+ *   legacy         — PBO ring, unconditional blocking glGetBufferSubData.
+ *   fence          — PBO ring, fence-guarded skip-on-not-ready. BROKEN on
+ *                    Mesa/RDMA4 (1fps + GL_INVALID_VALUE on texture create);
+ *                    kept only for triage. */
+static int g_rbMode = -1;
 static int readbackMode() {
-    static int mode = -1;
-    if (mode < 0) {
-        const char *env = getenv("NUVIO_READBACK");
-        if (env && strcmp(env, "legacy") == 0) mode = 1;
-        else if (env && strcmp(env, "sync") == 0) mode = 2;
-        else mode = 0;
-        DBG("readback mode = %s", mode == 1 ? "legacy" : mode == 2 ? "sync" : "fence");
-    }
-    return mode;
+    return g_rbMode;
 }
+static void init_readback_mode() {
+    const char *env = getenv("NUVIO_READBACK");
+    int m = 0; /* auto */
+    if (env && strcmp(env, "sync") == 0) m = 2;
+    else if (env && strcmp(env, "legacy") == 0) m = 1;
+    else if (env && strcmp(env, "fence") == 0) m = 3;
+    g_rbMode = m;
+    DBG("readback mode = %s", m == 0 ? "auto(starts sync)" : m == 1 ? "legacy" :
+        m == 2 ? "sync" : "fence");
+}
+/* Effective strategy for THIS frame: auto behaves as sync until escalated. */
+static bool   g_autoEscalated = false;
+static double g_rbEmaMs = 0;          /* EMA of sync-copy cost */
+static int    g_rbOverBudgetStreak = 0;
+static int    g_rbArrivals = 0;       /* frames mpv offered this window */
+static int    g_rbPublished = 0;      /* frames actually captured */
+static bool useRing() { int m = readbackMode(); return m == 1 || (m == 0 && g_autoEscalated); }
 
 /* Copies out the previous request's transfer and issues this frame's
  * readback into the ring.
@@ -1514,22 +1526,20 @@ static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
     if (gl->pboHasPrev) {
         int outSlot = (gl->pboIndex + GlRenderer::kPboCount - 1) % GlRenderer::kPboCount;
         bool ready = true;
-        if (readbackMode() == 1) {
-            /* legacy: unconditional blocking copy — the implicit sync that
-             * existed before the fence change. */
-            ready = true;
-        } else if (gl->glFenceSync && gl->pboFences[outSlot]) {
-            /* GL_SYNC_FLUSH_COMMANDS_BIT: glFenceSync does NOT imply a
-             * flush, and our context otherwise idles between requests —
-             * without this bit the fence would never signal (the old
-             * glGetBufferSubData path flushed implicitly every frame). */
-            int status = gl->glClientWaitSync(gl->pboFences[outSlot],
-                                              GL_SYNC_FLUSH_COMMANDS_BIT,
-                                              0 /* zero timeout */);
-            ready = (status == GL_ALREADY_SIGNALED || status == GL_CONDITION_SATISFIED);
-            if (!ready && status == GL_WAIT_FAILED) {
-                DBG("glClientWaitSync failed; treating slot as ready");
-                ready = true;
+        if (readbackMode() == 3) {
+            /* explicit fence mode: skip-on-not-ready */
+            if (gl->glFenceSync && gl->pboFences[outSlot]) {
+                /* GL_SYNC_FLUSH_COMMANDS_BIT: glFenceSync does NOT imply a
+                 * flush, and our context otherwise idles between requests —
+                 * without this bit the fence would never signal. */
+                int status = gl->glClientWaitSync(gl->pboFences[outSlot],
+                                                  GL_SYNC_FLUSH_COMMANDS_BIT,
+                                                  0 /* zero timeout */);
+                ready = (status == GL_ALREADY_SIGNALED || status == GL_CONDITION_SATISFIED);
+                if (!ready && status == GL_WAIT_FAILED) {
+                    DBG("glClientWaitSync failed; treating slot as ready");
+                    ready = true;
+                }
             }
         }
         if (ready) {
@@ -1555,18 +1565,8 @@ static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
             /* Previous slot's DMA is still running — do NOT issue this
              * frame's readback into the next slot either: that would put two
              * transfers in flight and starve the ring. Report "no new frame";
-             * the producer polls again in ~1ms. */
-            auto now = std::chrono::steady_clock::now();
-            double windowMs = std::chrono::duration<double, std::milli>(
-                now - g_rbStatsWindow).count();
-            if (windowMs >= 1000.0) {
-                DBG("readback stats: %d copies (avg %.2fms max %.1fms), %d skipped",
-                    g_rbWaitCount,
-                    g_rbWaitCount ? g_rbWaitSumMs / g_rbWaitCount : 0.0,
-                    g_rbWaitMaxMs, g_rbSkipCount);
-                g_rbWaitSumMs = 0; g_rbWaitMaxMs = 0; g_rbWaitCount = 0;
-                g_rbSkipCount = 0; g_rbStatsWindow = now;
-            }
+             * the producer polls again in ~1ms. (Stats are printed by the
+             * caller's per-second block.) */
             return false;
         }
     }
@@ -1574,7 +1574,8 @@ static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
      * read out (ring size >= 2). */
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[gl->pboIndex]);
     gl->glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, reinterpret_cast<void*>(0));
-    if (gl->glFenceSync) {
+    /* Fence only in explicit fence mode; auto/legacy rings copy blocking. */
+    if (readbackMode() == 3 && gl->glFenceSync) {
         if (gl->pboFences[gl->pboIndex]) {
             gl->glDeleteSync(gl->pboFences[gl->pboIndex]);
         }
@@ -1584,18 +1585,6 @@ static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
     gl->pboIndex = (gl->pboIndex + 1) % GlRenderer::kPboCount;
     gl->pboHasPrev = true;
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-
-    auto now = std::chrono::steady_clock::now();
-    double windowMs = std::chrono::duration<double, std::milli>(
-        now - g_rbStatsWindow).count();
-    if (windowMs >= 1000.0) {
-        DBG("readback stats: %d copies (avg %.2fms max %.1fms), %d skipped",
-            g_rbWaitCount,
-            g_rbWaitCount ? g_rbWaitSumMs / g_rbWaitCount : 0.0,
-            g_rbWaitMaxMs, g_rbSkipCount);
-        g_rbWaitSumMs = 0; g_rbWaitMaxMs = 0; g_rbWaitCount = 0;
-        g_rbSkipCount = 0; g_rbStatsWindow = now;
-    }
     return got;
 }
 
@@ -1947,8 +1936,9 @@ struct MpvPlayer {
     void renderLoop() {
         /* Try the OpenGL render API first (GPU conversion/scaling/subtitles);
          * fall back to the software renderer if GL is unusable. */
-        bool ok = false;
-        if (gl_init(&gl)) {
+    bool ok = false;
+    init_readback_mode();
+    if (gl_init(&gl)) {
             mpv_opengl_init_params initParams;
             initParams.get_proc_address = gl_get_proc_address_cb;
             initParams.get_proc_address_ctx = &gl;
@@ -2065,12 +2055,20 @@ struct MpvPlayer {
                          * rendering (its GL state-restore contract), so re-bind
                          * our FBO before reading the pixels back. */
                         gl.glBindFramebuffer(GL_FRAMEBUFFER, gl.fbo);
-                        if (readbackMode() == 2) {
-                            /* sync: straight read into the Kotlin buffer —
-                             * blocks the GL pipeline every frame (the issue
-                             * #13 behavior) but is the maximal-simplicity
-                             * reference for jitter bisection. */
+                        if (!useRing()) {
+                            /* Synchronous read straight into the Kotlin
+                             * buffer. Deterministic per-frame cost and no
+                             * DMA race — measured smoother than any async
+                             * variant on discrete GPUs (RDNA4 verified).
+                             * Auto mode escalates below if this GPU can't
+                             * afford it (weak iGPU, issue #13). */
+                            auto t0 = std::chrono::steady_clock::now();
                             gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                            double ms = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - t0).count();
+                            g_rbEmaMs = g_rbEmaMs * 0.9 + ms * 0.1;
+                            g_rbWaitCount++; g_rbWaitSumMs += ms;
+                            if (ms > g_rbWaitMaxMs) g_rbWaitMaxMs = ms;
                             result = true;
                         } else if (gl_pbo_ensure(&gl, w, h)) {
                             /* Async: issue this frame's transfer, deliver the
@@ -2080,11 +2078,46 @@ struct MpvPlayer {
                             gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
                             result = true;
                         }
+                        if (result) g_rbPublished++;
                     } else {
                         DBG("mpv_render_context_render(GL) failed: %d", ret);
                         /* Zero-copy surface-mapping failures are handled by the
                          * generic runtime fallback watching mpv's log stream
                          * (noteHwdecMappingFailure) — vendor-agnostic. */
+                    }
+
+                    /* Per-second readback telemetry + auto escalation. */
+                    {
+                        auto now = std::chrono::steady_clock::now();
+                        double windowMs = std::chrono::duration<double, std::milli>(
+                            now - g_rbStatsWindow).count();
+                        if (windowMs >= 1000.0) {
+                            int m = readbackMode();
+                            DBG("readback stats[%s]: copies %d (avg %.2fms max %.1fms) "
+                                "skips %d, arrivals %d published %d, ema %.2fms",
+                                useRing() ? (m == 3 ? "fence" : "ring") : "sync",
+                                g_rbWaitCount,
+                                g_rbWaitCount ? g_rbWaitSumMs / g_rbWaitCount : 0.0,
+                                g_rbWaitMaxMs, g_rbSkipCount,
+                                g_rbArrivals, g_rbPublished, g_rbEmaMs);
+                            if (m == 0 && !g_autoEscalated && g_rbArrivals > 0) {
+                                /* Escalate when sync demonstrably cannot keep
+                                 * pace: sustained oversized copies OR frames
+                                 * mpv offered that we failed to capture. */
+                                bool slowCopies = g_rbEmaMs > 10.0;
+                                if (slowCopies) g_rbOverBudgetStreak++; else g_rbOverBudgetStreak = 0;
+                                int deficit = g_rbArrivals - g_rbPublished;
+                                if (g_rbOverBudgetStreak >= 4 || deficit >= 25) {
+                                    g_autoEscalated = true;
+                                    LOG("readback: sync avg %.1fms too slow for this GPU "
+                                        "(deficit=%d) — escalating to async ring",
+                                        g_rbEmaMs, deficit);
+                                }
+                            }
+                            g_rbWaitSumMs = 0; g_rbWaitMaxMs = 0; g_rbWaitCount = 0;
+                            g_rbSkipCount = 0; g_rbArrivals = 0; g_rbPublished = 0;
+                            g_rbStatsWindow = now;
+                        }
                     }
                 }
             } else {
@@ -2788,6 +2821,7 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     }
 
     if (!player->framePending.exchange(false)) return JNI_FALSE;
+    g_rbArrivals++; /* mpv offered a frame — pressure metric for auto escalation */
 
 
 
