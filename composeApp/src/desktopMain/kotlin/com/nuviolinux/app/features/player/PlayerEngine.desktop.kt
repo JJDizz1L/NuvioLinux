@@ -369,6 +369,7 @@ private fun ComposeVideoSurface(
                  * filled even if a resize swapped the slot fields mid-render. */
                 if (newestSlot.compareAndSet(-1, index)) {
                     synchronized(slotLock) { slots[index].bitmap = slot.bitmap }
+                    slots[index].publishedAtNs = System.nanoTime()
                     /* 1 Hz cadence line so a reporter can confirm the pump
                      * produces at the video FPS (not the Compose frame rate). */
                     val nowNs = System.nanoTime()
@@ -389,19 +390,73 @@ private fun ComposeVideoSurface(
             }
         }
 
-        /* Consumer: on every Compose frame, draw the newest completed frame. */
+        /* Consumer: on every Compose frame, draw the newest completed frame.
+         * Telemetry (NUVIO_MPV_DEBUG): per-second tick interval stats +
+         * distinct-frame counts + published-age. This is the only window into
+         * presentation timing — producer cadence can be perfect while the
+         * consumer ticks irregularly (XWayland/GLX swap pacing), which reads
+         * as 'smooth but jittery'. */
+        var lastTickNs = 0L
+        var tickCount = 0
+        var tickMinMs = Double.MAX_VALUE
+        var tickMaxMs = 0.0
+        var tickSumMs = 0.0
+        var distinctFrames = 0
+        var staleTicks = 0
+        var ageSumMs = 0.0
+        var ageMaxMs = 0.0
+        var ageCount = 0
+        var consumerStatsWindowNs = 0L
+        val consumerLog = Logger.withTag("ComposeVideoSurface")
         while (coroutineContext.isActive) {
-            withFrameNanos { }
+            val frameNs = withFrameNanos { it }
+            if (consumerStatsWindowNs == 0L) consumerStatsWindowNs = frameNs
+            if (lastTickNs != 0L) {
+                val deltaMs = (frameNs - lastTickNs) / 1_000_000.0
+                tickSumMs += deltaMs
+                if (deltaMs < tickMinMs) tickMinMs = deltaMs
+                if (deltaMs > tickMaxMs) tickMaxMs = deltaMs
+            }
+            lastTickNs = frameNs
+            tickCount++
+
             val index = newestSlot.get()
-            if (index < 0) continue
-            if (newestSlot.compareAndSet(index, -1)) {
+            if (index < 0) {
+                staleTicks++
+            } else if (newestSlot.compareAndSet(index, -1)) {
                 /* The slot drawn in the previous frame has finished drawing,
                  * so it can be recycled. */
                 if (drawingSlot >= 0) {
                     synchronized(slotLock) { free.addLast(drawingSlot) }
                 }
                 drawingSlot = index
+                distinctFrames++
                 frameImage = synchronized(slotLock) { slots[index].bitmap.asComposeImageBitmap() }
+                val ageMs = (frameNs - slots[index].publishedAtNs) / 1_000_000.0
+                ageSumMs += ageMs
+                ageCount++
+                if (ageMs > ageMaxMs) ageMaxMs = ageMs
+
+                val windowMs = (frameNs - consumerStatsWindowNs) / 1_000_000.0
+                if (windowMs >= 1000.0) {
+                    consumerLog.d {
+                        "consumer stats: $tickCount ticks (avg %.2fms min %.2f max %.2f), " +
+                            "$distinctFrames new frames, $staleTicks stale ticks, " +
+                            "age avg %.1fms max %.1fms"
+                            .format(
+                                if (tickCount > 1) tickSumMs / (tickCount - 1) else 0.0,
+                                if (tickCount > 1) tickMinMs else 0.0,
+                                tickMaxMs,
+                                if (ageCount > 0) ageSumMs / ageCount else 0.0,
+                                ageMaxMs,
+                            )
+                    }
+                    lastTickNs = frameNs
+                    tickCount = 0; tickMinMs = Double.MAX_VALUE; tickMaxMs = 0.0; tickSumMs = 0.0
+                    distinctFrames = 0; staleTicks = 0
+                    ageSumMs = 0.0; ageMaxMs = 0.0; ageCount = 0
+                    consumerStatsWindowNs = frameNs
+                }
             }
         }
     }
@@ -448,4 +503,8 @@ private class RenderSlot {
     var capacity: Int = 0
     var width: Int = 0
     var height: Int = 0
+    /** System.nanoTime when the producer published this slot (consumer-side
+     *  staleness telemetry). */
+    @Volatile
+    var publishedAtNs: Long = 0L
 }
