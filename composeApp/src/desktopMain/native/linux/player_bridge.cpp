@@ -1653,19 +1653,6 @@ static bool findDrmRenderNodePath(char *outPath, size_t outPathLen) {
     return false;
 }
 
-/* Check if an mpv render error is likely an nvdec/CUDA failure.
- * Common nvdec failure error codes from mpv_render_context_render:
- * - MPV_ERROR_GENERIC (-1): generic failure (often CUDA context lost)
- * - MPV_ERROR_UNSUPPORTED (-2): unsupported operation (CUDA interop not available)
- * - Other negative codes may indicate CUDA resource exhaustion or context loss.
- * This is a heuristic; mpv doesn't expose detailed CUDA error codes here. */
-static bool is_nvdec_failure(int ret) {
-    /* mpv error codes are negative. Common nvdec-related failures: */
-    return ret == -1 ||  /* MPV_ERROR_GENERIC - often CUDA context lost */
-           ret == -2 ||  /* MPV_ERROR_UNSUPPORTED - CUDA interop unavailable */
-           ret == -3;    /* MPV_ERROR_INVALID_PARAMETER - sometimes CUDA resource issue */
-}
-
 struct MpvPlayer {
     mpv_handle   *mpv;
     std::thread   eventThread;
@@ -1735,10 +1722,7 @@ struct MpvPlayer {
     double        lastHwdecFailMonotonic = 0;
     std::string   currentHwdecName;
     bool          copyFallbackApplied = false;
-
-    /* nvdec failure tracking for dynamic fallback */
-    std::atomic<int> nvdecFailCount{0};
-    std::atomic<bool> nvdecFallbackRequested{false};
+    bool          queueOverflowLogged = false;
 
     /* Initial seek applied deterministically on MPV_EVENT_FILE_LOADED. A seek
      * issued immediately after loadfile can be dropped before the file is
@@ -1944,19 +1928,11 @@ struct MpvPlayer {
                             gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
                             result = true;
                         }
-                        /* Reset failure counter on success */
-                        nvdecFailCount.store(0);
                     } else {
                         DBG("mpv_render_context_render(GL) failed: %d", ret);
-                        /* Detect nvdec/CUDA failures and request fallback */
-                        if (gl.nvidiaVendor && is_nvdec_failure(ret)) {
-                            int fails = nvdecFailCount.fetch_add(1) + 1;
-                            LOG("nvdec render failure #%d (ret=%d); will fallback to nvdec-copy after 3 consecutive failures", fails, ret);
-                            if (fails >= 3) {
-                                nvdecFallbackRequested.store(true);
-                                p_mpv_wakeup(mpv); /* wake event thread to handle fallback */
-                            }
-                        }
+                        /* Zero-copy surface-mapping failures are handled by the
+                         * generic runtime fallback watching mpv's log stream
+                         * (noteHwdecMappingFailure) — vendor-agnostic. */
                     }
                 }
             } else {
@@ -2331,7 +2307,21 @@ after_hwdec:
             int evId = event->event_id;
             void *evData = event->data;
 
-            std::lock_guard<std::mutex> lock(mutex);
+            /* Locking policy: mpv's event data is only valid within this
+             * wait_event iteration and only this thread reads it, so event
+             * fields need no lock. The mutex exists solely to publish the
+             * track-list JSON strings against the JNI getters; everything
+             * else touches atomics or event-thread-only members. Logging
+             * (fprintf + fflush) deliberately happens OUTSIDE the lock so a
+             * chatty warn stream can never stall track getters. */
+
+            if (evId == MPV_EVENT_QUEUE_OVERFLOW) {
+                if (!queueOverflowLogged) {
+                    queueOverflowLogged = true;
+                    LOG("mpv event queue overflow — some property updates were dropped");
+                }
+                continue;
+            }
 
             if (evId == MPV_EVENT_SHUTDOWN) {
                 running = false;
@@ -2383,7 +2373,7 @@ after_hwdec:
                 }
             }
 
-            if (evId == MPV_EVENT_PROPERTY_CHANGE && evData) {
+            else if (evId == MPV_EVENT_PROPERTY_CHANGE && evData) {
                 mpv_event_property *prop = (mpv_event_property*)evData;
                 if (!prop->name || !prop->data) continue;
                 const char *pname = prop->name;
@@ -2414,8 +2404,13 @@ after_hwdec:
                     cachedVolume = *(double*)pdata;
                 else if (strcmp(pname, "track-list") == 0 && prop->format == MPV_FORMAT_NODE) {
                     mpv_node *node = (mpv_node*)pdata;
-                    cachedAudioTracksJson = buildTrackListJsonFromNode(node, "audio");
-                    cachedSubtitleTracksJson = buildTrackListJsonFromNode(node, "sub");
+                    /* JSON rebuild (string allocs) happens unlocked; only the
+                     * publication takes the mutex the JNI getters hold. */
+                    std::string audioJson = buildTrackListJsonFromNode(node, "audio");
+                    std::string subtitleJson = buildTrackListJsonFromNode(node, "sub");
+                    std::lock_guard<std::mutex> lock(mutex);
+                    cachedAudioTracksJson = std::move(audioJson);
+                    cachedSubtitleTracksJson = std::move(subtitleJson);
                 }
                 else if (strcmp(pname, "hwdec-current") == 0 && prop->format == MPV_FORMAT_STRING) {
                     const char *hwdec = pdata ? *(const char**)pdata : nullptr;
@@ -2443,13 +2438,6 @@ after_hwdec:
                         lastVoDropFrameCount = drops;
                     }
                 }
-            }
-
-            /* Handle nvdec fallback request from render thread */
-            if (nvdecFallbackRequested.exchange(false)) {
-                LOG("nvdec fallback requested after repeated failures; recommend restart with NUVIO_MPV_HWDEC=nvdec-copy");
-                /* Note: Dynamic fallback requires re-initializing mpv and render context.
-                 * For now, log actionable advice. Full dynamic fallback deferred to Phase 3. */
             }
         }
     }
