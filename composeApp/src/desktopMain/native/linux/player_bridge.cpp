@@ -398,6 +398,12 @@ static int load_libmpv() {
 #define GL_PIXEL_PACK_BUFFER          0x88EB
 #define GL_STREAM_READ                0x88E0
 #define GL_BUFFER_SIZE                0x8764
+#define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
+#define GL_SYNC_FLUSH_COMMANDS_BIT    0x00002000
+#define GL_ALREADY_SIGNALED           0x911A
+#define GL_TIMEOUT_EXPIRED            0x911B
+#define GL_CONDITION_SATISFIED        0x911C
+#define GL_WAIT_FAILED                0x911D
 
 typedef void* (*egl_get_proc_address_t)(const char*);
 typedef void* (*egl_get_platform_display_t)(unsigned int, void*, const int*);
@@ -538,6 +544,12 @@ struct GlRenderer {
     bool pboActive = false;    /* ring allocated for pboWidth/pboHeight */
     int pboWidth = 0;
     int pboHeight = 0;
+    /* One fence per in-flight readback (slot-indexed). The fence is planted
+     * after the glReadPixels-into-PBO and must be signaled before that slot's
+     * glGetBufferSubData may run — otherwise the copy blocks mid-frame for an
+     * unbounded DMA wait (observed: >4ms on half of all frames at 1896x2098
+     * HDR10, perceived as jitter despite a locked 24fps cadence average). */
+    void *pboFences[kPboCount] = {nullptr, nullptr, nullptr};
 
     gl_gen_buffers_t glGenBuffers = nullptr;
     gl_delete_buffers_t glDeleteBuffers = nullptr;
@@ -548,6 +560,10 @@ struct GlRenderer {
      * glGenBuffers yields a name even when glBufferData fails (OOM), and a
      * zero-sized buffer would silently corrupt every async readback. */
     gl_get_buffer_parameteriv_t glGetBufferParameteriv = nullptr;
+    /* Optional fence API for non-blocking copy-out. */
+    void *(*glFenceSync)(unsigned int, unsigned int) = nullptr;
+    void (*glDeleteSync)(void*) = nullptr;
+    int (*glClientWaitSync)(void*, unsigned int, unsigned long long) = nullptr;
 
     /* True when GL_VENDOR is NVIDIA: the DRM render node is then withheld
      * from mpv (see render context creation) so the drmprime-overlay hwdec,
@@ -1304,6 +1320,13 @@ static bool gl_init(GlRenderer *gl) {
     gl->glBufferData = (gl_buffer_data_t)gl_resolve(gl, "glBufferData");
     gl->glGetBufferSubData = (gl_get_buffer_sub_data_t)gl_resolve(gl, "glGetBufferSubData");
     gl->glGetBufferParameteriv = (gl_get_buffer_parameteriv_t)gl_resolve(gl, "glGetBufferParameteriv");
+    gl->glFenceSync = (void *(*)(unsigned int, unsigned int))gl_resolve(gl, "glFenceSync");
+    gl->glDeleteSync = (void (*)(void*))gl_resolve(gl, "glDeleteSync");
+    gl->glClientWaitSync = (int (*)(void*, unsigned int, unsigned long long))gl_resolve(gl, "glClientWaitSync");
+    if (!gl->glFenceSync || !gl->glDeleteSync || !gl->glClientWaitSync) {
+        DBG("fence API unavailable; PBO copy-out will block on DMA waits");
+        gl->glFenceSync = nullptr;
+    }
     if (!gl->glGenBuffers || !gl->glDeleteBuffers || !gl->glBindBuffer ||
         !gl->glBufferData || !gl->glGetBufferSubData) {
         DBG("async readback unavailable: missing buffer entry points");
@@ -1381,6 +1404,14 @@ static void gl_pbo_destroy(GlRenderer *gl) {
     if (gl->pbos[0] && gl->glDeleteBuffers) {
         gl->glDeleteBuffers(GlRenderer::kPboCount, gl->pbos);
     }
+    if (gl->glDeleteSync) {
+        for (int i = 0; i < GlRenderer::kPboCount; i++) {
+            if (gl->pboFences[i]) {
+                gl->glDeleteSync(gl->pboFences[i]);
+                gl->pboFences[i] = nullptr;
+            }
+        }
+    }
     for (int i = 0; i < GlRenderer::kPboCount; i++) gl->pbos[i] = 0;
     gl->pboIndex = 0;
     gl->pboHasPrev = false;
@@ -1437,33 +1468,109 @@ static bool gl_pbo_ensure(GlRenderer *gl, int w, int h) {
     return true;
 }
 
-/* Copies out the previous request's completed transfer and issues this
- * frame's readback into the ring. glGetBufferSubData implicitly waits for the
- * slot's DMA — issued a full frame period ago, so this is normally
- * instantaneous. Returns false only when no completed frame exists yet (first
- * request after create/resize); the caller then reports "no new frame" and
- * the producer simply polls again. */
+/* Per-second wait statistics (event/render-thread local, DBG only). */
+static double g_rbWaitSumMs = 0;
+static double g_rbWaitMaxMs = 0;
+static int    g_rbWaitCount = 0;
+static int    g_rbSkipCount = 0;
+static std::chrono::steady_clock::time_point g_rbStatsWindow =
+    std::chrono::steady_clock::now();
+
+/* Copies out the previous request's transfer and issues this frame's
+ * readback into the ring.
+ *
+ * Fence-guarded: each glReadPixels-into-PBO plants a fence. Before copying a
+ * slot out we test its fence with ZERO timeout — if the DMA is still in
+ * flight we SKIP this frame instead of blocking mid-copy. Blocking waits were
+ * measured on >50% of frames at 1896x2098 HDR10 (674 waits >4ms per ~50s),
+ * producing uneven publish intervals the viewer reads as jitter even though
+ * the 1-second cadence average stays locked at 24.0 fps. A skipped frame just
+ * means the consumer keeps showing the previous one for one extra poll cycle.
+ * Without the fence API the old blocking behavior is preserved. */
 static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
     const long long bytes = (long long)w * h * 4;
     bool got = false;
     if (gl->pboHasPrev) {
         int outSlot = (gl->pboIndex + GlRenderer::kPboCount - 1) % GlRenderer::kPboCount;
-        gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[outSlot]);
-        auto t0 = std::chrono::steady_clock::now();
-        gl->glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, bytes, pixels);
-        double ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - t0).count();
-        if (ms > 4.0) DBG("readback waited %.1fms for GPU transfer", ms);
-        gl->pboHasPrev = false;
-        got = true;
+        bool ready = true;
+        if (gl->glFenceSync && gl->pboFences[outSlot]) {
+            /* GL_SYNC_FLUSH_COMMANDS_BIT: glFenceSync does NOT imply a
+             * flush, and our context otherwise idles between requests —
+             * without this bit the fence would never signal (the old
+             * glGetBufferSubData path flushed implicitly every frame). */
+            int status = gl->glClientWaitSync(gl->pboFences[outSlot],
+                                              GL_SYNC_FLUSH_COMMANDS_BIT,
+                                              0 /* zero timeout */);
+            ready = (status == GL_ALREADY_SIGNALED || status == GL_CONDITION_SATISFIED);
+            if (!ready && status == GL_WAIT_FAILED) {
+                DBG("glClientWaitSync failed; treating slot as ready");
+                ready = true;
+            }
+        }
+        if (ready) {
+            gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[outSlot]);
+            auto t0 = std::chrono::steady_clock::now();
+            gl->glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, bytes, pixels);
+            double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t0).count();
+            g_rbWaitSumMs += ms;
+            g_rbWaitCount++;
+            if (ms > g_rbWaitMaxMs) g_rbWaitMaxMs = ms;
+            got = true;
+        } else {
+            g_rbSkipCount++;
+        }
+        if (gl->glDeleteSync && gl->pboFences[outSlot]) {
+            gl->glDeleteSync(gl->pboFences[outSlot]);
+            gl->pboFences[outSlot] = nullptr;
+        }
+        if (got) {
+            gl->pboHasPrev = false;
+        } else {
+            /* Previous slot's DMA is still running — do NOT issue this
+             * frame's readback into the next slot either: that would put two
+             * transfers in flight and starve the ring. Report "no new frame";
+             * the producer polls again in ~1ms. */
+            auto now = std::chrono::steady_clock::now();
+            double windowMs = std::chrono::duration<double, std::milli>(
+                now - g_rbStatsWindow).count();
+            if (windowMs >= 1000.0) {
+                DBG("readback stats: %d copies (avg %.2fms max %.1fms), %d skipped",
+                    g_rbWaitCount,
+                    g_rbWaitCount ? g_rbWaitSumMs / g_rbWaitCount : 0.0,
+                    g_rbWaitMaxMs, g_rbSkipCount);
+                g_rbWaitSumMs = 0; g_rbWaitMaxMs = 0; g_rbWaitCount = 0;
+                g_rbSkipCount = 0; g_rbStatsWindow = now;
+            }
+            return false;
+        }
     }
     /* Issue this frame's transfer into the next slot — never the one just
      * read out (ring size >= 2). */
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[gl->pboIndex]);
     gl->glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, reinterpret_cast<void*>(0));
+    if (gl->glFenceSync) {
+        if (gl->pboFences[gl->pboIndex]) {
+            gl->glDeleteSync(gl->pboFences[gl->pboIndex]);
+        }
+        gl->pboFences[gl->pboIndex] =
+            gl->glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    }
     gl->pboIndex = (gl->pboIndex + 1) % GlRenderer::kPboCount;
     gl->pboHasPrev = true;
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+
+    auto now = std::chrono::steady_clock::now();
+    double windowMs = std::chrono::duration<double, std::milli>(
+        now - g_rbStatsWindow).count();
+    if (windowMs >= 1000.0) {
+        DBG("readback stats: %d copies (avg %.2fms max %.1fms), %d skipped",
+            g_rbWaitCount,
+            g_rbWaitCount ? g_rbWaitSumMs / g_rbWaitCount : 0.0,
+            g_rbWaitMaxMs, g_rbSkipCount);
+        g_rbWaitSumMs = 0; g_rbWaitMaxMs = 0; g_rbWaitCount = 0;
+        g_rbSkipCount = 0; g_rbStatsWindow = now;
+    }
     return got;
 }
 
