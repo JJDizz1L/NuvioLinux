@@ -794,8 +794,17 @@ static char* nvidia_read_driver_version() {
 }
 
 /* Read GPU name from nvidia-smi (if available) or /proc/driver/nvidia/gpus/<id>/information.
- * Returns malloc'd string (caller must free) or nullptr on failure. */
+ * Returns malloc'd string (caller must free) or nullptr on failure.
+ * Memoized for the process lifetime: the GPU cannot change mid-session, and
+ * every player create used to spawn an nvidia-smi subprocess (hover previews
+ * multiplied it). */
 static char* nvidia_read_gpu_name() {
+    static char* cached = nullptr;
+    static bool attempted = false;
+    if (attempted) {
+        return cached ? strdup(cached) : nullptr;
+    }
+    attempted = true;
     /* Try nvidia-smi first (most reliable) */
     FILE *f = popen("nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1", "r");
     if (f) {
@@ -804,7 +813,10 @@ static char* nvidia_read_gpu_name() {
             char *end = line + strlen(line) - 1;
             while (end > line && (*end == '\n' || *end == '\r')) *end-- = '\0';
             pclose(f);
-            if (line[0]) return strdup(line);
+            if (line[0]) {
+                cached = strdup(line);
+                return strdup(cached);
+            }
         }
         pclose(f);
     }
@@ -829,7 +841,8 @@ static char* nvidia_read_gpu_name() {
                             while (end > colon && (*end == '\n' || *end == '\r' || *end == ' ')) *end-- = '\0';
                             fclose(gf);
                             closedir(dp);
-                            return strdup(colon);
+                            cached = strdup(colon);
+                            return strdup(cached);
                         }
                     }
                 }
