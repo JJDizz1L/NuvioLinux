@@ -1903,14 +1903,21 @@ struct MpvPlayer {
     }
 
     void destroy() {
-        bool expected = true;
-        if (running.compare_exchange_strong(expected, false)) {
-            if (mpv) {
-                p_mpv_wakeup(mpv);
-            }
-            if (eventThread.joinable()) {
-                eventThread.join();
-            }
+        /* Wake the event loop so a blocked mpv_wait_event returns promptly,
+         * then ALWAYS join both threads. The loop may already have exited on
+         * its own: MPV_EVENT_SHUTDOWN fires when the core quits (e.g. a user
+         * auto-profile switched vo away from libmpv and the popped-out window
+         * was closed), setting running=false before we get here. Joining an
+         * already-finished thread returns immediately, but DESTROYING one
+         * that was never joined calls std::terminate — observed as SIGABRT
+         * in dispose() (2026-08-22 crash, join skipped behind a CAS on
+         * running). */
+        bool wasRunning = running.exchange(false);
+        if (wasRunning && mpv) {
+            p_mpv_wakeup(mpv);
+        }
+        if (eventThread.joinable()) {
+            eventThread.join();
         }
         /* Stop the render thread; it frees the render context and GL state
          * itself (the GL context is current on that thread only). */
@@ -2228,9 +2235,14 @@ struct MpvPlayer {
 
             /* Embedding-critical options: applied AFTER any user config so they
              * always win. A user vo=gpu-next would otherwise make mpv open its
-             * own window and render there instead of into our FBO. */
+             * own window and render there instead of into our FBO. idle=yes
+             * keeps the core alive when playback ends or a load fails — a
+             * spontaneous core quit (idle=no from a config, or a popped-out VO
+             * window being closed) fires MPV_EVENT_SHUTDOWN and strands the
+             * player mid-session. */
             p_mpv_set_option_string(mpv, "vo", "libmpv");
             p_mpv_set_option_string(mpv, "force-window", "no");
+            p_mpv_set_option_string(mpv, "idle", "yes");
 
             /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
              * read-ahead and the network cache) and optional on-disk cache. The
@@ -2509,6 +2521,12 @@ after_hwdec:
             }
 
             if (evId == MPV_EVENT_SHUTDOWN) {
+                /* The core died under us (fatal error, or a user config /
+                 * auto-profile quit it — e.g. a popped-out VO window closed).
+                 * Exit the loop; destroy() still joins this thread because
+                 * running=false no longer gates the join. */
+                LOG("MPV_EVENT_SHUTDOWN: mpv core shut down on its own "
+                    "(check user mpv.conf for idle/quit options or vo-switching auto-profiles)");
                 running = false;
                 break;
             }
