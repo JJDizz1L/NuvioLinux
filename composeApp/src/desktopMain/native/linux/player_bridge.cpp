@@ -2526,15 +2526,31 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
         }
     }
 
-    /* Collect headers */
-    std::vector<const char*> headers;
+    /* Collect headers. Each line's UTF chars are released immediately after
+     * copying into std::string storage, and null chars (OOM) skip the entry:
+     * no retained JNI refs, no index pairing to drift, nothing that can
+     * strlen a nullptr later. */
+    std::vector<std::string> collected;
     jsize numHeaders = headerLines ? env->GetArrayLength(headerLines) : 0;
     for (jsize i = 0; i < numHeaders; i++) {
         jstring hs = (jstring)env->GetObjectArrayElement(headerLines, i);
-        if (hs) {
-            headers.push_back(env->GetStringUTFChars(hs, nullptr));
+        if (!hs) {
+            env->ExceptionClear();
+            continue;
         }
+        const char *chars = env->GetStringUTFChars(hs, nullptr);
+        if (!chars) {
+            env->ExceptionClear();
+            env->DeleteLocalRef(hs);
+            DBG("header %d: GetStringUTFChars failed, skipping", (int)i);
+            continue;
+        }
+        collected.emplace_back(chars);
+        env->ReleaseStringUTFChars(hs, chars);
     }
+    std::vector<const char*> headers;
+    headers.reserve(collected.size());
+    for (auto &line : collected) headers.push_back(line.c_str());
 
     MpvPlayer *player = new MpvPlayer();
     LOG("create: calling player->initialize...");
@@ -2552,12 +2568,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     if (audioUrlChars) {
         env->ReleaseStringUTFChars(sourceAudioUrl, audioUrlChars);
     }
-    for (size_t i = 0; i < headers.size(); i++) {
-        if (headers[i]) {
-            jstring hs = (jstring)env->GetObjectArrayElement(headerLines, i);
-            if (hs) env->ReleaseStringUTFChars(hs, headers[i]);
-        }
-    }
+    /* Header JNI refs were already released during collection; the local
+     * jstring refs die with this frame. */
 
     if (ret < 0) {
         LOG("create: initialization failed, deleting player");
