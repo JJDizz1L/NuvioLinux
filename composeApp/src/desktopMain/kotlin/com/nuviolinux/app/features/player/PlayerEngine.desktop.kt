@@ -281,6 +281,7 @@ private fun ComposeVideoSurface(
         var drawingSlot = -1
         var lastWidth = 0
         var lastHeight = 0
+        var lastInstallWarnSize = -1
         var cadenceStartNs = 0L
         var cadenceFrames = 0
 
@@ -352,8 +353,14 @@ private fun ComposeVideoSurface(
                         size.width * 4,
                     )
                 ) {
-                    log.w { "installPixels failed for ${size.width}x${size.height}" }
+                    /* Back off: a persistent failure would otherwise spin the
+                     * producer hot and flood the log at frame rate. */
+                    if (lastInstallWarnSize != needed) {
+                        lastInstallWarnSize = needed
+                        log.w { "installPixels failed for ${size.width}x${size.height}; retrying slowly" }
+                    }
                     synchronized(slotLock) { free.addLast(index) }
+                    delay(50L)
                     continue
                 }
                 /* Publish the filled slot. The producer is the only writer and
