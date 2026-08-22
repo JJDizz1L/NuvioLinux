@@ -4,8 +4,10 @@ import com.nuviolinux.app.core.build.AppVersionConfig
 import com.nuviolinux.app.core.storage.AppPaths
 import com.nuviolinux.app.core.storage.DesktopStorage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import nuviolinux.composeapp.generated.resources.Res
 import nuviolinux.composeapp.generated.resources.updates_download_failed_http
 import nuviolinux.composeapp.generated.resources.updates_downloaded_file_missing
@@ -68,8 +70,9 @@ actual object AppUpdaterPlatform {
         assetUrl: String,
         assetName: String,
         onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+    ): Result<String> {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
             val safeName = assetName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
             val destination = File(updatesDir(), safeName)
             val tempFile = File(updatesDir(), "$safeName.part")
@@ -94,6 +97,10 @@ actual object AppUpdaterPlatform {
                 FileOutputStream(tempFile).use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     while (true) {
+                        /* Stop streaming the moment the caller goes away —
+                         * without this a cancelled download ran to
+                         * completion, writing hundreds of MB. */
+                        coroutineContext.ensureActive()
                         val read = input.read(buffer)
                         if (read <= 0) break
                         output.write(buffer, 0, read)
@@ -110,6 +117,12 @@ actual object AppUpdaterPlatform {
             }
             destination.absolutePath
         }
+        }
+        /* Cancellation must propagate, not masquerade as a failed update. */
+        result.exceptionOrNull()
+            ?.takeIf { it is kotlinx.coroutines.CancellationException }
+            ?.let { throw it }
+        return result
     }
 
     actual fun canInstallDownloadedUpdate(): Boolean = true
