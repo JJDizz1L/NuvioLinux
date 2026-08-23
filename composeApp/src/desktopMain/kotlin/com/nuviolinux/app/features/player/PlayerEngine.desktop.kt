@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.power.ScreensaverInhibit
@@ -68,8 +69,10 @@ actual fun PlatformPlayerSurface(
     onControllerReady: (PlayerEngineController) -> Unit,
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
     onError: (String?) -> Unit,
+    cursorControlEnabled: Boolean,
 ) {
     NativePlayerSurface(
+        cursorControlEnabled = cursorControlEnabled,
         sourceUrl = sourceUrl,
         sourceAudioUrl = sourceAudioUrl,
         sourceHeaders = sourceHeaders,
@@ -103,9 +106,12 @@ private fun NativePlayerSurface(
     onControllerReady: (PlayerEngineController) -> Unit,
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
     onError: (String?) -> Unit,
+    cursorControlEnabled: Boolean,
 ) {
     val log = remember { Logger.withTag("NativePlayerSurface") }
     val host = remember { ComposeRenderSurfaceHost() }
+    /* Set during composition so it precedes attachWindow's first apply. */
+    host.cursorControlEnabled = cursorControlEnabled
     val controller = remember(host) { NativePlayerController(host) }
     val playbackHeaders = remember(sourceHeaders) { sanitizePlaybackHeaders(sourceHeaders) }
     log.d { "composed — sourceUrl=${sourceUrl.take(80)}" }
@@ -114,6 +120,7 @@ private fun NativePlayerSurface(
     val latestOnError = rememberUpdatedState(onError)
     val playerSettings by PlayerSettingsRepository.uiState.collectAsState()
     val decoderPriority = playerSettings.decoderPriority
+    val forceSoftwareRenderer = playerSettings.forceSoftwareRenderer
     val streamCacheSize = playerSettings.streamCacheSize
     val streamCacheOnDisk = playerSettings.streamCacheOnDisk
 
@@ -168,6 +175,7 @@ private fun NativePlayerSurface(
         sourceAudioUrl,
         playbackHeaders,
         decoderPriority,
+        forceSoftwareRenderer,
         streamCacheSize,
         streamCacheOnDisk,
         initialPositionMs,
@@ -181,6 +189,7 @@ private fun NativePlayerSurface(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs,
             decoderPriority = decoderPriority,
+            forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheBytes = streamCacheSize.bytes,
             streamCacheOnDisk = streamCacheOnDisk,
             onError = { message -> latestOnError.value(message) },
@@ -260,6 +269,8 @@ private fun ComposeVideoSurface(
 ) {
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
     var frameImage by remember { mutableStateOf<ImageBitmap?>(null) }
+    var frameSrcWidth by remember { mutableStateOf(0) }
+    var frameSrcHeight by remember { mutableStateOf(0) }
 
     /* The pump's LaunchedEffect never restarts (keyed on the stable
      * controller), so a plain parameter capture would freeze the first
@@ -281,7 +292,6 @@ private fun ComposeVideoSurface(
         var drawingSlot = -1
         var lastWidth = 0
         var lastHeight = 0
-        var lastInstallWarnSize = -1
         var cadenceStartNs = 0L
         var cadenceFrames = 0
 
@@ -296,73 +306,106 @@ private fun ComposeVideoSurface(
          * capacity they are reused (installPixels rebinds size per frame), so
          * shrinking a window or moving between surfaces doesn't churn native
          * memory through Cleaners/GC. */
-        fun ensureSlotSize(slot: RenderSlot, width: Int, height: Int, needed: Int) {
-            if (slot.width == width && slot.height == height) return
-            if (needed > slot.capacity) {
-                val capacity = maxOf(needed, slot.capacity * 2)
-                slot.directBuffer = java.nio.ByteBuffer.allocateDirect(capacity)
-                slot.pixels = ByteArray(capacity)
-                slot.bitmap = Bitmap()
-                slot.capacity = capacity
-                log.d { "resized slot to ${width}x${height}, buffer=$capacity bytes" }
+        /* Allocate a slot's bitmap for the current size if they don't match.
+         * Must be called with slotLock held. Deliberately does NOT touch other
+         * slots: a slot that is published or currently on screen keeps its
+         * valid bitmap until the consumer recycles it. Blanking every slot on
+         * resize (the old resizeSlots) left the consumer drawing a fresh empty
+         * Bitmap with no pixel data -> Image::makeFromBitmap crash.
+         *
+         * The bitmap is grow-only per axis (1.5x geometric): frames smaller
+         * than the capacity render into it stride-aligned (GL_PACK_ROW_LENGTH /
+         * SW_STRIDE) and are drawn as a srcSize sub-rect, so window shrinks and
+         * small popups don't churn frame-sized allocations. */
+        fun ensureSlotSize(slot: RenderSlot, width: Int, height: Int) {
+            if (slot.width == width && slot.height == height && slot.hasPixels) return
+            if (!slot.hasPixels || width > slot.capacityWidth || height > slot.capacityHeight) {
+                val newW = maxOf(width, slot.capacityWidth + slot.capacityWidth / 2)
+                val newH = maxOf(height, slot.capacityHeight + slot.capacityHeight / 2)
+                val next = Bitmap()
+                val info = ImageInfo(newW, newH, ColorType.RGB_888X, ColorAlphaType.OPAQUE)
+                check(next.allocPixels(info)) { "Could not allocate ${newW}x${newH} video slot" }
+                checkNotNull(next.peekPixels()) { "Skia did not expose video slot pixels" }
+                /* The replaced bitmap is intentionally not closed here: the
+                 * consumer may still hold an asComposeImageBitmap wrapper of it
+                 * from a previous published frame — GC finalizes it, exactly
+                 * like the pre-existing code path did. */
+                slot.bitmap = next
+                slot.capacityWidth = newW
+                slot.capacityHeight = newH
+                slot.hasPixels = true
+                log.d { "resized slot to ${width}x${height} (capacity ${newW}x${newH})" }
             }
             slot.width = width
             slot.height = height
         }
 
         /* Producer: renders into a free slot and publishes the newest
-         * completed frame. renderFrame returns true exactly when mpv signals a
-         * new frame, so the produce cadence tracks the video FPS; between
-         * frames it polls cheaply. */
+         * completed frame. Event-driven (phase 2): blocks in waitFrame until
+         * mpv's render update callback signals a frame, so the wake cadence IS
+         * the video FPS — no 1ms polling between frames. A window resize must
+         * not wait (paused video re-renders at the new geometry on the next
+         * render call), so size changes bypass the block. */
         launch(Dispatchers.Default) {
+            var seenFrameSeq = 0L
             while (coroutineContext.isActive) {
                 val size = awtWindowSizeState.value ?: surfaceSize
                 if (size.width <= 0 || size.height <= 0) {
                     delay(16L)
                     continue
                 }
-                val needed = size.width * size.height * 4
-                if (lastWidth != size.width || lastHeight != size.height) {
-                    lastWidth = size.width
-                    lastHeight = size.height
-                }
+                val sizeChanged = size.width != lastWidth || size.height != lastHeight
 
                 /* Wait for the consumer to pick up the previous frame before
-                 * producing another — the pool only has one spare slot. */
+                 * producing another — the pool only has one spare slot. While
+                 * waiting we still advance seenFrameSeq so a burst of signals
+                 * collapses into one render of the newest state. */
                 if (newestSlot.get() != -1) {
-                    delay(1L)
+                    seenFrameSeq = controller.waitFrame(seenFrameSeq, 8)
                     continue
                 }
+
+                if (!sizeChanged) {
+                    /* Bounded-wait pull: sleep up to 20ms, waking EARLY when
+                     * mpv's update callback signals a frame. Renders happen
+                     * every pass — mpv's callback rate follows consumption
+                     * rate (instrumented: pure event-blocking self-starves to
+                     * ~10 signals/s; pulling keeps it locked to video FPS).
+                     * Net wakeups ≈ 50-70/s vs ~1000/s under 1ms polling. */
+                    controller.waitFrame(seenFrameSeq, 20)
+                }
+                lastWidth = size.width
+                lastHeight = size.height
+
                 val index = synchronized(slotLock) { free.removeFirstOrNull() }
                     ?: run { delay(1L); continue }
                 val slot = slots[index]
-                synchronized(slotLock) { ensureSlotSize(slot, size.width, size.height, needed) }
-                slot.directBuffer.rewind()
-                val rendered = controller.renderFrame(size.width, size.height, slot.directBuffer)
-                if (!rendered) {
+                synchronized(slotLock) { ensureSlotSize(slot, size.width, size.height) }
+                /* Re-peek every frame (cheap): the Pixmap's address is only
+                 * guaranteed for the bitmap's current allocation, and this is
+                 * what keeps the direct-write contract explicit. */
+                val pixmap = synchronized(slotLock) { slot.bitmap.peekPixels() }
+                if (pixmap == null) {
                     synchronized(slotLock) { free.addLast(index) }
-                    /* No new frame yet; poll cheaply instead of busy-spinning. */
                     delay(1L)
                     continue
                 }
-                slot.directBuffer.rewind()
-                slot.directBuffer.get(slot.pixels, 0, needed)
-                if (!slot.bitmap.installPixels(
-                        ImageInfo(size.width, size.height, ColorType.RGB_888X, ColorAlphaType.OPAQUE),
-                        slot.pixels,
-                        size.width * 4,
-                    )
-                ) {
-                    /* Back off: a persistent failure would otherwise spin the
-                     * producer hot and flood the log at frame rate. */
-                    if (lastInstallWarnSize != needed) {
-                        lastInstallWarnSize = needed
-                        log.w { "installPixels failed for ${size.width}x${size.height}; retrying slowly" }
-                    }
+                val rendered = controller.renderFrameInto(
+                    size.width, size.height, pixmap.addr, pixmap.rowBytes,
+                )
+                if (!rendered) {
                     synchronized(slotLock) { free.addLast(index) }
-                    delay(50L)
+                    /* No new frame pending (signal already consumed by an
+                     * earlier produce). Sleep briefly rather than spin; the
+                     * next callback signal re-drives us anyway. */
+                    delay(1L)
                     continue
                 }
+                /* Bump skia's generation id so the next asComposeImageBitmap/
+                 * draw sees the fresh pixels mpv just wrote behind its back.
+                 * Happens BEFORE publish — slot access is serialized by the
+                 * pool: the consumer touches a slot only after the CAS below. */
+                slot.bitmap.notifyPixelsChanged()
                 /* Publish the filled slot. The producer is the only writer and
                  * only renders while newestSlot == -1, so the CAS always
                  * succeeds here; the bitmap re-store keeps the published slot
@@ -377,9 +420,22 @@ private fun ComposeVideoSurface(
                     cadenceFrames++
                     val cadenceMs = (nowNs - cadenceStartNs) / 1_000_000L
                     if (cadenceMs >= 1000L) {
+                        /* Telemetry snapshot (atomic C++ caches): distinguishes
+                         * 'decode too slow' (decoder drops) from 'presentation
+                         * jitter' (mistimed/delayed frames) from 'source too
+                         * slow' (bitrate vs cache growth). Zeros before media
+                         * loads — harmless in the log. */
+                        val stats = controller.renderStats()
+                        val mbps = stats.videoBitrateBytesPerSec * 8.0 / 1_000_000.0
                         log.d {
                             "render cadence: $cadenceFrames frames in ${cadenceMs}ms (" +
-                                "%.1f fps".format(cadenceFrames * 1000.0 / cadenceMs) + ")"
+                                "%.1f fps".format(cadenceFrames * 1000.0 / cadenceMs) +
+                                ") [hwdec=${stats.hwdecCurrent.ifBlank { "none" }}" +
+                                " mpv-fps=${"%.1f".format(stats.estimatedVfFps)}" +
+                                " bitrate=${"%.1f".format(mbps)}Mbps" +
+                                " decDrops=${stats.decoderFrameDropCount}" +
+                                " mistimed=${stats.mistimedFrameCount}" +
+                                " delayed=${stats.voDelayedFrameCount}]"
                         }
                         cadenceStartNs = nowNs
                         cadenceFrames = 0
@@ -431,7 +487,13 @@ private fun ComposeVideoSurface(
                 }
                 drawingSlot = index
                 distinctFrames++
-                frameImage = synchronized(slotLock) { slots[index].bitmap.asComposeImageBitmap() }
+                synchronized(slotLock) {
+                    frameImage = slots[index].bitmap.asComposeImageBitmap()
+                    /* Frames render into a capacity-sized bitmap; draw only
+                     * the w×h sub-rect mpv actually filled this cycle. */
+                    frameSrcWidth = slots[index].width
+                    frameSrcHeight = slots[index].height
+                }
                 val ageMs = (frameNs - slots[index].publishedAtNs) / 1_000_000.0
                 ageSumMs += ageMs
                 ageCount++
@@ -476,10 +538,14 @@ private fun ComposeVideoSurface(
             },
     ) {
         frameImage?.let { image ->
-            drawImage(
-                image = image,
-                dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-            )
+            if (frameSrcWidth > 0 && frameSrcHeight > 0) {
+                drawImage(
+                    image = image,
+                    srcOffset = IntOffset.Zero,
+                    srcSize = IntSize(frameSrcWidth, frameSrcHeight),
+                    dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+                )
+            }
         }
     }
 }
@@ -497,10 +563,15 @@ private fun findPlayerWindow(): java.awt.Window? =
  * the frame pump reuses a fixed pool of these instead.
  */
 private class RenderSlot {
-    var directBuffer: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(0)
-    var pixels: ByteArray = ByteArray(0)
+    /* Skia-owned pixel memory mpv writes into directly (peekPixels address).
+     * The bitmap is allocated at CAPACITY dimensions and frames smaller than
+     * that are drawn as a sub-rect (srcSize) — the grow-only reuse the old
+     * flat byte buffer had, without the second copy its installPixels(byte[])
+     * path required. */
     var bitmap: Bitmap = Bitmap()
-    var capacity: Int = 0
+    var capacityWidth: Int = 0
+    var capacityHeight: Int = 0
+    var hasPixels: Boolean = false
     var width: Int = 0
     var height: Int = 0
     /** System.nanoTime when the producer published this slot (consumer-side

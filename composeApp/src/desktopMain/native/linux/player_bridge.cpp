@@ -396,6 +396,7 @@ static int load_libmpv() {
 #define GL_COLOR_BUFFER_BIT           0x4000
 #define GL_VENDOR                     0x1F00
 #define GL_PIXEL_PACK_BUFFER          0x88EB
+#define GL_PACK_ROW_LENGTH            0x0D02
 #define GL_STREAM_READ                0x88E0
 #define GL_BUFFER_SIZE                0x8764
 #define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
@@ -452,6 +453,7 @@ typedef void (*gl_tex_image2d_t)(unsigned int, int, int, int, int, int, unsigned
 typedef void (*gl_tex_parameteri_t)(unsigned int, unsigned int, int);
 typedef int  (*gl_check_framebuffer_t)(unsigned int);
 typedef void (*gl_read_pixels_t)(int, int, int, int, unsigned int, unsigned int, void*);
+typedef void (*gl_pixel_storei_t)(unsigned int, int);
 typedef void (*gl_clear_color_t)(float, float, float, float);
 typedef void (*gl_clear_t)(unsigned int);
 typedef const unsigned char* (*gl_get_string_t)(unsigned int);
@@ -528,6 +530,7 @@ struct GlRenderer {
     gl_tex_parameteri_t glTexParameteri = nullptr;
     gl_check_framebuffer_t glCheckFramebufferStatus = nullptr;
     gl_read_pixels_t glReadPixels = nullptr;
+    gl_pixel_storei_t glPixelStorei = nullptr;
     gl_clear_color_t glClearColor = nullptr;
     gl_clear_t glClear = nullptr;
     gl_get_string_t glGetString = nullptr;
@@ -1301,12 +1304,14 @@ static bool gl_init(GlRenderer *gl) {
     gl->glTexParameteri = (gl_tex_parameteri_t)gl_resolve(gl, "glTexParameteri");
     gl->glCheckFramebufferStatus = (gl_check_framebuffer_t)gl_resolve(gl, "glCheckFramebufferStatus");
     gl->glReadPixels = (gl_read_pixels_t)gl_resolve(gl, "glReadPixels");
+    gl->glPixelStorei = (gl_pixel_storei_t)gl_resolve(gl, "glPixelStorei");
     gl->glClearColor = (gl_clear_color_t)gl_resolve(gl, "glClearColor");
     gl->glClear = (gl_clear_t)gl_resolve(gl, "glClear");
     gl->glGetString = (gl_get_string_t)gl_resolve(gl, "glGetString");
     if (!gl->glGenFramebuffers || !gl->glBindFramebuffer || !gl->glFramebufferTexture2D ||
         !gl->glGenTextures || !gl->glBindTexture || !gl->glTexImage2D || !gl->glTexParameteri ||
-        !gl->glCheckFramebufferStatus || !gl->glReadPixels || !gl->glClear || !gl->glClearColor) {
+        !gl->glCheckFramebufferStatus || !gl->glReadPixels || !gl->glClear || !gl->glClearColor ||
+        !gl->glPixelStorei) {
         LOG("GL renderer unavailable: missing GL entry points, falling back to SW renderer");
         gl_destroy(gl);
         return false;
@@ -1420,20 +1425,21 @@ static void gl_pbo_destroy(GlRenderer *gl) {
     gl->pboHeight = 0;
 }
 
-/* Ensures the ring is allocated for w*h*4 bytes. Returns false when async
+/* Ensures the ring is allocated for rowBytes*h bytes. Returns false when async
  * readback cannot be used (missing entry points or allocation failure), so
  * the caller falls back to a synchronous glReadPixels for this frame. */
-static bool gl_pbo_ensure(GlRenderer *gl, int w, int h) {
+static bool gl_pbo_ensure(GlRenderer *gl, int w, int h, int rowBytes) {
     if (!gl->glGenBuffers || !gl->glDeleteBuffers || !gl->glBindBuffer ||
         !gl->glBufferData || !gl->glGetBufferSubData) {
         return false;
     }
     if (gl->pboActive && gl->pboWidth == w && gl->pboHeight == h) return true;
     gl_pbo_destroy(gl);
+    const long long allocBytes = (long long)rowBytes * h;
     for (int i = 0; i < GlRenderer::kPboCount; i++) {
         gl->glGenBuffers(1, &gl->pbos[i]);
         gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[i]);
-        gl->glBufferData(GL_PIXEL_PACK_BUFFER, (long long)w * h * 4, nullptr, GL_STREAM_READ);
+        gl->glBufferData(GL_PIXEL_PACK_BUFFER, allocBytes, nullptr, GL_STREAM_READ);
     }
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     if (!gl->pbos[0]) {
@@ -1441,11 +1447,11 @@ static bool gl_pbo_ensure(GlRenderer *gl, int w, int h) {
         return false;
     }
     /* A buffer NAME can exist with no storage behind it (glBufferData OOM).
-     * Verify each slot really is w*h*4 bytes, else fall back to sync
+     * Verify each slot really is rowBytes*h bytes, else fall back to sync
      * readback rather than shipping garbage frames. Sizes above INT_MAX are
      * not representable in GLint — trust the allocation there (a 32k x 32k
      * RGBA frame would be needed to hit it). */
-    const long long expected = (long long)w * h * 4;
+    const long long expected = (long long)rowBytes * h;
     if (gl->glGetBufferParameteriv && expected <= 2147483647LL) {
         for (int i = 0; i < GlRenderer::kPboCount; i++) {
             int size = 0;
@@ -1503,6 +1509,9 @@ static void init_readback_mode() {
 }
 /* Effective strategy for THIS frame: auto behaves as sync until escalated. */
 static bool   g_autoEscalated = false;
+static std::atomic<int> g_cbFires{0};      /* phase2 debug: update-callback rate */
+static std::atomic<int> g_wfWakes{0};      /* phase2 debug: waitFrame seq-advances */
+static std::atomic<int> g_wfTimeouts{0};   /* phase2 debug: waitFrame timeouts */
 static double g_rbEmaMs = 0;          /* EMA of sync-copy cost */
 static int    g_rbOverBudgetStreak = 0;
 static int    g_rbArrivals = 0;       /* frames mpv offered this window */
@@ -1520,8 +1529,8 @@ static bool useRing() { int m = readbackMode(); return m == 1 || (m == 0 && g_au
  * the 1-second cadence average stays locked at 24.0 fps. A skipped frame just
  * means the consumer keeps showing the previous one for one extra poll cycle.
  * Without the fence API the old blocking behavior is preserved. */
-static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
-    const long long bytes = (long long)w * h * 4;
+static bool gl_readback_async(GlRenderer *gl, int w, int h, int rowBytes, void *pixels) {
+    const long long bytes = (long long)rowBytes * h;
     bool got = false;
     if (gl->pboHasPrev) {
         int outSlot = (gl->pboIndex + GlRenderer::kPboCount - 1) % GlRenderer::kPboCount;
@@ -1571,9 +1580,15 @@ static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
         }
     }
     /* Issue this frame's transfer into the next slot — never the one just
-     * read out (ring size >= 2). */
+     * read out (ring size >= 2). PACK_ROW_LENGTH makes each landed row
+     * stride-aligned with the destination bitmap when the frame is smaller
+     * than the grow-only allocation; tightly packed when equal (rowBytes/4
+     * == w), which is also the reset default. */
+    bool strided = rowBytes > 0 && (rowBytes / 4) != w;
+    if (strided) gl->glPixelStorei(GL_PACK_ROW_LENGTH, rowBytes / 4);
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[gl->pboIndex]);
     gl->glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, reinterpret_cast<void*>(0));
+    if (strided) gl->glPixelStorei(GL_PACK_ROW_LENGTH, 0);
     /* Fence only in explicit fence mode; auto/legacy rings copy blocking. */
     if (readbackMode() == 3 && gl->glFenceSync) {
         if (gl->pboFences[gl->pboIndex]) {
@@ -1794,8 +1809,19 @@ struct MpvPlayer {
     std::mutex    mutex;
     mpv_render_context *renderCtx;
     std::atomic<bool>  framePending;
+    /* Frame-signal latch for the Kotlin producer (phase 2: event-driven pump).
+     * render_update_cb bumps frameCbSeq under frameCbMutex; waitFrame() blocks
+     * until seq advances past the caller's last-seen value or times out.
+     * destroy() notifies so a blocked producer returns promptly. */
+    std::mutex         frameCbMutex;
+    std::condition_variable frameCbCv;
+    uint64_t           frameCbSeq = 0;
     GlRenderer    gl;
     bool          useGl = false;
+    /* Compatibility rendering: skip GL entirely, render with mpv's SW path
+     * and decode with auto-copy (GPU decode, copy-back frames). Set from the
+     * app's "Compatibility rendering" setting or NUVIO_SW_RENDER env. */
+    bool          forceSoftwareRenderer = false;
     /* DRM render node passed via MPV_RENDER_PARAM_DRM_DISPLAY_V2 so mpv's
      * vaapi interop can build a VA display for zero-copy EGL/dmabuf decode.
      * Owned here (mpv only copies the struct, not the fd). */
@@ -1816,6 +1842,12 @@ struct MpvPlayer {
     bool          renderResult = false;
     int           renderWidth = 0;
     int           renderHeight = 0;
+    /* Destination row stride in BYTES. Equals width*4 when the frame fills a
+     * tightly-packed buffer; larger when frames render into a grow-only Skia
+     * bitmap whose capacity exceeds the current window (rowBytes = capW*4).
+     * glReadPixels honors it via GL_PACK_ROW_LENGTH; the SW path passes it as
+     * MPV_RENDER_PARAM_SW_STRIDE. */
+    int           renderRowBytes = 0;
     void         *renderBuffer = nullptr;
     std::mutex    renderInitMutex;
     std::condition_variable renderInitCv;
@@ -1833,19 +1865,42 @@ struct MpvPlayer {
     std::atomic<double>  cachedBufferedPosition;
     std::atomic<int>     cachedPaused;
     std::atomic<int>     cachedEnded;
+    /* Latched on MPV_EVENT_FILE_LOADED, cleared on START_FILE/END_FILE — the
+     * "demuxer has delivered media+tracks" signal the Kotlin track-preference
+     * retry window keys on. */
+    std::atomic<int>     cachedFileLoaded;
     std::atomic<int>     cachedPausedForCache;
     std::atomic<double>  cachedSpeed;
     std::atomic<double>  cachedVolume;
 
+    /* Playback-quality telemetry (mpv approximations, event-thread caches,
+     * read by JNI getters from arbitrary threads). Surfaced so a reporter's
+     * debug log can distinguish 'decode too slow' (decoder drops) from
+     * 'presentation jitter' (mistimed/delayed frames) from 'source too slow'
+     * (bitrate vs cache growth) without shipping extra tooling. */
+    std::atomic<double>  cachedEstimatedVfFps;
+    std::atomic<double>  cachedVideoBitrate;
+    std::atomic<int64_t> cachedMistimedFrameCount;
+    std::atomic<int64_t> cachedVoDelayedFrameCount;
+    std::atomic<int64_t> cachedDecoderFrameDropCount;
+
     /* Track lists rebuilt by the event thread on track-list changes. */
     std::string cachedAudioTracksJson;
     std::string cachedSubtitleTracksJson;
+
+    /* Mutex-guarded mirror of currentHwdecName for cross-thread JNI reads
+     * (currentHwdecName itself stays event-thread-only for the fallback logic). */
+    std::string cachedHwdecName;
 
     /* Software-decode warning (logged once per file) and frame-drop tracking
      * (event-thread only; reset on file-loaded). */
     bool          warnedSoftwareDecode = false;
     int64_t       lastDropFrameCount = -1;
     int64_t       lastVoDropFrameCount = -1;
+    /* Last hwdec-current VALUE we logged unconditionally — transitions between
+     * decoders mid-stream must be visible in any log level (a silent
+     * zero-copy→copy degradation otherwise looks like nothing happened). */
+    std::string   loggedHwdecValue;
 
     /* Runtime hwdec fallback (event-thread only). When mpv repeatedly fails
      * to map zero-copy surfaces ("Mapping hardware decoded surface failed" —
@@ -1876,14 +1931,25 @@ struct MpvPlayer {
     MpvPlayer() : mpv(nullptr), running(false),
                   renderCtx(nullptr), framePending(false),
                   cachedDuration(0), cachedPosition(0), cachedBufferedPosition(0),
-                  cachedPaused(1), cachedEnded(0), cachedPausedForCache(0),
+                  cachedPaused(1), cachedEnded(0), cachedFileLoaded(0), cachedPausedForCache(0),
                   cachedSpeed(1.0), cachedVolume(100.0),
+                  cachedEstimatedVfFps(0), cachedVideoBitrate(0),
+                  cachedMistimedFrameCount(0), cachedVoDelayedFrameCount(0),
+                  cachedDecoderFrameDropCount(0),
                   pendingInitialPositionMs(0) {}
     ~MpvPlayer() { destroy(); }
 
     void enqueueCommand(std::function<void()> command) {
-        std::lock_guard<std::mutex> lock(cmdMutex);
-        pendingCommands.push_back(std::move(command));
+        {
+            std::lock_guard<std::mutex> lock(cmdMutex);
+            pendingCommands.push_back(std::move(command));
+        }
+        /* Wake the event loop out of its (up-to-250ms) wait_event sleep so
+         * queued commands apply within ~1-2ms. Without this, continuous
+         * gestures — volume-slider drags above all — trail the pointer in
+         * audible rubber-band steps. Safe to call from any thread; spurious
+         * wakeups with an empty queue are harmless (drain + re-wait). */
+        if (mpv) p_mpv_wakeup(mpv);
     }
 
     void drainCommands() {
@@ -1899,10 +1965,30 @@ struct MpvPlayer {
 
     static void render_update_cb(void *ctx) {
         /* Called on an mpv internal thread; only signal, never call mpv here. */
-        static_cast<MpvPlayer*>(ctx)->framePending.store(true);
+        auto *p = static_cast<MpvPlayer*>(ctx);
+        p->framePending.store(true);
+        g_cbFires++;
+        /* Wake a blocked waitFrame() JNI caller (producer coroutine). Lock the
+         * mutex for the seq bump so waiters can't miss a wakeup between their
+         * predicate check and wait. */
+        {
+            std::lock_guard<std::mutex> lk(p->frameCbMutex);
+            p->frameCbSeq++;
+        }
+        p->frameCbCv.notify_all();
     }
 
     void destroy() {
+        /* Wake a producer blocked in waitFrame() so dispose() isn't serialized
+         * behind its (≤100ms) timeout. The seq predicate won't satisfy — the
+         * waiter returns via timeout with an unchanged seq and then observes
+         * the dead handle. */
+        {
+            std::lock_guard<std::mutex> lk(frameCbMutex);
+            frameCbSeq++;
+        }
+        frameCbCv.notify_all();
+
         /* Wake the event loop so a blocked mpv_wait_event returns promptly,
          * then ALWAYS join both threads. The loop may already have exited on
          * its own: MPV_EVENT_SHUTDOWN fires when the core quits (e.g. a user
@@ -1945,7 +2031,9 @@ struct MpvPlayer {
          * fall back to the software renderer if GL is unusable. */
     bool ok = false;
     init_readback_mode();
-    if (gl_init(&gl)) {
+    /* forceSoftwareRenderer (compatibility mode) skips the GL attempt entirely
+     * and lands in the SW branch below. */
+    if (!forceSoftwareRenderer && gl_init(&gl)) {
             mpv_opengl_init_params initParams;
             initParams.get_proc_address = gl_get_proc_address_cb;
             initParams.get_proc_address_ctx = &gl;
@@ -2004,8 +2092,7 @@ struct MpvPlayer {
             ok = true;
         }
         if (ok) {
-            p_mpv_render_context_set_update_callback(renderCtx, MpvPlayer::render_update_cb, this);
-            DBG("render context created (mode=%s)", useGl ? "opengl" : "sw");
+            p_mpv_render_context_set_update_callback(renderCtx, MpvPlayer::render_update_cb, this);            DBG("render context created (mode=%s)", useGl ? "opengl" : "sw");
         } else {
             LOG("mpv_render_context_create failed");
         }
@@ -2024,13 +2111,21 @@ struct MpvPlayer {
             renderRequestPending = false;
             int w = renderWidth;
             int h = renderHeight;
+            int rowBytes = renderRowBytes > 0 ? renderRowBytes : w * 4;
             void *pixels = renderBuffer;
             lock.unlock();
 
 
 
             bool result = false;
-            /* Present-time hint for mpv's frame selection / video-sync pacing.
+            /* NOTE: deliberately NOT calling mpv_render_context_update() here.
+             * Measured (phase 2 instrumentation): with ADVANCED_CONTROL, an
+             * unconsumed update state makes mpv re-fire the update callback
+             * once per presented frame (~24/s); calling update() clears that
+             * state and the callback collapses to ~10/s — starving the
+             * event-driven producer. The framePending latch set by our own
+             * update callback is the sole frame-availability signal instead.
+             * Present-time hint for mpv's frame selection / video-sync pacing.
              * Without MPV_RENDER_PARAM_NEXT_FRAME_INFO, mpv renders whatever
              * frame is current at call time, so the caller's render cadence
              * (here: the Compose frame clock) overrides mpv's own display
@@ -2064,25 +2159,31 @@ struct MpvPlayer {
                         gl.glBindFramebuffer(GL_FRAMEBUFFER, gl.fbo);
                         if (!useRing()) {
                             /* Synchronous read straight into the Kotlin
-                             * buffer. Deterministic per-frame cost and no
+                             * (Skia-owned) buffer. Deterministic per-frame cost and no
                              * DMA race — measured smoother than any async
                              * variant on discrete GPUs (RDNA4 verified).
                              * Auto mode escalates below if this GPU can't
                              * afford it (weak iGPU, issue #13). */
                             auto t0 = std::chrono::steady_clock::now();
+                            bool strided = (rowBytes / 4) != w;
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, rowBytes / 4);
                             gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, 0);
                             double ms = std::chrono::duration<double, std::milli>(
                                 std::chrono::steady_clock::now() - t0).count();
                             g_rbEmaMs = g_rbEmaMs * 0.9 + ms * 0.1;
                             g_rbWaitCount++; g_rbWaitSumMs += ms;
                             if (ms > g_rbWaitMaxMs) g_rbWaitMaxMs = ms;
                             result = true;
-                        } else if (gl_pbo_ensure(&gl, w, h)) {
+                        } else if (gl_pbo_ensure(&gl, w, h, rowBytes)) {
                             /* Async: issue this frame's transfer, deliver the
                              * previous request's completed one. */
-                            result = gl_readback_async(&gl, w, h, pixels);
+                            result = gl_readback_async(&gl, w, h, rowBytes, pixels);
                         } else {
+                            bool strided = (rowBytes / 4) != w;
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, rowBytes / 4);
                             gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, 0);
                             result = true;
                         }
                         if (result) g_rbPublished++;
@@ -2101,12 +2202,13 @@ struct MpvPlayer {
                         if (windowMs >= 1000.0) {
                             int m = readbackMode();
                             DBG("readback stats[%s]: copies %d (avg %.2fms max %.1fms) "
-                                "skips %d, arrivals %d published %d, ema %.2fms",
+                                "skips %d, arrivals %d published %d, ema %.2fms | cb=%d wfWake=%d wfTO=%d",
                                 useRing() ? (m == 3 ? "fence" : "ring") : "sync",
                                 g_rbWaitCount,
                                 g_rbWaitCount ? g_rbWaitSumMs / g_rbWaitCount : 0.0,
                                 g_rbWaitMaxMs, g_rbSkipCount,
-                                g_rbArrivals, g_rbPublished, g_rbEmaMs);
+                                g_rbArrivals, g_rbPublished, g_rbEmaMs,
+                                g_cbFires.exchange(0), g_wfWakes.exchange(0), g_wfTimeouts.exchange(0));
                             if (m == 0 && !g_autoEscalated && g_rbArrivals > 0) {
                                 /* Escalate when sync demonstrably cannot keep
                                  * pace: sustained oversized copies OR frames
@@ -2129,7 +2231,7 @@ struct MpvPlayer {
                 }
             } else {
                 int size[2] = { w, h };
-                size_t stride = (size_t)w * 4;
+                size_t stride = (size_t)rowBytes;
                 mpv_render_param renderParams[] = {
                     { MPV_RENDER_PARAM_SW_SIZE,    &size },
                     { MPV_RENDER_PARAM_SW_FORMAT,  (void*)"rgb0" },
@@ -2152,8 +2254,11 @@ struct MpvPlayer {
             renderCv.notify_all();
         }
 
-        /* Teardown on this thread: render context first, then GL state. */
+        /* Teardown on this thread: render context first, then GL state.
+         * Detach the update callback BEFORE freeing the context so mpv can't
+         * invoke the trampoline into a player that's mid-teardown. */
         if (renderCtx) {
+            p_mpv_render_context_set_update_callback(renderCtx, nullptr, nullptr);
             p_mpv_render_context_free(renderCtx);
             renderCtx = nullptr;
         }
@@ -2179,9 +2284,17 @@ struct MpvPlayer {
                    const char *sourceAudioUrl,
                    const char * const *headers, int numHeaders,
                    int playWhenReady, int64_t initialPositionMs,
-                   int decoderPriority, int64_t streamCacheBytes,
+                   int decoderPriority, bool forceSwRenderer,
+                   int64_t streamCacheBytes,
                    bool streamCacheOnDisk)
     {
+        /* Compatibility-rendering escape hatch (phase 4): env override wins so
+         * testers can flip it without touching settings storage. */
+        this->forceSoftwareRenderer =
+            forceSwRenderer || getenv("NUVIO_SW_RENDER") != nullptr;
+        if (this->forceSoftwareRenderer) {
+            LOG("software renderer FORCED (compatibility mode) — decode via auto-copy");
+        }
         LOG("initialize: url=%s audioUrl=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
             sourceUrl, sourceAudioUrl ? sourceAudioUrl : "(none)", numHeaders, playWhenReady,
             (long long)initialPositionMs, decoderPriority);
@@ -2410,6 +2523,11 @@ after_hwdec:
         p_mpv_observe_property(mpv, 0, "hwdec-active", MPV_FORMAT_FLAG);
         p_mpv_observe_property(mpv, 0, "drop-frame-count", MPV_FORMAT_INT64);
         p_mpv_observe_property(mpv, 0, "vo-drop-frame-count", MPV_FORMAT_INT64);
+        p_mpv_observe_property(mpv, 0, "estimated-vf-fps", MPV_FORMAT_DOUBLE);
+        p_mpv_observe_property(mpv, 0, "video-bitrate", MPV_FORMAT_DOUBLE);
+        p_mpv_observe_property(mpv, 0, "mistimed-frame-count", MPV_FORMAT_INT64);
+        p_mpv_observe_property(mpv, 0, "vo-delayed-frame-count", MPV_FORMAT_INT64);
+        p_mpv_observe_property(mpv, 0, "decoder-frame-drop-count", MPV_FORMAT_INT64);
 
         /* Load the file. The initial position (if any) is applied once
          * MPV_EVENT_FILE_LOADED arrives — a seek issued immediately after
@@ -2531,13 +2649,19 @@ after_hwdec:
                 break;
             }
 
+            if (evId == MPV_EVENT_START_FILE) {
+                cachedFileLoaded = 0;
+            }
+
             if (evId == MPV_EVENT_END_FILE && evData) {
                 mpv_event_end_file *ef = (mpv_event_end_file*)evData;
                 cachedEnded = (ef->reason == MPV_END_FILE_REASON_EOF) ? 1 : 0;
+                cachedFileLoaded = 0;
             }
 
             if (evId == MPV_EVENT_FILE_LOADED) {
                 cachedEnded = 0;
+                cachedFileLoaded = 1;
                 warnedSoftwareDecode = false;
                 lastDropFrameCount = -1;
                 lastVoDropFrameCount = -1;
@@ -2618,7 +2742,28 @@ after_hwdec:
                 else if (strcmp(pname, "hwdec-current") == 0 && prop->format == MPV_FORMAT_STRING) {
                     const char *hwdec = pdata ? *(const char**)pdata : nullptr;
                     currentHwdecName = hwdec ? hwdec : "";
+                    {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        cachedHwdecName = currentHwdecName;
+                    }
                     DBG("hwdec-current = %s", hwdec ? hwdec : "(null)");
+                    /* Unconditional (NOT debug-gated): a decoder TRANSITION mid-stream
+                     * must be visible in any log — e.g. zero-copy vaapi silently
+                     * degrading to vaapi-copy, or nvdec dropping to software. Fires
+                     * only when the value actually changes (mpv reports the initial
+                     * empty value at observe time; that one is skipped). */
+                    if (currentHwdecName != loggedHwdecValue) {
+                        bool first = loggedHwdecValue.empty();
+                        if (!currentHwdecName.empty()) {
+                            const char *codec = p_mpv_get_property_string(mpv, "video-codec");
+                            LOG("decoder: %s %s (codec=%s)",
+                                first ? "attached:" : "changed:",
+                                currentHwdecName.c_str(),
+                                codec ? codec : "unknown");
+                            if (codec) p_mpv_free((void*)codec);
+                        }
+                        loggedHwdecValue = currentHwdecName;
+                    }
                     if (hwdec && strcmp(hwdec, "no") == 0 && !warnedSoftwareDecode) {
                         warnedSoftwareDecode = true;
                         LOG("software decoding active (hwdec-current=no) — 4K/high-bitrate streams may lag on this hardware");
@@ -2641,6 +2786,16 @@ after_hwdec:
                         lastVoDropFrameCount = drops;
                     }
                 }
+                else if (strcmp(pname, "estimated-vf-fps") == 0 && prop->format == MPV_FORMAT_DOUBLE)
+                    cachedEstimatedVfFps = *(double*)pdata;
+                else if (strcmp(pname, "video-bitrate") == 0 && prop->format == MPV_FORMAT_DOUBLE)
+                    cachedVideoBitrate = *(double*)pdata;
+                else if (strcmp(pname, "mistimed-frame-count") == 0 && prop->format == MPV_FORMAT_INT64)
+                    cachedMistimedFrameCount = *(int64_t*)pdata;
+                else if (strcmp(pname, "vo-delayed-frame-count") == 0 && prop->format == MPV_FORMAT_INT64)
+                    cachedVoDelayedFrameCount = *(int64_t*)pdata;
+                else if (strcmp(pname, "decoder-frame-drop-count") == 0 && prop->format == MPV_FORMAT_INT64)
+                    cachedDecoderFrameDropCount = *(int64_t*)pdata;
             }
         }
     }
@@ -2703,6 +2858,7 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     jboolean playWhenReady,
     jlong initialPositionMs,
     jint decoderPriority,
+    jboolean forceSoftwareRenderer,
     jlong streamCacheBytes,
     jboolean streamCacheOnDisk)
 {
@@ -2763,6 +2919,7 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
                                   headers.data(), (int)headers.size(),
                                   playWhenReady, static_cast<int64_t>(initialPositionMs),
                                   decoderPriority,
+                                  forceSoftwareRenderer ? true : false,
                                   static_cast<int64_t>(streamCacheBytes),
                                   streamCacheOnDisk ? true : false);
     LOG("create: player->initialize returned %d", ret);
@@ -2860,6 +3017,65 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
         return JNI_FALSE;
     }
     return player->renderResult ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Direct-write variant: renders into caller-owned memory (a Skia bitmap's
+ * pixel address obtained via Bitmap.peekPixels()). Removes the intermediate
+ * ByteBuffer→byte[] copy the ByteBuffer variant required for installPixels.
+ * [address] must stay valid until this call returns — the Kotlin slot keeps
+ * a strong reference to the owning bitmap, and the render-thread handoff
+ * completes synchronously before publish. */
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_renderFrameInto(
+    JNIEnv *env, jclass clazz, jlong handle, jint width, jint height,
+    jlong address, jint rowBytes)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player || !player->renderCtx) return JNI_FALSE;
+    if (width <= 0 || height <= 0) return JNI_FALSE;
+    if (address == 0) return JNI_FALSE;
+    if (rowBytes < width * 4) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+
+    if (!player->framePending.exchange(false)) return JNI_FALSE;
+    g_rbArrivals++; /* mpv offered a frame — pressure metric for auto escalation */
+
+    {
+        std::unique_lock<std::mutex> lock(player->renderMutex);
+        player->renderWidth = width;
+        player->renderHeight = height;
+        player->renderRowBytes = rowBytes;
+        player->renderBuffer = reinterpret_cast<void*>(static_cast<uintptr_t>(address));
+        player->renderRequestPending = true;
+        player->renderDone = false;
+    }
+    player->renderCv.notify_all();
+
+    std::unique_lock<std::mutex> lock(player->renderMutex);
+    player->renderCv.wait_for(lock, std::chrono::seconds(2), [&] { return player->renderDone; });
+    if (!player->renderDone) {
+        DBG("renderFrameInto: timed out waiting for render thread");
+        return JNI_FALSE;
+    }
+    return player->renderResult ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Block until the render update callback fires again (seq > [lastSeq]) or
+ * [timeoutMs] elapses; returns the current sequence number. The Kotlin
+ * producer uses this instead of 1ms polling: playing → wakes per mpv frame,
+ * paused/hidden → sleeps. destroy() bumps seq to release blocked waiters. */
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_waitFrame(
+    JNIEnv *env, jclass clazz, jlong handle, jlong lastSeq, jint timeoutMs)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return lastSeq;
+    PlayerUse use(player);
+    if (!use.ok) return lastSeq;
+    std::unique_lock<std::mutex> lock(player->frameCbMutex);
+    if (player->frameCbSeq > (uint64_t)lastSeq) { g_wfWakes++; return (jlong)player->frameCbSeq; }
+    player->frameCbCv.wait_for(lock, std::chrono::milliseconds(timeoutMs < 0 ? 0 : timeoutMs));
+    if (player->frameCbSeq > (uint64_t)lastSeq) g_wfWakes++; else g_wfTimeouts++;
+    return (jlong)player->frameCbSeq;
 }
 
 JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setPaused(
@@ -3057,6 +3273,16 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     return player->cachedEnded ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_isFileLoaded(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+    return player->cachedFileLoaded ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_isPaused(
     JNIEnv *env, jclass clazz, jlong handle)
 {
@@ -3075,6 +3301,70 @@ JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativeP
     PlayerUse use(player);
     if (!use.ok) return 1.0f;
     return (jfloat)player->cachedSpeed.load();
+}
+
+/* ---- Playback-quality telemetry getters (atomic caches; see struct) ---- */
+
+JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_estimatedVfFps(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0.0f;
+    PlayerUse use(player);
+    if (!use.ok) return 0.0f;
+    return (jfloat)player->cachedEstimatedVfFps.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_videoBitrate(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedVideoBitrate.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_mistimedFrameCount(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedMistimedFrameCount.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_voDelayedFrameCount(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedVoDelayedFrameCount.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_decoderFrameDropCount(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedDecoderFrameDropCount.load();
+}
+
+JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_hwdecCurrent(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return env->NewStringUTF("");
+    PlayerUse use(player);
+    if (!use.ok) return env->NewStringUTF("");
+    /* mutex: cachedHwdecName is written by the event thread under this lock */
+    std::lock_guard<std::mutex> _l(player->mutex);
+    return env->NewStringUTF(player->cachedHwdecName.c_str());
 }
 
 JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_audioTracksJson(

@@ -61,6 +61,7 @@ data class PlayerSettingsUiState(
     val streamReuseLastLinkEnabled: Boolean = false,
     val streamReuseLastLinkCacheHours: Int = 24,
     val decoderPriority: Int = 1,
+    val forceSoftwareRenderer: Boolean = false,
     val streamCacheSize: StreamCacheSize = StreamCacheSize.MB_256,
     val streamCacheOnDisk: Boolean = false,
     val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.MANUAL,
@@ -110,6 +111,7 @@ object PlayerSettingsRepository {
     private var streamReuseLastLinkEnabled = false
     private var streamReuseLastLinkCacheHours = 24
     private var decoderPriority = 1
+    private var forceSoftwareRenderer = false
     private var streamCacheSize = StreamCacheSize.MB_256
     private var streamCacheOnDisk = false
     private var streamAutoPlayMode = StreamAutoPlayMode.MANUAL
@@ -164,6 +166,7 @@ object PlayerSettingsRepository {
         streamReuseLastLinkEnabled = false
         streamReuseLastLinkCacheHours = 24
         decoderPriority = 1
+        forceSoftwareRenderer = false
         streamCacheSize = StreamCacheSize.MB_256
         streamCacheOnDisk = false
         streamAutoPlayMode = StreamAutoPlayMode.MANUAL
@@ -251,6 +254,7 @@ object PlayerSettingsRepository {
         streamReuseLastLinkEnabled = PlayerSettingsStorage.loadStreamReuseLastLinkEnabled() ?: false
         streamReuseLastLinkCacheHours = PlayerSettingsStorage.loadStreamReuseLastLinkCacheHours() ?: 24
         decoderPriority = PlayerSettingsStorage.loadDecoderPriority() ?: 1
+        forceSoftwareRenderer = PlayerSettingsStorage.loadForceSoftwareRenderer() ?: false
         streamCacheSize = PlayerSettingsStorage.loadStreamCacheSize()
             ?.let { runCatching { StreamCacheSize.valueOf(it) }.getOrNull() }
             ?: StreamCacheSize.MB_256
@@ -489,6 +493,16 @@ object PlayerSettingsRepository {
         PlayerSettingsStorage.saveDecoderPriority(priority)
     }
 
+    /** Compatibility rendering: software render path + copy-back decoding.
+     *  Last rung under the automatic GL→SW fallback for broken GL stacks. */
+    fun setForceSoftwareRenderer(enabled: Boolean) {
+        ensureLoaded()
+        if (forceSoftwareRenderer == enabled) return
+        forceSoftwareRenderer = enabled
+        publish()
+        PlayerSettingsStorage.saveForceSoftwareRenderer(enabled)
+    }
+
     fun setStreamCacheSize(size: StreamCacheSize) {
         ensureLoaded()
         if (streamCacheSize == size) return
@@ -697,6 +711,7 @@ object PlayerSettingsRepository {
             streamReuseLastLinkEnabled = streamReuseLastLinkEnabled,
             streamReuseLastLinkCacheHours = streamReuseLastLinkCacheHours,
             decoderPriority = decoderPriority,
+            forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheSize = streamCacheSize,
             streamCacheOnDisk = streamCacheOnDisk,
             streamAutoPlayMode = streamAutoPlayMode,

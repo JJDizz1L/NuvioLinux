@@ -62,6 +62,7 @@ internal class NativePlayerController(
         playWhenReady: Boolean,
         initialPositionMs: Long,
         decoderPriority: Int,
+        forceSoftwareRenderer: Boolean,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
         onError: (String?) -> Unit,
@@ -73,6 +74,7 @@ internal class NativePlayerController(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs.coerceAtLeast(0L),
             decoderPriority = decoderPriority,
+            forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheBytes = streamCacheBytes,
             streamCacheOnDisk = streamCacheOnDisk,
             onError = onError,
@@ -81,7 +83,7 @@ internal class NativePlayerController(
         log.d {
             "attach requested source=${sourceUrl.toPlaybackLogKey()} audio=${!sourceAudioUrl.isNullOrBlank()} " +
                 "headers=${sourceHeaders.size} playWhenReady=$playWhenReady " +
-                "initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority"
+                "initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority swRender=$forceSoftwareRenderer"
         }
         attachPending()
     }
@@ -135,6 +137,7 @@ internal class NativePlayerController(
                     playWhenReady = pending.playWhenReady,
                     initialPositionMs = pending.initialPositionMs,
                     decoderPriority = pending.decoderPriority,
+                    forceSoftwareRenderer = pending.forceSoftwareRenderer,
                     streamCacheBytes = pending.streamCacheBytes,
                     streamCacheOnDisk = pending.streamCacheOnDisk,
                 ).also { handle ->
@@ -238,6 +241,7 @@ internal class NativePlayerController(
             val isEnded = NativePlayerBridge.isEnded(current)
             PlayerPlaybackSnapshot(
                 isLoading = isLoading,
+                fileLoaded = NativePlayerBridge.isFileLoaded(current),
                 isPlaying = !NativePlayerBridge.isPaused(current) && !isLoading && !isEnded,
                 isEnded = isEnded,
                 durationMs = NativePlayerBridge.durationMs(current),
@@ -275,6 +279,77 @@ internal class NativePlayerController(
                     log.w(error) { "renderFrame JNI failed handle=$current" }
                 }
                 false
+            }
+    }
+
+    /** Playback-quality telemetry snapshot (atomic C++ caches; cheap, any thread).
+     *  All zeros/blank before media is loaded — callers must tolerate that. */
+    data class RenderStats(
+        val estimatedVfFps: Float,
+        val videoBitrateBytesPerSec: Long,
+        val mistimedFrameCount: Long,
+        val voDelayedFrameCount: Long,
+        val decoderFrameDropCount: Long,
+        val hwdecCurrent: String,
+    )
+
+    /**
+     * Renders the latest video frame directly into [address] (a Skia bitmap's
+     * pixel memory from Bitmap.peekPixels). Stride-aware: rows land
+     * [rowBytes]-aligned even when the bitmap is larger than the frame.
+     * Returns true exactly when a new frame was rendered.
+     */
+    fun renderFrameInto(width: Int, height: Int, address: Long, rowBytes: Int): Boolean {
+        if (disposed) return false
+        val current = handle
+        if (current == 0L) return false
+        return runCatching { NativePlayerBridge.renderFrameInto(current, width, height, address, rowBytes) }
+            .getOrElse { error ->
+                if (error !is NoClassDefFoundError) {
+                    log.w(error) { "renderFrameInto JNI failed handle=$current" }
+                }
+                false
+            }
+    }
+
+    fun renderStats(): RenderStats {
+        if (disposed) return RenderStats(0f, 0, 0, 0, 0, "")
+        val current = handle
+        if (current == 0L) return RenderStats(0f, 0, 0, 0, 0, "")
+        return runCatching {
+            RenderStats(
+                estimatedVfFps = NativePlayerBridge.estimatedVfFps(current),
+                videoBitrateBytesPerSec = NativePlayerBridge.videoBitrate(current),
+                mistimedFrameCount = NativePlayerBridge.mistimedFrameCount(current),
+                voDelayedFrameCount = NativePlayerBridge.voDelayedFrameCount(current),
+                decoderFrameDropCount = NativePlayerBridge.decoderFrameDropCount(current),
+                hwdecCurrent = NativePlayerBridge.hwdecCurrent(current),
+            )
+        }.getOrElse { error ->
+            if (error !is NoClassDefFoundError) {
+                log.w(error) { "renderStats JNI failed handle=$current" }
+            }
+            RenderStats(0f, 0, 0, 0, 0, "")
+        }
+    }
+
+    /**
+     * Blocks until mpv signals a new frame (seq advances past [lastSeq]) or
+     * [timeoutMs] elapses; returns the latest sequence. Replaces the producer's
+     * 1ms polling: playing surfaces wake per frame, paused ones sleep. A size
+     * change must NOT wait — callers bypass this when the window was resized
+     * so paused video still re-renders at the new geometry.
+     */
+    fun waitFrame(lastSeq: Long, timeoutMs: Int): Long {
+        if (disposed) return lastSeq
+        val current = handle
+        if (current == 0L) return lastSeq
+        return runCatching { NativePlayerBridge.waitFrame(current, lastSeq, timeoutMs) }
+            .getOrElse { error ->
+                if (error !is NoClassDefFoundError) {
+                    log.w(error) { "waitFrame JNI failed handle=$current" }
+                }
+                lastSeq
             }
     }
 
@@ -331,6 +406,7 @@ internal class NativePlayerController(
             playWhenReady = pending.playWhenReady,
             initialPositionMs = pending.initialPositionMs,
             decoderPriority = pending.decoderPriority,
+            forceSoftwareRenderer = pending.forceSoftwareRenderer,
             streamCacheBytes = pending.streamCacheBytes,
             streamCacheOnDisk = pending.streamCacheOnDisk,
             onError = pending.onError,
@@ -536,6 +612,7 @@ private data class PendingSource(
     val playWhenReady: Boolean,
     val initialPositionMs: Long,
     val decoderPriority: Int,
+    val forceSoftwareRenderer: Boolean,
     val streamCacheBytes: Long,
     val streamCacheOnDisk: Boolean,
     val onError: (String?) -> Unit,

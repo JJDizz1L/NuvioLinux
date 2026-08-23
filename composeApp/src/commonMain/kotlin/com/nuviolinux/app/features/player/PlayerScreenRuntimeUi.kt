@@ -436,6 +436,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         )
         if (playerSurfaceSourceUrl != null) {
             PlatformPlayerSurface(
+                cursorControlEnabled = true,
                 sourceUrl = playerSurfaceSourceUrl,
                 sourceAudioUrl = activeSourceAudioUrl,
                 sourceHeaders = activeSourceHeaders,
@@ -470,6 +471,16 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 onSnapshot = { snapshot ->
                     playbackSnapshot = snapshot
                     if (!snapshot.isLoading) initialLoadCompleted = true
+                    // Self-healing preference application: the startup retry
+                    // window can expire before a slow-opening source delivers
+                    // its track list; re-apply opportunistically (idempotent —
+                    // the applied-flags latch bounds this to one real pass)
+                    // until the preferred audio/subtitle tracks latch.
+                    if ((!preferredAudioSelectionApplied || !preferredSubtitleSelectionApplied) &&
+                        snapshot.fileLoaded && !snapshot.isLoading && playerController != null
+                    ) {
+                        refreshTracks()
+                    }
                     val pendingScrub = scrubbingPositionMs
                     if (!isScrubbingTimeline && pendingScrub != null && !snapshot.isLoading &&
                         abs(snapshot.positionMs - pendingScrub) < 2_000L

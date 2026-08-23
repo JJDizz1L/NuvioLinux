@@ -348,4 +348,6 @@ expect fun PlatformPlayerSurface(
     onControllerReady: (PlayerEngineController) -> Unit,
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
     onError: (String?) -> Unit,
+    /** false for passive surfaces (trailers) sharing a window with a real player. */
+    cursorControlEnabled: Boolean = true,
 )

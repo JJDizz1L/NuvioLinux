@@ -66,6 +66,8 @@ enum class PlayerResizeMode {
 
 data class PlayerPlaybackSnapshot(
     val isLoading: Boolean = true,
+    /** mpv FILE_LOADED latch: the demuxer has delivered media and its track list. */
+    val fileLoaded: Boolean = false,
     val isPlaying: Boolean = false,
     val isEnded: Boolean = false,
     val durationMs: Long = 0L,

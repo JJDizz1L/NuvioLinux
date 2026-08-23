@@ -19,12 +19,27 @@ internal object NativePlayerBridge {
         playWhenReady: Boolean,
         initialPositionMs: Long,
         decoderPriority: Int,
+        forceSoftwareRenderer: Boolean,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
     ): Long
 
     external fun dispose(handle: Long)
     external fun renderFrame(handle: Long, width: Int, height: Int, buffer: java.nio.ByteBuffer): Boolean
+    /**
+     * Direct-write variant: renders into caller-owned memory (a Skia bitmap's
+     * pixel address from [org.jetbrains.skia.Bitmap.peekPixels]). [rowBytes]
+     * is the destination stride in bytes; rows land stride-aligned via
+     * GL_PACK_ROW_LENGTH / MPV_RENDER_PARAM_SW_STRIDE. The address must stay
+     * valid for the duration of the call (slot owns the bitmap).
+     */
+    external fun renderFrameInto(handle: Long, width: Int, height: Int, address: Long, rowBytes: Int): Boolean
+    /**
+     * Blocks until the render update callback fires again (returned seq >
+     * [lastSeq]) or [timeoutMs] elapses. Event-driven pump replacement for
+     * 1ms polling; destroy() bumps seq so blocked waiters return promptly.
+     */
+    external fun waitFrame(handle: Long, lastSeq: Long, timeoutMs: Int): Long
     external fun setPaused(handle: Long, paused: Boolean)
     external fun seekTo(handle: Long, positionMs: Long)
     external fun seekBy(handle: Long, offsetMs: Long)
@@ -40,8 +55,22 @@ internal object NativePlayerBridge {
     external fun bufferedPositionMs(handle: Long): Long
     external fun isLoading(handle: Long): Boolean
     external fun isEnded(handle: Long): Boolean
+    /** True once mpv fired FILE_LOADED for the current file (demuxer delivered media + tracks). */
+    external fun isFileLoaded(handle: Long): Boolean
     external fun isPaused(handle: Long): Boolean
     external fun speed(handle: Long): Float
+
+    // Playback-quality telemetry (mpv approximations; atomic caches on the C++
+    // side, safe to poll from any thread). Consumed by the 1 Hz cadence line.
+    external fun estimatedVfFps(handle: Long): Float
+    /** Estimated video bitrate in bytes/second. */
+    external fun videoBitrate(handle: Long): Long
+    external fun mistimedFrameCount(handle: Long): Long
+    external fun voDelayedFrameCount(handle: Long): Long
+    external fun decoderFrameDropCount(handle: Long): Long
+    /** The decoder mpv actually opened for the current file ("", "no", "vaapi", "nvdec", …). */
+    external fun hwdecCurrent(handle: Long): String
+
     external fun audioTracksJson(handle: Long): String
     external fun subtitleTracksJson(handle: Long): String
     external fun selectAudioTrack(handle: Long, trackId: Int)

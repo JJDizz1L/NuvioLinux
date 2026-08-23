@@ -1,5 +1,7 @@
 package com.nuviolinux.app.features.player
 
+import co.touchlab.kermit.Logger
+
 internal val PlayerScreenRuntime.subtitleStyle: SubtitleStyleState
     get() = playerSettingsUiState.subtitleStyle
 
@@ -170,6 +172,11 @@ internal fun PlayerScreenRuntime.refreshTracks() {
 
     if (!preferredAudioSelectionApplied) {
         if (preferredAudioTargets.isEmpty()) {
+            Logger.withTag("PlayerTracks").d {
+                "audio auto-select skipped — no targets " +
+                    "(pref=${playerSettingsUiState.preferredAudioLanguage}, " +
+                    "sec=${playerSettingsUiState.secondaryPreferredAudioLanguage ?: "none"})"
+            }
             preferredAudioSelectionApplied = true
         } else if (audioTracks.isNotEmpty()) {
             val preferredAudioIndex = findPreferredTrackIndex(
@@ -177,9 +184,27 @@ internal fun PlayerScreenRuntime.refreshTracks() {
                 targets = preferredAudioTargets,
                 language = ::resolveAudioTrackLanguageTarget,
             )
-            if (preferredAudioIndex >= 0 && preferredAudioIndex != selectedAudioIndex) {
-                playerController?.selectAudioTrack(preferredAudioIndex)
-                selectedAudioIndex = preferredAudioIndex
+            when {
+                preferredAudioIndex >= 0 && preferredAudioIndex != selectedAudioIndex -> {
+                    val track = audioTracks[preferredAudioIndex]
+                    Logger.withTag("PlayerTracks").d {
+                        "audio auto-select applied idx=$preferredAudioIndex " +
+                            "lang=${track.language} label=${track.label} " +
+                            "(targets=$preferredAudioTargets)"
+                    }
+                    playerController?.selectAudioTrack(preferredAudioIndex)
+                    selectedAudioIndex = preferredAudioIndex
+                }
+                preferredAudioIndex >= 0 ->
+                    Logger.withTag("PlayerTracks").d {
+                        "audio auto-select: preferred track already active " +
+                            "idx=$preferredAudioIndex (targets=$preferredAudioTargets)"
+                    }
+                else -> Logger.withTag("PlayerTracks").d {
+                    "audio auto-select found no match — keeping container default " +
+                        "(targets=$preferredAudioTargets, " +
+                        "tracks=${audioTracks.map { it.language }})"
+                }
             }
             preferredAudioSelectionApplied = true
         }
