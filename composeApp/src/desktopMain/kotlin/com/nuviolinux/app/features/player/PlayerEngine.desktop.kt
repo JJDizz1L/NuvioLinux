@@ -458,6 +458,16 @@ private fun ComposeVideoSurface(
          * consumer ticks irregularly (XWayland/GLX swap pacing), which reads
          * as 'smooth but jittery'. */
         var lastTickNs = 0L
+        /* Judder metric: intervals between CONSECUTIVE new-content frames —
+         * the actual displayed durations. 24fps@120Hz ideal reads ~41.7ms;
+         * the fixed-120Hz 5-5-5-6 cadence shows max≈50ms; producer lateness
+         * shows scattered outliers (>55ms = a missed beat). */
+        var lastNewFrameNs = 0L
+        var nfMinMs = Double.MAX_VALUE
+        var nfMaxMs = 0.0
+        var nfSumMs = 0.0
+        var nfCount = 0
+        var nfOver55 = 0
         var tickCount = 0
         var tickMinMs = Double.MAX_VALUE
         var tickMaxMs = 0.0
@@ -492,6 +502,15 @@ private fun ComposeVideoSurface(
                 }
                 drawingSlot = index
                 distinctFrames++
+                if (lastNewFrameNs != 0L) {
+                    val deltaMs = (frameNs - lastNewFrameNs) / 1_000_000.0
+                    nfSumMs += deltaMs
+                    if (deltaMs < nfMinMs) nfMinMs = deltaMs
+                    if (deltaMs > nfMaxMs) nfMaxMs = deltaMs
+                    if (deltaMs > 55.0) nfOver55++
+                    nfCount++
+                }
+                lastNewFrameNs = frameNs
                 synchronized(slotLock) {
                     frameImage = slots[index].bitmap.asComposeImageBitmap()
                     /* Frames render into a capacity-sized bitmap; draw only
@@ -507,21 +526,27 @@ private fun ComposeVideoSurface(
                 val windowMs = (frameNs - consumerStatsWindowNs) / 1_000_000.0
                 if (windowMs >= 1000.0) {
                     consumerLog.d {
-                        "consumer stats: $tickCount ticks (avg %.2fms min %.2f max %.2f), " +
+                        val tickLine = if (tickCount > 1)
+                            "%.2f/%.2f/%.2f".format(
+                                tickSumMs / (tickCount - 1), tickMinMs, tickMaxMs)
+                        else "n/a"
+                        val ageLine = if (ageCount > 0)
+                            "%.1f/%.1f".format(ageSumMs / ageCount, ageMaxMs)
+                        else "n/a"
+                        val nfLine = if (nfCount > 0)
+                            "min %.1f avg %.1f max %.1f over55=%d/%d"
+                                .format(nfMinMs, nfSumMs / nfCount, nfMaxMs, nfOver55, nfCount)
+                        else "n/a"
+                        "consumer stats: $tickCount ticks ($tickLine), " +
                             "$distinctFrames new frames, $staleTicks stale ticks, " +
-                            "age avg %.1fms max %.1fms"
-                            .format(
-                                if (tickCount > 1) tickSumMs / (tickCount - 1) else 0.0,
-                                if (tickCount > 1) tickMinMs else 0.0,
-                                tickMaxMs,
-                                if (ageCount > 0) ageSumMs / ageCount else 0.0,
-                                ageMaxMs,
-                            )
+                            "age $ageLine | newFrameΔ ms: $nfLine"
                     }
                     lastTickNs = frameNs
                     tickCount = 0; tickMinMs = Double.MAX_VALUE; tickMaxMs = 0.0; tickSumMs = 0.0
                     distinctFrames = 0; staleTicks = 0
                     ageSumMs = 0.0; ageMaxMs = 0.0; ageCount = 0
+                    lastNewFrameNs = 0L
+                    nfMinMs = Double.MAX_VALUE; nfMaxMs = 0.0; nfSumMs = 0.0; nfCount = 0; nfOver55 = 0
                     consumerStatsWindowNs = frameNs
                 }
             }
