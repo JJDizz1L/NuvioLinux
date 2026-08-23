@@ -282,6 +282,14 @@ internal class NativePlayerController(
             }
     }
 
+    /** Current media position (atomic cache read; cheap, any thread). */
+    fun positionMs(): Long {
+        if (disposed) return 0L
+        val current = handle
+        if (current == 0L) return 0L
+        return runCatching { NativePlayerBridge.positionMs(current) }.getOrDefault(0L)
+    }
+
     /** Playback-quality telemetry snapshot (atomic C++ caches; cheap, any thread).
      *  All zeros/blank before media is loaded — callers must tolerate that. */
     data class RenderStats(

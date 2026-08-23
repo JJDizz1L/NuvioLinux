@@ -294,6 +294,7 @@ private fun ComposeVideoSurface(
         var lastHeight = 0
         var cadenceStartNs = 0L
         var cadenceFrames = 0
+        var prodSkips = 0
 
         /* Allocate a slot's buffers for the current size if they don't match.
          * Must be called with slotLock held. Deliberately does NOT touch other
@@ -347,6 +348,10 @@ private fun ComposeVideoSurface(
          * not wait (paused video re-renders at the new geometry on the next
          * render call), so size changes bypass the block. */
         launch(Dispatchers.Default) {
+            /* NUVIO_PUMP_POLL=1 restores the pre-phase-2 pump verbatim (1ms
+             * polling, no callback gating) for A/B judder comparison. */
+            val pollPump = System.getenv("NUVIO_PUMP_POLL") == "1"
+            if (pollPump) log.i { "frame pump: legacy 1ms polling mode (NUVIO_PUMP_POLL)" }
             var seenFrameSeq = 0L
             while (coroutineContext.isActive) {
                 val size = awtWindowSizeState.value ?: surfaceSize
@@ -364,20 +369,26 @@ private fun ComposeVideoSurface(
                  * rendering would skip the frame on screen (measured: ~1.5%
                  * published-frame deficit = visible micro-judder on pans). */
                 var produceNow = false
-                if (newestSlot.get() != -1) {
+                if (newestSlot.get() != -1 && !pollPump) {
                     seenFrameSeq = controller.waitFrame(seenFrameSeq, 8)
                     if (newestSlot.get() != -1) continue
                     produceNow = true // slot just freed — render pending frame NOW
                 }
 
                 if (!sizeChanged && !produceNow) {
-                    /* Bounded-wait pull: sleep up to 20ms, waking EARLY when
-                     * mpv's update callback signals a frame. Renders happen
-                     * every pass — mpv's callback rate follows consumption
-                     * rate (instrumented: pure event-blocking self-starves to
-                     * ~10 signals/s; pulling keeps it locked to video FPS).
-                     * Net wakeups ≈ 50-70/s vs ~1000/s under 1ms polling. */
-                    controller.waitFrame(seenFrameSeq, 20)
+                    if (pollPump) {
+                        /* Legacy pump: 1ms cadence, no callback gating — every
+                         * free slot attempts production each pass. */
+                        delay(1L)
+                    } else {
+                        /* Bounded-wait pull: sleep up to 20ms, waking EARLY when
+                         * mpv's update callback signals a frame. Renders happen
+                         * every pass — mpv's callback rate follows consumption
+                         * rate (instrumented: pure event-blocking self-starves to
+                         * ~10 signals/s; pulling keeps it locked to video FPS).
+                         * Net wakeups ≈ 50-70/s vs ~1000/s under 1ms polling. */
+                        controller.waitFrame(seenFrameSeq, 20)
+                    }
                 }
                 lastWidth = size.width
                 lastHeight = size.height
@@ -399,6 +410,7 @@ private fun ComposeVideoSurface(
                     size.width, size.height, pixmap.addr, pixmap.rowBytes,
                 )
                 if (!rendered) {
+                    prodSkips++
                     synchronized(slotLock) { free.addLast(index) }
                     /* No new frame pending (signal already consumed by an
                      * earlier produce). Sleep briefly rather than spin; the
@@ -406,6 +418,7 @@ private fun ComposeVideoSurface(
                     delay(1L)
                     continue
                 }
+                slot.posMs = controller.positionMs()
                 /* Bump skia's generation id so the next asComposeImageBitmap/
                  * draw sees the fresh pixels mpv just wrote behind its back.
                  * Happens BEFORE publish — slot access is serialized by the
@@ -440,10 +453,12 @@ private fun ComposeVideoSurface(
                                 " bitrate=${"%.1f".format(mbps)}Mbps" +
                                 " decDrops=${stats.decoderFrameDropCount}" +
                                 " mistimed=${stats.mistimedFrameCount}" +
-                                " delayed=${stats.voDelayedFrameCount}]"
+                                " delayed=${stats.voDelayedFrameCount}" +
+                                " skipped=$prodSkips]"
                         }
                         cadenceStartNs = nowNs
                         cadenceFrames = 0
+                        prodSkips = 0
                     }
                 } else {
                     synchronized(slotLock) { free.addLast(index) }
@@ -468,6 +483,12 @@ private fun ComposeVideoSurface(
         var nfSumMs = 0.0
         var nfCount = 0
         var nfOver55 = 0
+        /* Displayed-position deltas: Δ≈42ms normal; Δ<15ms = REPEATED frame;
+         * Δ>65ms = SKIPPED frame. rep/jump counts are the judder signature
+         * that per-second frame counts cannot see. */
+        var lastPosMs = -1L
+        var repCount = 0
+        var jumpCount = 0
         var tickCount = 0
         var tickMinMs = Double.MAX_VALUE
         var tickMaxMs = 0.0
@@ -512,6 +533,13 @@ private fun ComposeVideoSurface(
                 }
                 lastNewFrameNs = frameNs
                 synchronized(slotLock) {
+                    val pos = slots[index].posMs
+                    if (lastPosMs >= 0 && pos > lastPosMs) {
+                        val posDelta = pos - lastPosMs
+                        if (posDelta < 15) repCount++          /* repeated frame */
+                        else if (posDelta > 65) jumpCount++    /* skipped frame */
+                    }
+                    if (pos >= 0) lastPosMs = pos
                     frameImage = slots[index].bitmap.asComposeImageBitmap()
                     /* Frames render into a capacity-sized bitmap; draw only
                      * the w×h sub-rect mpv actually filled this cycle. */
@@ -539,7 +567,8 @@ private fun ComposeVideoSurface(
                         else "n/a"
                         "consumer stats: $tickCount ticks ($tickLine), " +
                             "$distinctFrames new frames, $staleTicks stale ticks, " +
-                            "age $ageLine | newFrameΔ ms: $nfLine"
+                            "age $ageLine | newFrameΔ ms: $nfLine " +
+                            "posΔ: rep=$repCount jump=$jumpCount"
                     }
                     lastTickNs = frameNs
                     tickCount = 0; tickMinMs = Double.MAX_VALUE; tickMaxMs = 0.0; tickSumMs = 0.0
@@ -547,6 +576,7 @@ private fun ComposeVideoSurface(
                     ageSumMs = 0.0; ageMaxMs = 0.0; ageCount = 0
                     lastNewFrameNs = 0L
                     nfMinMs = Double.MAX_VALUE; nfMaxMs = 0.0; nfSumMs = 0.0; nfCount = 0; nfOver55 = 0
+                    lastPosMs = -1L; repCount = 0; jumpCount = 0
                     consumerStatsWindowNs = frameNs
                 }
             }
@@ -604,6 +634,10 @@ private class RenderSlot {
     var hasPixels: Boolean = false
     var width: Int = 0
     var height: Int = 0
+    /** Media position (ms) of the frame mpv rendered into this slot — lets the
+     *  consumer detect displayed-frame REPEATS (Δ≈0) and SKIPS (Δ≈2×period),
+     *  the judder signature that frame-count telemetry cannot see. */
+    var posMs: Long = -1L
     /** System.nanoTime when the producer published this slot (consumer-side
      *  staleness telemetry). */
     @Volatile
