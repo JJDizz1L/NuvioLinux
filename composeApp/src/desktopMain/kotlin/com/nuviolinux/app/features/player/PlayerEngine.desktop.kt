@@ -377,9 +377,22 @@ private fun ComposeVideoSurface(
                     cadenceFrames++
                     val cadenceMs = (nowNs - cadenceStartNs) / 1_000_000L
                     if (cadenceMs >= 1000L) {
+                        /* Telemetry snapshot (atomic C++ caches): distinguishes
+                         * 'decode too slow' (decoder drops) from 'presentation
+                         * jitter' (mistimed/delayed frames) from 'source too
+                         * slow' (bitrate vs cache growth). Zeros before media
+                         * loads — harmless in the log. */
+                        val stats = controller.renderStats()
+                        val mbps = stats.videoBitrateBytesPerSec * 8.0 / 1_000_000.0
                         log.d {
                             "render cadence: $cadenceFrames frames in ${cadenceMs}ms (" +
-                                "%.1f fps".format(cadenceFrames * 1000.0 / cadenceMs) + ")"
+                                "%.1f fps".format(cadenceFrames * 1000.0 / cadenceMs) +
+                                ") [hwdec=${stats.hwdecCurrent.ifBlank { "none" }}" +
+                                " mpv-fps=${"%.1f".format(stats.estimatedVfFps)}" +
+                                " bitrate=${"%.1f".format(mbps)}Mbps" +
+                                " decDrops=${stats.decoderFrameDropCount}" +
+                                " mistimed=${stats.mistimedFrameCount}" +
+                                " delayed=${stats.voDelayedFrameCount}]"
                         }
                         cadenceStartNs = nowNs
                         cadenceFrames = 0

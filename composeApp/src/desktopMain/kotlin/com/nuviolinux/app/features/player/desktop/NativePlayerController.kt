@@ -278,6 +278,38 @@ internal class NativePlayerController(
             }
     }
 
+    /** Playback-quality telemetry snapshot (atomic C++ caches; cheap, any thread).
+     *  All zeros/blank before media is loaded — callers must tolerate that. */
+    data class RenderStats(
+        val estimatedVfFps: Float,
+        val videoBitrateBytesPerSec: Long,
+        val mistimedFrameCount: Long,
+        val voDelayedFrameCount: Long,
+        val decoderFrameDropCount: Long,
+        val hwdecCurrent: String,
+    )
+
+    fun renderStats(): RenderStats {
+        if (disposed) return RenderStats(0f, 0, 0, 0, 0, "")
+        val current = handle
+        if (current == 0L) return RenderStats(0f, 0, 0, 0, 0, "")
+        return runCatching {
+            RenderStats(
+                estimatedVfFps = NativePlayerBridge.estimatedVfFps(current),
+                videoBitrateBytesPerSec = NativePlayerBridge.videoBitrate(current),
+                mistimedFrameCount = NativePlayerBridge.mistimedFrameCount(current),
+                voDelayedFrameCount = NativePlayerBridge.voDelayedFrameCount(current),
+                decoderFrameDropCount = NativePlayerBridge.decoderFrameDropCount(current),
+                hwdecCurrent = NativePlayerBridge.hwdecCurrent(current),
+            )
+        }.getOrElse { error ->
+            if (error !is NoClassDefFoundError) {
+                log.w(error) { "renderStats JNI failed handle=$current" }
+            }
+            RenderStats(0f, 0, 0, 0, 0, "")
+        }
+    }
+
     /** Reports mouse activity over the Compose video surface (reveals controls). */
     fun reportCursorActivity() {
         onEvent("cursorActivity", 0.0)

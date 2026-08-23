@@ -42,6 +42,18 @@ internal object NativePlayerBridge {
     external fun isEnded(handle: Long): Boolean
     external fun isPaused(handle: Long): Boolean
     external fun speed(handle: Long): Float
+
+    // Playback-quality telemetry (mpv approximations; atomic caches on the C++
+    // side, safe to poll from any thread). Consumed by the 1 Hz cadence line.
+    external fun estimatedVfFps(handle: Long): Float
+    /** Estimated video bitrate in bytes/second. */
+    external fun videoBitrate(handle: Long): Long
+    external fun mistimedFrameCount(handle: Long): Long
+    external fun voDelayedFrameCount(handle: Long): Long
+    external fun decoderFrameDropCount(handle: Long): Long
+    /** The decoder mpv actually opened for the current file ("", "no", "vaapi", "nvdec", …). */
+    external fun hwdecCurrent(handle: Long): String
+
     external fun audioTracksJson(handle: Long): String
     external fun subtitleTracksJson(handle: Long): String
     external fun selectAudioTrack(handle: Long, trackId: Int)

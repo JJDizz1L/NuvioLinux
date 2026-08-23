@@ -1837,15 +1837,34 @@ struct MpvPlayer {
     std::atomic<double>  cachedSpeed;
     std::atomic<double>  cachedVolume;
 
+    /* Playback-quality telemetry (mpv approximations, event-thread caches,
+     * read by JNI getters from arbitrary threads). Surfaced so a reporter's
+     * debug log can distinguish 'decode too slow' (decoder drops) from
+     * 'presentation jitter' (mistimed/delayed frames) from 'source too slow'
+     * (bitrate vs cache growth) without shipping extra tooling. */
+    std::atomic<double>  cachedEstimatedVfFps;
+    std::atomic<double>  cachedVideoBitrate;
+    std::atomic<int64_t> cachedMistimedFrameCount;
+    std::atomic<int64_t> cachedVoDelayedFrameCount;
+    std::atomic<int64_t> cachedDecoderFrameDropCount;
+
     /* Track lists rebuilt by the event thread on track-list changes. */
     std::string cachedAudioTracksJson;
     std::string cachedSubtitleTracksJson;
+
+    /* Mutex-guarded mirror of currentHwdecName for cross-thread JNI reads
+     * (currentHwdecName itself stays event-thread-only for the fallback logic). */
+    std::string cachedHwdecName;
 
     /* Software-decode warning (logged once per file) and frame-drop tracking
      * (event-thread only; reset on file-loaded). */
     bool          warnedSoftwareDecode = false;
     int64_t       lastDropFrameCount = -1;
     int64_t       lastVoDropFrameCount = -1;
+    /* Last hwdec-current VALUE we logged unconditionally — transitions between
+     * decoders mid-stream must be visible in any log level (a silent
+     * zero-copy→copy degradation otherwise looks like nothing happened). */
+    std::string   loggedHwdecValue;
 
     /* Runtime hwdec fallback (event-thread only). When mpv repeatedly fails
      * to map zero-copy surfaces ("Mapping hardware decoded surface failed" —
@@ -1878,6 +1897,9 @@ struct MpvPlayer {
                   cachedDuration(0), cachedPosition(0), cachedBufferedPosition(0),
                   cachedPaused(1), cachedEnded(0), cachedPausedForCache(0),
                   cachedSpeed(1.0), cachedVolume(100.0),
+                  cachedEstimatedVfFps(0), cachedVideoBitrate(0),
+                  cachedMistimedFrameCount(0), cachedVoDelayedFrameCount(0),
+                  cachedDecoderFrameDropCount(0),
                   pendingInitialPositionMs(0) {}
     ~MpvPlayer() { destroy(); }
 
@@ -2410,6 +2432,11 @@ after_hwdec:
         p_mpv_observe_property(mpv, 0, "hwdec-active", MPV_FORMAT_FLAG);
         p_mpv_observe_property(mpv, 0, "drop-frame-count", MPV_FORMAT_INT64);
         p_mpv_observe_property(mpv, 0, "vo-drop-frame-count", MPV_FORMAT_INT64);
+        p_mpv_observe_property(mpv, 0, "estimated-vf-fps", MPV_FORMAT_DOUBLE);
+        p_mpv_observe_property(mpv, 0, "video-bitrate", MPV_FORMAT_DOUBLE);
+        p_mpv_observe_property(mpv, 0, "mistimed-frame-count", MPV_FORMAT_INT64);
+        p_mpv_observe_property(mpv, 0, "vo-delayed-frame-count", MPV_FORMAT_INT64);
+        p_mpv_observe_property(mpv, 0, "decoder-frame-drop-count", MPV_FORMAT_INT64);
 
         /* Load the file. The initial position (if any) is applied once
          * MPV_EVENT_FILE_LOADED arrives — a seek issued immediately after
@@ -2618,7 +2645,28 @@ after_hwdec:
                 else if (strcmp(pname, "hwdec-current") == 0 && prop->format == MPV_FORMAT_STRING) {
                     const char *hwdec = pdata ? *(const char**)pdata : nullptr;
                     currentHwdecName = hwdec ? hwdec : "";
+                    {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        cachedHwdecName = currentHwdecName;
+                    }
                     DBG("hwdec-current = %s", hwdec ? hwdec : "(null)");
+                    /* Unconditional (NOT debug-gated): a decoder TRANSITION mid-stream
+                     * must be visible in any log — e.g. zero-copy vaapi silently
+                     * degrading to vaapi-copy, or nvdec dropping to software. Fires
+                     * only when the value actually changes (mpv reports the initial
+                     * empty value at observe time; that one is skipped). */
+                    if (currentHwdecName != loggedHwdecValue) {
+                        bool first = loggedHwdecValue.empty();
+                        if (!currentHwdecName.empty()) {
+                            const char *codec = p_mpv_get_property_string(mpv, "video-codec");
+                            LOG("decoder: %s %s (codec=%s)",
+                                first ? "attached:" : "changed:",
+                                currentHwdecName.c_str(),
+                                codec ? codec : "unknown");
+                            if (codec) p_mpv_free((void*)codec);
+                        }
+                        loggedHwdecValue = currentHwdecName;
+                    }
                     if (hwdec && strcmp(hwdec, "no") == 0 && !warnedSoftwareDecode) {
                         warnedSoftwareDecode = true;
                         LOG("software decoding active (hwdec-current=no) — 4K/high-bitrate streams may lag on this hardware");
@@ -2641,6 +2689,16 @@ after_hwdec:
                         lastVoDropFrameCount = drops;
                     }
                 }
+                else if (strcmp(pname, "estimated-vf-fps") == 0 && prop->format == MPV_FORMAT_DOUBLE)
+                    cachedEstimatedVfFps = *(double*)pdata;
+                else if (strcmp(pname, "video-bitrate") == 0 && prop->format == MPV_FORMAT_DOUBLE)
+                    cachedVideoBitrate = *(double*)pdata;
+                else if (strcmp(pname, "mistimed-frame-count") == 0 && prop->format == MPV_FORMAT_INT64)
+                    cachedMistimedFrameCount = *(int64_t*)pdata;
+                else if (strcmp(pname, "vo-delayed-frame-count") == 0 && prop->format == MPV_FORMAT_INT64)
+                    cachedVoDelayedFrameCount = *(int64_t*)pdata;
+                else if (strcmp(pname, "decoder-frame-drop-count") == 0 && prop->format == MPV_FORMAT_INT64)
+                    cachedDecoderFrameDropCount = *(int64_t*)pdata;
             }
         }
     }
@@ -3075,6 +3133,70 @@ JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativeP
     PlayerUse use(player);
     if (!use.ok) return 1.0f;
     return (jfloat)player->cachedSpeed.load();
+}
+
+/* ---- Playback-quality telemetry getters (atomic caches; see struct) ---- */
+
+JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_estimatedVfFps(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0.0f;
+    PlayerUse use(player);
+    if (!use.ok) return 0.0f;
+    return (jfloat)player->cachedEstimatedVfFps.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_videoBitrate(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedVideoBitrate.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_mistimedFrameCount(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedMistimedFrameCount.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_voDelayedFrameCount(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedVoDelayedFrameCount.load();
+}
+
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_decoderFrameDropCount(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0;
+    PlayerUse use(player);
+    if (!use.ok) return 0;
+    return (jlong)player->cachedDecoderFrameDropCount.load();
+}
+
+JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_hwdecCurrent(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return env->NewStringUTF("");
+    PlayerUse use(player);
+    if (!use.ok) return env->NewStringUTF("");
+    /* mutex: cachedHwdecName is written by the event thread under this lock */
+    std::lock_guard<std::mutex> _l(player->mutex);
+    return env->NewStringUTF(player->cachedHwdecName.c_str());
 }
 
 JNIEXPORT jstring JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_audioTracksJson(
