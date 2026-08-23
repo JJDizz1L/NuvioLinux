@@ -1940,8 +1940,16 @@ struct MpvPlayer {
     ~MpvPlayer() { destroy(); }
 
     void enqueueCommand(std::function<void()> command) {
-        std::lock_guard<std::mutex> lock(cmdMutex);
-        pendingCommands.push_back(std::move(command));
+        {
+            std::lock_guard<std::mutex> lock(cmdMutex);
+            pendingCommands.push_back(std::move(command));
+        }
+        /* Wake the event loop out of its (up-to-250ms) wait_event sleep so
+         * queued commands apply within ~1-2ms. Without this, continuous
+         * gestures — volume-slider drags above all — trail the pointer in
+         * audible rubber-band steps. Safe to call from any thread; spurious
+         * wakeups with an empty queue are harmless (drain + re-wait). */
+        if (mpv) p_mpv_wakeup(mpv);
     }
 
     void drainCommands() {
