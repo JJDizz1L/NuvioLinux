@@ -436,6 +436,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         )
         if (playerSurfaceSourceUrl != null) {
             PlatformPlayerSurface(
+                cursorControlEnabled = true,
                 sourceUrl = playerSurfaceSourceUrl,
                 sourceAudioUrl = activeSourceAudioUrl,
                 sourceHeaders = activeSourceHeaders,

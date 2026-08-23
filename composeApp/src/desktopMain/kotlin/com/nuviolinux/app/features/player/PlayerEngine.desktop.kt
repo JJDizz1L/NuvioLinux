@@ -69,8 +69,10 @@ actual fun PlatformPlayerSurface(
     onControllerReady: (PlayerEngineController) -> Unit,
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
     onError: (String?) -> Unit,
+    cursorControlEnabled: Boolean,
 ) {
     NativePlayerSurface(
+        cursorControlEnabled = cursorControlEnabled,
         sourceUrl = sourceUrl,
         sourceAudioUrl = sourceAudioUrl,
         sourceHeaders = sourceHeaders,
@@ -104,9 +106,12 @@ private fun NativePlayerSurface(
     onControllerReady: (PlayerEngineController) -> Unit,
     onSnapshot: (PlayerPlaybackSnapshot) -> Unit,
     onError: (String?) -> Unit,
+    cursorControlEnabled: Boolean,
 ) {
     val log = remember { Logger.withTag("NativePlayerSurface") }
     val host = remember { ComposeRenderSurfaceHost() }
+    /* Set during composition so it precedes attachWindow's first apply. */
+    host.cursorControlEnabled = cursorControlEnabled
     val controller = remember(host) { NativePlayerController(host) }
     val playbackHeaders = remember(sourceHeaders) { sanitizePlaybackHeaders(sourceHeaders) }
     log.d { "composed — sourceUrl=${sourceUrl.take(80)}" }

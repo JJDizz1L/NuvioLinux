@@ -171,6 +171,8 @@ fun TrailerPlayerPopup(
 
                     playbackSource != null -> {
                         PlatformPlayerSurface(
+                            // Passive popup preview: never touches the window cursor.
+                            cursorControlEnabled = false,
                             sourceUrl = playbackSource.videoUrl,
                             sourceAudioUrl = playbackSource.audioUrl,
                             useYoutubeChunkedPlayback = true,

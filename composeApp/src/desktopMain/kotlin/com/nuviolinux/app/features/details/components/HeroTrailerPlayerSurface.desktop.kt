@@ -132,6 +132,9 @@ private fun DesktopTrailerPlayerSession(
 
     Box(modifier = modifier.clipToBounds()) {
         PlatformPlayerSurface(
+            // Passive preview sharing the window with the app UI: it must not
+            // touch the cursor (no controls runtime to re-hide it).
+            cursorControlEnabled = false,
             sourceUrl = sourceUrl,
             sourceAudioUrl = sourceAudioUrl,
             modifier = Modifier

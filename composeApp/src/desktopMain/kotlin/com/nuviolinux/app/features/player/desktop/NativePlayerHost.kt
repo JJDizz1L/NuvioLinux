@@ -18,6 +18,14 @@ internal interface NativePlayerSurfaceHost {
     fun isDisplayable(): Boolean
     var onPeerReady: (() -> Unit)?
     var onCursorActivity: (() -> Unit)?
+
+    /**
+     * When false this surface never touches the window cursor. Secondary
+     * surfaces mounted in the SAME window (hero/trailer previews) must opt
+     * out: they have no controls runtime to hide the cursor again, so any
+     * show they trigger would stick until the next main-player idle cycle.
+     */
+    var cursorControlEnabled: Boolean
     fun setControlsVisible(visible: Boolean)
     fun resetCursorVisibility()
     fun requestFocusInWindow(): Boolean
@@ -41,6 +49,8 @@ internal class ComposeRenderSurfaceHost : NativePlayerSurfaceHost {
     @Volatile
     private var controlsVisible = true
 
+    override var cursorControlEnabled: Boolean = true
+
     private var blankCursor: Cursor? = null
 
     override fun isDisplayable(): Boolean = true
@@ -59,6 +69,7 @@ internal class ComposeRenderSurfaceHost : NativePlayerSurfaceHost {
     override fun requestFocusInWindow(): Boolean = currentWindow()?.requestFocusInWindow() ?: false
 
     override fun noteCursorActivity() {
+        if (!cursorControlEnabled) return
         // Reveal the cursor on any mouse movement; the controls auto-hide
         // timer hides it again together with the controls overlay.
         applyCursor(showCursor = true)
@@ -76,6 +87,7 @@ internal class ComposeRenderSurfaceHost : NativePlayerSurfaceHost {
     /** Restores the default cursor when the window loses focus (and re-applies
      * the hidden state when focus returns). */
     fun onWindowFocusChanged(gained: Boolean) {
+        if (!cursorControlEnabled) return
         if (gained) {
             resetCursorVisibility()
         } else {
@@ -92,6 +104,7 @@ internal class ComposeRenderSurfaceHost : NativePlayerSurfaceHost {
     }
 
     private fun applyCursor(showCursor: Boolean) {
+        if (!cursorControlEnabled) return
         val w = currentWindow() ?: return
         val cursor = if (showCursor) Cursor.getDefaultCursor() else blankCursor()
         if (SwingUtilities.isEventDispatchThread()) {
