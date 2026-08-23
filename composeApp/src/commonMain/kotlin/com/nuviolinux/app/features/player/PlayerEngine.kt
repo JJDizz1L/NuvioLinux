@@ -1,6 +1,7 @@
 package com.nuviolinux.app.features.player
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
 
 interface PlayerEngineController {
@@ -52,6 +53,7 @@ enum class PlayerControlsAction {
     DoubleTapSeekForward,
 }
 
+@Immutable
 data class PlayerControlsState(
     val title: String = "",
     val episodeText: String = "",

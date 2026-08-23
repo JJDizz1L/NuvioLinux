@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
@@ -194,7 +196,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
             )
         else -> ""
     }
-    val playerControlsState = PlayerControlsState(
+    val playerControlsStateCandidate = PlayerControlsState(
         title = title,
         episodeText = episodeText,
         streamTitle = activeStreamTitle,
@@ -380,6 +382,10 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         },
         nextEpisodePlayable = nextEpisodeForControls?.hasAired == true,
     )
+    // Stable reference while contents are equal: snapshot ticks (~5/s) otherwise
+    // hand PlatformPlayerSurface a new identity each time, invalidating its whole
+    // body (UI-thread bursts colliding with 4K draw deadlines -> skipped frames).
+    val playerControlsState = remember(playerControlsStateCandidate) { playerControlsStateCandidate }
     val gestureCallbacks = rememberSurfaceGestureCallbacks()
 
     Box(
@@ -435,6 +441,27 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
             durationMs = playbackSnapshot.durationMs,
         )
         if (playerSurfaceSourceUrl != null) {
+            /* Remembered forwarders keep lambda identities stable across parent
+             * recompositions (snapshot ticks) so the native surface is
+             * skippable — without this it recomposed ~5x/s, and each burst of
+             * UI-thread work collided with 4K draw deadlines (skipped frames). */
+            // Captures the enclosing runtime instance (stable for the screen's
+            // lifetime), so identity never changes across recompositions.
+            val onActionStable = remember { { action: PlayerControlsAction ->
+                handlePlayerControlsAction(action)
+            } }
+            val onEventStable = remember { { type: String, value: Double ->
+                handlePlayerControlsEvent(type, value)
+            } }
+            val onScrubChangeStable = remember { { positionMs: Long ->
+                handlePlayerControlsScrubChange(positionMs)
+                true
+            } }
+            val onScrubFinishStable = remember { { positionMs: Long ->
+                handlePlayerControlsScrubFinished(positionMs)
+                true
+            } }
+
             PlatformPlayerSurface(
                 cursorControlEnabled = true,
                 sourceUrl = playerSurfaceSourceUrl,
@@ -449,16 +476,10 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 initialPositionRequestKey = initialPositionRequestKey,
                 resizeMode = resizeMode,
                 playerControlsState = playerControlsState,
-                onPlayerControlsAction = { action -> handlePlayerControlsAction(action) },
-                onPlayerControlsEvent = { type, value -> handlePlayerControlsEvent(type, value) },
-                onPlayerControlsScrubChange = { positionMs ->
-                    handlePlayerControlsScrubChange(positionMs)
-                    true
-                },
-                onPlayerControlsScrubFinished = { positionMs ->
-                    handlePlayerControlsScrubFinished(positionMs)
-                    true
-                },
+                onPlayerControlsAction = onActionStable,
+                onPlayerControlsEvent = onEventStable,
+                onPlayerControlsScrubChange = onScrubChangeStable,
+                onPlayerControlsScrubFinished = onScrubFinishStable,
                 onInitialPositionHandled = { key, handled ->
                     if (key == currentInitialPositionRequestKey()) {
                         initialSeekApplied = handled
