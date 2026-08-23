@@ -49,3 +49,8 @@ DEADCODE.md
 
 # Code review working notes
 REVIEW-NOTES.md
+
+# Local research/plan documents (not repo content)
+Debrify-pipeline.md
+cove-pipeline.md
+render-pipeline-upgrade.md
