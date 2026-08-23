@@ -55,6 +55,8 @@ internal object NativePlayerBridge {
     external fun bufferedPositionMs(handle: Long): Long
     external fun isLoading(handle: Long): Boolean
     external fun isEnded(handle: Long): Boolean
+    /** True once mpv fired FILE_LOADED for the current file (demuxer delivered media + tracks). */
+    external fun isFileLoaded(handle: Long): Boolean
     external fun isPaused(handle: Long): Boolean
     external fun speed(handle: Long): Float
 

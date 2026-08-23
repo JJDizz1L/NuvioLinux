@@ -241,6 +241,7 @@ internal class NativePlayerController(
             val isEnded = NativePlayerBridge.isEnded(current)
             PlayerPlaybackSnapshot(
                 isLoading = isLoading,
+                fileLoaded = NativePlayerBridge.isFileLoaded(current),
                 isPlaying = !NativePlayerBridge.isPaused(current) && !isLoading && !isEnded,
                 isEnded = isEnded,
                 durationMs = NativePlayerBridge.durationMs(current),

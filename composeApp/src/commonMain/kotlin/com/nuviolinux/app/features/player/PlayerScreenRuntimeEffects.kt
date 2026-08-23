@@ -220,11 +220,20 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
 
     LaunchedEffect(
         playerController,
+        playbackSnapshot.fileLoaded,
         playbackSnapshot.isLoading,
         preferredAudioSelectionApplied,
         preferredSubtitleSelectionApplied,
     ) {
-        if (playerController == null || playbackSnapshot.isLoading) {
+        // The retry window starts at FILE_LOADED, not at controller attach:
+        // before mpv fires FILE_LOADED the demuxer has not delivered the track
+        // list, so a window keyed to composition expires before slow-opening
+        // (network/debrid) sources ever expose tracks — and the container's
+        // default-flagged audio/subtitle track then plays forever.
+        if (playerController == null || !playbackSnapshot.fileLoaded) {
+            return@LaunchedEffect
+        }
+        if (playbackSnapshot.isLoading) {
             return@LaunchedEffect
         }
         if (preferredAudioSelectionApplied && preferredSubtitleSelectionApplied) {

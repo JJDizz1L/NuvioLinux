@@ -1865,6 +1865,10 @@ struct MpvPlayer {
     std::atomic<double>  cachedBufferedPosition;
     std::atomic<int>     cachedPaused;
     std::atomic<int>     cachedEnded;
+    /* Latched on MPV_EVENT_FILE_LOADED, cleared on START_FILE/END_FILE — the
+     * "demuxer has delivered media+tracks" signal the Kotlin track-preference
+     * retry window keys on. */
+    std::atomic<int>     cachedFileLoaded;
     std::atomic<int>     cachedPausedForCache;
     std::atomic<double>  cachedSpeed;
     std::atomic<double>  cachedVolume;
@@ -1927,7 +1931,7 @@ struct MpvPlayer {
     MpvPlayer() : mpv(nullptr), running(false),
                   renderCtx(nullptr), framePending(false),
                   cachedDuration(0), cachedPosition(0), cachedBufferedPosition(0),
-                  cachedPaused(1), cachedEnded(0), cachedPausedForCache(0),
+                  cachedPaused(1), cachedEnded(0), cachedFileLoaded(0), cachedPausedForCache(0),
                   cachedSpeed(1.0), cachedVolume(100.0),
                   cachedEstimatedVfFps(0), cachedVideoBitrate(0),
                   cachedMistimedFrameCount(0), cachedVoDelayedFrameCount(0),
@@ -2637,13 +2641,19 @@ after_hwdec:
                 break;
             }
 
+            if (evId == MPV_EVENT_START_FILE) {
+                cachedFileLoaded = 0;
+            }
+
             if (evId == MPV_EVENT_END_FILE && evData) {
                 mpv_event_end_file *ef = (mpv_event_end_file*)evData;
                 cachedEnded = (ef->reason == MPV_END_FILE_REASON_EOF) ? 1 : 0;
+                cachedFileLoaded = 0;
             }
 
             if (evId == MPV_EVENT_FILE_LOADED) {
                 cachedEnded = 0;
+                cachedFileLoaded = 1;
                 warnedSoftwareDecode = false;
                 lastDropFrameCount = -1;
                 lastVoDropFrameCount = -1;
@@ -3253,6 +3263,16 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     PlayerUse use(player);
     if (!use.ok) return JNI_FALSE;
     return player->cachedEnded ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_isFileLoaded(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+    return player->cachedFileLoaded ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_isPaused(
