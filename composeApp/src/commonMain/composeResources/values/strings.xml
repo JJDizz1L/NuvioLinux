@@ -993,6 +993,8 @@
     <string name="settings_stream_cache_2gb">2 GB</string>
     <string name="settings_playback_stream_cache_on_disk">Cache to Disk</string>
     <string name="settings_playback_stream_cache_on_disk_description">Write the stream cache to a temporary file instead of keeping it in memory.</string>
+    <string name="settings_playback_force_software_renderer">Compatibility Rendering</string>
+    <string name="settings_playback_force_software_renderer_description">Use the software renderer with copy-back hardware decoding. Try this if video shows corruption, green frames, or decoding fails on your GPU.</string>
     <string name="settings_playback_dialog_close">Tap outside to close</string>
     <string name="settings_playback_dialog_save_close">Tap outside to save &amp; close</string>
     <string name="settings_playback_duration_day_one">%1$d day</string>

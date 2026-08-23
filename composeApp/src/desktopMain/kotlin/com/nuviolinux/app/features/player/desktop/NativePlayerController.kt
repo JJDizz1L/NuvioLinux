@@ -62,6 +62,7 @@ internal class NativePlayerController(
         playWhenReady: Boolean,
         initialPositionMs: Long,
         decoderPriority: Int,
+        forceSoftwareRenderer: Boolean,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
         onError: (String?) -> Unit,
@@ -73,6 +74,7 @@ internal class NativePlayerController(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs.coerceAtLeast(0L),
             decoderPriority = decoderPriority,
+            forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheBytes = streamCacheBytes,
             streamCacheOnDisk = streamCacheOnDisk,
             onError = onError,
@@ -81,7 +83,7 @@ internal class NativePlayerController(
         log.d {
             "attach requested source=${sourceUrl.toPlaybackLogKey()} audio=${!sourceAudioUrl.isNullOrBlank()} " +
                 "headers=${sourceHeaders.size} playWhenReady=$playWhenReady " +
-                "initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority"
+                "initialPositionMs=$initialPositionMs decoderPriority=$decoderPriority swRender=$forceSoftwareRenderer"
         }
         attachPending()
     }
@@ -135,6 +137,7 @@ internal class NativePlayerController(
                     playWhenReady = pending.playWhenReady,
                     initialPositionMs = pending.initialPositionMs,
                     decoderPriority = pending.decoderPriority,
+                    forceSoftwareRenderer = pending.forceSoftwareRenderer,
                     streamCacheBytes = pending.streamCacheBytes,
                     streamCacheOnDisk = pending.streamCacheOnDisk,
                 ).also { handle ->
@@ -402,6 +405,7 @@ internal class NativePlayerController(
             playWhenReady = pending.playWhenReady,
             initialPositionMs = pending.initialPositionMs,
             decoderPriority = pending.decoderPriority,
+            forceSoftwareRenderer = pending.forceSoftwareRenderer,
             streamCacheBytes = pending.streamCacheBytes,
             streamCacheOnDisk = pending.streamCacheOnDisk,
             onError = pending.onError,
@@ -607,6 +611,7 @@ private data class PendingSource(
     val playWhenReady: Boolean,
     val initialPositionMs: Long,
     val decoderPriority: Int,
+    val forceSoftwareRenderer: Boolean,
     val streamCacheBytes: Long,
     val streamCacheOnDisk: Boolean,
     val onError: (String?) -> Unit,

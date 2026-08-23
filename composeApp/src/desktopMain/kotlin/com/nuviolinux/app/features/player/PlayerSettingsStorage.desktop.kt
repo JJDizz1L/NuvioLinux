@@ -44,6 +44,7 @@ internal actual object PlayerSettingsStorage {
     private const val addonSubtitleStartupModeKey = "addon_subtitle_startup_mode"
     private const val streamReuseLastLinkEnabledKey = "stream_reuse_last_link_enabled"
     private const val streamReuseLastLinkCacheHoursKey = "stream_reuse_last_link_cache_hours"
+    private const val forceSoftwareRendererKey = "force_software_renderer"
     private const val decoderPriorityKey = "decoder_priority"
     private const val streamCacheSizeKey = "stream_cache_size"
     private const val streamCacheOnDiskKey = "stream_cache_on_disk"
@@ -176,6 +177,8 @@ internal actual object PlayerSettingsStorage {
     actual fun saveStreamReuseLastLinkEnabled(enabled: Boolean) = saveBoolean(streamReuseLastLinkEnabledKey, enabled)
     actual fun loadStreamReuseLastLinkCacheHours(): Int? = loadInt(streamReuseLastLinkCacheHoursKey)
     actual fun saveStreamReuseLastLinkCacheHours(hours: Int) = saveInt(streamReuseLastLinkCacheHoursKey, hours)
+    actual fun loadForceSoftwareRenderer(): Boolean? = loadBoolean(forceSoftwareRendererKey)
+    actual fun saveForceSoftwareRenderer(enabled: Boolean) = saveBoolean(forceSoftwareRendererKey, enabled)
     actual fun loadDecoderPriority(): Int? = loadInt(decoderPriorityKey)
     actual fun saveDecoderPriority(priority: Int) = saveInt(decoderPriorityKey, priority)
     actual fun loadStreamCacheSize(): String? = loadString(streamCacheSizeKey)
@@ -269,6 +272,7 @@ internal actual object PlayerSettingsStorage {
         loadDecoderPriority()?.let { put(decoderPriorityKey, encodeSyncInt(it)) }
         loadStreamCacheSize()?.let { put(streamCacheSizeKey, encodeSyncString(it)) }
         loadStreamCacheOnDisk()?.let { put(streamCacheOnDiskKey, encodeSyncBoolean(it)) }
+        loadForceSoftwareRenderer()?.let { put(forceSoftwareRendererKey, encodeSyncBoolean(it)) }
         loadStreamAutoPlayMode()?.let { put(streamAutoPlayModeKey, encodeSyncString(it)) }
         loadStreamAutoPlaySource()?.let { put(streamAutoPlaySourceKey, encodeSyncString(it)) }
         loadStreamAutoPlaySelectedAddons()?.let { put(streamAutoPlaySelectedAddonsKey, encodeSyncStringSet(it)) }
@@ -322,6 +326,7 @@ internal actual object PlayerSettingsStorage {
         payload.decodeSyncInt(decoderPriorityKey)?.let(::saveDecoderPriority)
         payload.decodeSyncString(streamCacheSizeKey)?.let(::saveStreamCacheSize)
         payload.decodeSyncBoolean(streamCacheOnDiskKey)?.let(::saveStreamCacheOnDisk)
+        payload.decodeSyncBoolean(forceSoftwareRendererKey)?.let(::saveForceSoftwareRenderer)
         payload.decodeSyncString(streamAutoPlayModeKey)?.let(::saveStreamAutoPlayMode)
         payload.decodeSyncString(streamAutoPlaySourceKey)?.let(::saveStreamAutoPlaySource)
         payload.decodeSyncStringSet(streamAutoPlaySelectedAddonsKey)?.let(::saveStreamAutoPlaySelectedAddons)

@@ -102,6 +102,7 @@ internal fun LazyListScope.playbackSettingsContent(
     streamReuseLastLinkEnabled: Boolean,
     streamReuseLastLinkCacheHours: Int,
     decoderPriority: Int,
+    forceSoftwareRenderer: Boolean,
     streamCacheSize: StreamCacheSize,
     streamCacheOnDisk: Boolean,
     useLibass: Boolean,
@@ -121,6 +122,7 @@ internal fun LazyListScope.playbackSettingsContent(
             streamReuseLastLinkEnabled = streamReuseLastLinkEnabled,
             streamReuseLastLinkCacheHours = streamReuseLastLinkCacheHours,
             decoderPriority = decoderPriority,
+            forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheSize = streamCacheSize,
             streamCacheOnDisk = streamCacheOnDisk,
             useLibass = useLibass,
@@ -281,6 +283,7 @@ private fun PlaybackSettingsSection(
     streamReuseLastLinkEnabled: Boolean,
     streamReuseLastLinkCacheHours: Int,
     decoderPriority: Int,
+    forceSoftwareRenderer: Boolean,
     streamCacheSize: StreamCacheSize,
     streamCacheOnDisk: Boolean,
     useLibass: Boolean,
@@ -876,6 +879,15 @@ private fun PlaybackSettingsSection(
                     checked = streamCacheOnDisk,
                     isTablet = isTablet,
                     onCheckedChange = PlayerSettingsRepository::setStreamCacheOnDisk,
+                )
+                SettingsGroupDivider(isTablet = isTablet)
+                SettingsSwitchRow(
+                    title = stringResource(Res.string.settings_playback_force_software_renderer),
+                    description = stringResource(Res.string.settings_playback_force_software_renderer_description),
+                    enabled = decoderEnabled,
+                    isTablet = isTablet,
+                    checked = forceSoftwareRenderer,
+                    onCheckedChange = PlayerSettingsRepository::setForceSoftwareRenderer,
                 )
             }
         }

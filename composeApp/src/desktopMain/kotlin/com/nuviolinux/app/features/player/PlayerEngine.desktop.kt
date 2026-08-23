@@ -115,6 +115,7 @@ private fun NativePlayerSurface(
     val latestOnError = rememberUpdatedState(onError)
     val playerSettings by PlayerSettingsRepository.uiState.collectAsState()
     val decoderPriority = playerSettings.decoderPriority
+    val forceSoftwareRenderer = playerSettings.forceSoftwareRenderer
     val streamCacheSize = playerSettings.streamCacheSize
     val streamCacheOnDisk = playerSettings.streamCacheOnDisk
 
@@ -169,6 +170,7 @@ private fun NativePlayerSurface(
         sourceAudioUrl,
         playbackHeaders,
         decoderPriority,
+        forceSoftwareRenderer,
         streamCacheSize,
         streamCacheOnDisk,
         initialPositionMs,
@@ -182,6 +184,7 @@ private fun NativePlayerSurface(
             playWhenReady = playWhenReady,
             initialPositionMs = initialPositionMs,
             decoderPriority = decoderPriority,
+            forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheBytes = streamCacheSize.bytes,
             streamCacheOnDisk = streamCacheOnDisk,
             onError = { message -> latestOnError.value(message) },

@@ -1818,6 +1818,10 @@ struct MpvPlayer {
     uint64_t           frameCbSeq = 0;
     GlRenderer    gl;
     bool          useGl = false;
+    /* Compatibility rendering: skip GL entirely, render with mpv's SW path
+     * and decode with auto-copy (GPU decode, copy-back frames). Set from the
+     * app's "Compatibility rendering" setting or NUVIO_SW_RENDER env. */
+    bool          forceSoftwareRenderer = false;
     /* DRM render node passed via MPV_RENDER_PARAM_DRM_DISPLAY_V2 so mpv's
      * vaapi interop can build a VA display for zero-copy EGL/dmabuf decode.
      * Owned here (mpv only copies the struct, not the fd). */
@@ -2015,7 +2019,9 @@ struct MpvPlayer {
          * fall back to the software renderer if GL is unusable. */
     bool ok = false;
     init_readback_mode();
-    if (gl_init(&gl)) {
+    /* forceSoftwareRenderer (compatibility mode) skips the GL attempt entirely
+     * and lands in the SW branch below. */
+    if (!forceSoftwareRenderer && gl_init(&gl)) {
             mpv_opengl_init_params initParams;
             initParams.get_proc_address = gl_get_proc_address_cb;
             initParams.get_proc_address_ctx = &gl;
@@ -2266,9 +2272,17 @@ struct MpvPlayer {
                    const char *sourceAudioUrl,
                    const char * const *headers, int numHeaders,
                    int playWhenReady, int64_t initialPositionMs,
-                   int decoderPriority, int64_t streamCacheBytes,
+                   int decoderPriority, bool forceSwRenderer,
+                   int64_t streamCacheBytes,
                    bool streamCacheOnDisk)
     {
+        /* Compatibility-rendering escape hatch (phase 4): env override wins so
+         * testers can flip it without touching settings storage. */
+        this->forceSoftwareRenderer =
+            forceSwRenderer || getenv("NUVIO_SW_RENDER") != nullptr;
+        if (this->forceSoftwareRenderer) {
+            LOG("software renderer FORCED (compatibility mode) — decode via auto-copy");
+        }
         LOG("initialize: url=%s audioUrl=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
             sourceUrl, sourceAudioUrl ? sourceAudioUrl : "(none)", numHeaders, playWhenReady,
             (long long)initialPositionMs, decoderPriority);
@@ -2826,6 +2840,7 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     jboolean playWhenReady,
     jlong initialPositionMs,
     jint decoderPriority,
+    jboolean forceSoftwareRenderer,
     jlong streamCacheBytes,
     jboolean streamCacheOnDisk)
 {
@@ -2886,6 +2901,7 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
                                   headers.data(), (int)headers.size(),
                                   playWhenReady, static_cast<int64_t>(initialPositionMs),
                                   decoderPriority,
+                                  forceSoftwareRenderer ? true : false,
                                   static_cast<int64_t>(streamCacheBytes),
                                   streamCacheOnDisk ? true : false);
     LOG("create: player->initialize returned %d", ret);

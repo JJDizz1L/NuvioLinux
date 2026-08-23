@@ -57,6 +57,8 @@ internal expect object PlayerSettingsStorage {
     fun saveStreamReuseLastLinkEnabled(enabled: Boolean)
     fun loadStreamReuseLastLinkCacheHours(): Int?
     fun saveStreamReuseLastLinkCacheHours(hours: Int)
+    fun loadForceSoftwareRenderer(): Boolean?
+    fun saveForceSoftwareRenderer(enabled: Boolean)
     fun loadDecoderPriority(): Int?
     fun saveDecoderPriority(priority: Int)
     fun loadStreamCacheSize(): String?

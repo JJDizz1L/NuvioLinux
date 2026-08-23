@@ -19,6 +19,7 @@ internal object NativePlayerBridge {
         playWhenReady: Boolean,
         initialPositionMs: Long,
         decoderPriority: Int,
+        forceSoftwareRenderer: Boolean,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
     ): Long
