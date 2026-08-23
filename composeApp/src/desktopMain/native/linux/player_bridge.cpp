@@ -1509,6 +1509,9 @@ static void init_readback_mode() {
 }
 /* Effective strategy for THIS frame: auto behaves as sync until escalated. */
 static bool   g_autoEscalated = false;
+static std::atomic<int> g_cbFires{0};      /* phase2 debug: update-callback rate */
+static std::atomic<int> g_wfWakes{0};      /* phase2 debug: waitFrame seq-advances */
+static std::atomic<int> g_wfTimeouts{0};   /* phase2 debug: waitFrame timeouts */
 static double g_rbEmaMs = 0;          /* EMA of sync-copy cost */
 static int    g_rbOverBudgetStreak = 0;
 static int    g_rbArrivals = 0;       /* frames mpv offered this window */
@@ -1806,6 +1809,13 @@ struct MpvPlayer {
     std::mutex    mutex;
     mpv_render_context *renderCtx;
     std::atomic<bool>  framePending;
+    /* Frame-signal latch for the Kotlin producer (phase 2: event-driven pump).
+     * render_update_cb bumps frameCbSeq under frameCbMutex; waitFrame() blocks
+     * until seq advances past the caller's last-seen value or times out.
+     * destroy() notifies so a blocked producer returns promptly. */
+    std::mutex         frameCbMutex;
+    std::condition_variable frameCbCv;
+    uint64_t           frameCbSeq = 0;
     GlRenderer    gl;
     bool          useGl = false;
     /* DRM render node passed via MPV_RENDER_PARAM_DRM_DISPLAY_V2 so mpv's
@@ -1939,10 +1949,30 @@ struct MpvPlayer {
 
     static void render_update_cb(void *ctx) {
         /* Called on an mpv internal thread; only signal, never call mpv here. */
-        static_cast<MpvPlayer*>(ctx)->framePending.store(true);
+        auto *p = static_cast<MpvPlayer*>(ctx);
+        p->framePending.store(true);
+        g_cbFires++;
+        /* Wake a blocked waitFrame() JNI caller (producer coroutine). Lock the
+         * mutex for the seq bump so waiters can't miss a wakeup between their
+         * predicate check and wait. */
+        {
+            std::lock_guard<std::mutex> lk(p->frameCbMutex);
+            p->frameCbSeq++;
+        }
+        p->frameCbCv.notify_all();
     }
 
     void destroy() {
+        /* Wake a producer blocked in waitFrame() so dispose() isn't serialized
+         * behind its (≤100ms) timeout. The seq predicate won't satisfy — the
+         * waiter returns via timeout with an unchanged seq and then observes
+         * the dead handle. */
+        {
+            std::lock_guard<std::mutex> lk(frameCbMutex);
+            frameCbSeq++;
+        }
+        frameCbCv.notify_all();
+
         /* Wake the event loop so a blocked mpv_wait_event returns promptly,
          * then ALWAYS join both threads. The loop may already have exited on
          * its own: MPV_EVENT_SHUTDOWN fires when the core quits (e.g. a user
@@ -2044,8 +2074,7 @@ struct MpvPlayer {
             ok = true;
         }
         if (ok) {
-            p_mpv_render_context_set_update_callback(renderCtx, MpvPlayer::render_update_cb, this);
-            DBG("render context created (mode=%s)", useGl ? "opengl" : "sw");
+            p_mpv_render_context_set_update_callback(renderCtx, MpvPlayer::render_update_cb, this);            DBG("render context created (mode=%s)", useGl ? "opengl" : "sw");
         } else {
             LOG("mpv_render_context_create failed");
         }
@@ -2071,7 +2100,14 @@ struct MpvPlayer {
 
 
             bool result = false;
-            /* Present-time hint for mpv's frame selection / video-sync pacing.
+            /* NOTE: deliberately NOT calling mpv_render_context_update() here.
+             * Measured (phase 2 instrumentation): with ADVANCED_CONTROL, an
+             * unconsumed update state makes mpv re-fire the update callback
+             * once per presented frame (~24/s); calling update() clears that
+             * state and the callback collapses to ~10/s — starving the
+             * event-driven producer. The framePending latch set by our own
+             * update callback is the sole frame-availability signal instead.
+             * Present-time hint for mpv's frame selection / video-sync pacing.
              * Without MPV_RENDER_PARAM_NEXT_FRAME_INFO, mpv renders whatever
              * frame is current at call time, so the caller's render cadence
              * (here: the Compose frame clock) overrides mpv's own display
@@ -2148,12 +2184,13 @@ struct MpvPlayer {
                         if (windowMs >= 1000.0) {
                             int m = readbackMode();
                             DBG("readback stats[%s]: copies %d (avg %.2fms max %.1fms) "
-                                "skips %d, arrivals %d published %d, ema %.2fms",
+                                "skips %d, arrivals %d published %d, ema %.2fms | cb=%d wfWake=%d wfTO=%d",
                                 useRing() ? (m == 3 ? "fence" : "ring") : "sync",
                                 g_rbWaitCount,
                                 g_rbWaitCount ? g_rbWaitSumMs / g_rbWaitCount : 0.0,
                                 g_rbWaitMaxMs, g_rbSkipCount,
-                                g_rbArrivals, g_rbPublished, g_rbEmaMs);
+                                g_rbArrivals, g_rbPublished, g_rbEmaMs,
+                                g_cbFires.exchange(0), g_wfWakes.exchange(0), g_wfTimeouts.exchange(0));
                             if (m == 0 && !g_autoEscalated && g_rbArrivals > 0) {
                                 /* Escalate when sync demonstrably cannot keep
                                  * pace: sustained oversized copies OR frames
@@ -2199,8 +2236,11 @@ struct MpvPlayer {
             renderCv.notify_all();
         }
 
-        /* Teardown on this thread: render context first, then GL state. */
+        /* Teardown on this thread: render context first, then GL state.
+         * Detach the update callback BEFORE freeing the context so mpv can't
+         * invoke the trampoline into a player that's mid-teardown. */
         if (renderCtx) {
+            p_mpv_render_context_set_update_callback(renderCtx, nullptr, nullptr);
             p_mpv_render_context_free(renderCtx);
             renderCtx = nullptr;
         }
@@ -2984,6 +3024,24 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
         return JNI_FALSE;
     }
     return player->renderResult ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Block until the render update callback fires again (seq > [lastSeq]) or
+ * [timeoutMs] elapses; returns the current sequence number. The Kotlin
+ * producer uses this instead of 1ms polling: playing → wakes per mpv frame,
+ * paused/hidden → sleeps. destroy() bumps seq to release blocked waiters. */
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_waitFrame(
+    JNIEnv *env, jclass clazz, jlong handle, jlong lastSeq, jint timeoutMs)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return lastSeq;
+    PlayerUse use(player);
+    if (!use.ok) return lastSeq;
+    std::unique_lock<std::mutex> lock(player->frameCbMutex);
+    if (player->frameCbSeq > (uint64_t)lastSeq) { g_wfWakes++; return (jlong)player->frameCbSeq; }
+    player->frameCbCv.wait_for(lock, std::chrono::milliseconds(timeoutMs < 0 ? 0 : timeoutMs));
+    if (player->frameCbSeq > (uint64_t)lastSeq) g_wfWakes++; else g_wfTimeouts++;
+    return (jlong)player->frameCbSeq;
 }
 
 JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_setPaused(

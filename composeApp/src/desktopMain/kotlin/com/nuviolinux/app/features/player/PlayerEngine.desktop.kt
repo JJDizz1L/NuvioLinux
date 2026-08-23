@@ -333,27 +333,42 @@ private fun ComposeVideoSurface(
         }
 
         /* Producer: renders into a free slot and publishes the newest
-         * completed frame. renderFrameInto returns true exactly when mpv
-         * signals a new frame, so the produce cadence tracks the video FPS;
-         * between frames it polls cheaply. */
+         * completed frame. Event-driven (phase 2): blocks in waitFrame until
+         * mpv's render update callback signals a frame, so the wake cadence IS
+         * the video FPS — no 1ms polling between frames. A window resize must
+         * not wait (paused video re-renders at the new geometry on the next
+         * render call), so size changes bypass the block. */
         launch(Dispatchers.Default) {
+            var seenFrameSeq = 0L
             while (coroutineContext.isActive) {
                 val size = awtWindowSizeState.value ?: surfaceSize
                 if (size.width <= 0 || size.height <= 0) {
                     delay(16L)
                     continue
                 }
-                if (lastWidth != size.width || lastHeight != size.height) {
-                    lastWidth = size.width
-                    lastHeight = size.height
-                }
+                val sizeChanged = size.width != lastWidth || size.height != lastHeight
 
                 /* Wait for the consumer to pick up the previous frame before
-                 * producing another — the pool only has one spare slot. */
+                 * producing another — the pool only has one spare slot. While
+                 * waiting we still advance seenFrameSeq so a burst of signals
+                 * collapses into one render of the newest state. */
                 if (newestSlot.get() != -1) {
-                    delay(1L)
+                    seenFrameSeq = controller.waitFrame(seenFrameSeq, 8)
                     continue
                 }
+
+                if (!sizeChanged) {
+                    /* Bounded-wait pull: sleep up to 20ms, waking EARLY when
+                     * mpv's update callback signals a frame. Renders happen
+                     * every pass — mpv's callback rate follows consumption
+                     * rate (instrumented: pure event-blocking self-starves to
+                     * ~10 signals/s; pulling keeps it locked to video FPS).
+                     * Net wakeups ≈ 50-70/s vs ~1000/s under 1ms polling. */
+                    controller.waitFrame(seenFrameSeq, 20)
+                }
+                lastWidth = size.width
+                lastHeight = size.height
+
                 val index = synchronized(slotLock) { free.removeFirstOrNull() }
                     ?: run { delay(1L); continue }
                 val slot = slots[index]
@@ -372,7 +387,9 @@ private fun ComposeVideoSurface(
                 )
                 if (!rendered) {
                     synchronized(slotLock) { free.addLast(index) }
-                    /* No new frame yet; poll cheaply instead of busy-spinning. */
+                    /* No new frame pending (signal already consumed by an
+                     * earlier produce). Sleep briefly rather than spin; the
+                     * next callback signal re-drives us anyway. */
                     delay(1L)
                     continue
                 }

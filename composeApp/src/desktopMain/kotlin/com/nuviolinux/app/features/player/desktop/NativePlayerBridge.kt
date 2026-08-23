@@ -33,6 +33,12 @@ internal object NativePlayerBridge {
      * valid for the duration of the call (slot owns the bitmap).
      */
     external fun renderFrameInto(handle: Long, width: Int, height: Int, address: Long, rowBytes: Int): Boolean
+    /**
+     * Blocks until the render update callback fires again (returned seq >
+     * [lastSeq]) or [timeoutMs] elapses. Event-driven pump replacement for
+     * 1ms polling; destroy() bumps seq so blocked waiters return promptly.
+     */
+    external fun waitFrame(handle: Long, lastSeq: Long, timeoutMs: Int): Long
     external fun setPaused(handle: Long, paused: Boolean)
     external fun seekTo(handle: Long, positionMs: Long)
     external fun seekBy(handle: Long, offsetMs: Long)

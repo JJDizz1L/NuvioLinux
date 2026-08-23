@@ -329,6 +329,26 @@ internal class NativePlayerController(
         }
     }
 
+    /**
+     * Blocks until mpv signals a new frame (seq advances past [lastSeq]) or
+     * [timeoutMs] elapses; returns the latest sequence. Replaces the producer's
+     * 1ms polling: playing surfaces wake per frame, paused ones sleep. A size
+     * change must NOT wait — callers bypass this when the window was resized
+     * so paused video still re-renders at the new geometry.
+     */
+    fun waitFrame(lastSeq: Long, timeoutMs: Int): Long {
+        if (disposed) return lastSeq
+        val current = handle
+        if (current == 0L) return lastSeq
+        return runCatching { NativePlayerBridge.waitFrame(current, lastSeq, timeoutMs) }
+            .getOrElse { error ->
+                if (error !is NoClassDefFoundError) {
+                    log.w(error) { "waitFrame JNI failed handle=$current" }
+                }
+                lastSeq
+            }
+    }
+
     /** Reports mouse activity over the Compose video surface (reveals controls). */
     fun reportCursorActivity() {
         onEvent("cursorActivity", 0.0)
