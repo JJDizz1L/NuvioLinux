@@ -38,7 +38,7 @@ It keeps the upstream client codebase — including feature ports from newer ups
 
 ## What's Different From Upstream
 
-- Native Linux playback via MPV (libmpv). A C++/JNI bridge embeds mpv through its render API and draws video directly into the Compose scene, so overlay UI works on X11 and Wayland. The player renders offscreen with a vendor-aware GL context (GLX on NVIDIA, EGL on Mesa) into an FBO read back into the scene — UI and video are both GPU-accelerated on every vendor.
+- Native Linux playback via MPV (libmpv). A C++/JNI bridge embeds mpv through its render API: video is rendered offscreen into an FBO with a vendor-aware GL context (GLX on NVIDIA, EGL on Mesa) and written **directly into the Compose scene's pixel memory** — no intermediate copies, UI and video both GPU-accelerated on every vendor, frame delivery driven by mpv itself (~75 timer wakeups/s per playing surface instead of ~1000).
 - Hardware acceleration with zero-copy decode: VA-API on AMD/Intel and NVDEC on NVIDIA, chosen by the app's decoder setting, with automatic fallback to copy-mode or software decode when a GPU or codec doesn't cooperate. AV1 hardware decoding needs an RTX 3000+ (NVIDIA), RX 6000+/Ryzen 6000+ (AMD), or 11th-gen Core+/Arc (Intel); H.264/HEVC work on any NVDEC card (GTX 750+) and most VA-API cards. Hardware without an AV1 decoder still plays AV1 on the CPU. Tested on Radeon RX 9070 (Mesa 26.2.1) and GeForce RTX 3070 (driver 610.57), including 4K HDR10.
 - HDR support through your `mpv.conf`, which the player loads wholesale — tone-mapping, `target-peak`, profiles all apply as-is. (Not available in the Flatpak; see below.)
 - Discord Rich Presence under Settings → Integrations → Discord Rich Presence.
@@ -146,9 +146,14 @@ Extra knobs for specific problems:
 | `NUVIO_READBACK=sync` | Stutter/judder triage — forces the deterministic path |
 | `NUVIO_MPV_HWDEC=auto-copy` | Suspected hardware-decode issues |
 | `NUVIO_MPV_NO_AUTOFALLBACK=1` | Keeps decode from auto-switching, so we can see the raw failure |
+| `NUVIO_SW_RENDER=1` | Forces the software render path + copy-back decoding (same as Settings → Playback → Decoder → Compatibility Rendering) |
 | `NUVIO_TRAILER_DEBUG=1` | Trailer extraction problems |
 | `NUVIO_WINDOW_DEBUG=1` | Window sizing/fullscreen issues |
 | `nuvio-linux --nvidia-diag` | Prints an NVIDIA driver/GPU diagnostic block and exits |
+
+**Reading the debug output:** `decoder: attached:` / `decoder: changed:` lines show which hardware decoder actually opened for each file (and any mid-stream switch); the per-second `render cadence:` line carries measured fps, bitrate, dropped/mistimed/delayed frames; `PlayerTracks` lines show whether your preferred audio/subtitle language was applied and why not if it wasn't.
+
+Note: if your own `~/.config/mpv/mpv.conf` sets `alang=…`, mpv's default selection overrides language picking at load time — Nuvio still applies your preference afterwards.
 
 **Please report issues on GitHub — with data from the application, not just sentences describing the problem.** A report we can act on includes: the terminal output from the commands above (especially any `[mpv/...]`, `readback stats`, or `render cadence:` lines), your GPU + driver (`nvidia-smi` or `lspci`), which package format you run, your desktop environment, and exact steps to reproduce. Reports with logs get fixed; reports without them usually can't be reproduced.
 
