@@ -357,15 +357,20 @@ private fun ComposeVideoSurface(
                 val sizeChanged = size.width != lastWidth || size.height != lastHeight
 
                 /* Wait for the consumer to pick up the previous frame before
-                 * producing another — the pool only has one spare slot. While
-                 * waiting we still advance seenFrameSeq so a burst of signals
-                 * collapses into one render of the newest state. */
+                 * producing another — the pool only has one spare slot. When
+                 * it frees, fall through and produce IMMEDIATELY: the pending
+                 * latch may still hold the signal of a frame mpv delivered
+                 * while we were busy, and advancing past that signal without
+                 * rendering would skip the frame on screen (measured: ~1.5%
+                 * published-frame deficit = visible micro-judder on pans). */
+                var produceNow = false
                 if (newestSlot.get() != -1) {
                     seenFrameSeq = controller.waitFrame(seenFrameSeq, 8)
-                    continue
+                    if (newestSlot.get() != -1) continue
+                    produceNow = true // slot just freed — render pending frame NOW
                 }
 
-                if (!sizeChanged) {
+                if (!sizeChanged && !produceNow) {
                     /* Bounded-wait pull: sleep up to 20ms, waking EARLY when
                      * mpv's update callback signals a frame. Renders happen
                      * every pass — mpv's callback rate follows consumption
@@ -426,7 +431,7 @@ private fun ComposeVideoSurface(
                          * slow' (bitrate vs cache growth). Zeros before media
                          * loads — harmless in the log. */
                         val stats = controller.renderStats()
-                        val mbps = stats.videoBitrateBytesPerSec * 8.0 / 1_000_000.0
+                        val mbps = stats.videoBitrateBitsPerSec / 1_000_000.0
                         log.d {
                             "render cadence: $cadenceFrames frames in ${cadenceMs}ms (" +
                                 "%.1f fps".format(cadenceFrames * 1000.0 / cadenceMs) +

@@ -286,7 +286,7 @@ internal class NativePlayerController(
      *  All zeros/blank before media is loaded — callers must tolerate that. */
     data class RenderStats(
         val estimatedVfFps: Float,
-        val videoBitrateBytesPerSec: Long,
+        val videoBitrateBitsPerSec: Long,
         val mistimedFrameCount: Long,
         val voDelayedFrameCount: Long,
         val decoderFrameDropCount: Long,
@@ -319,7 +319,7 @@ internal class NativePlayerController(
         return runCatching {
             RenderStats(
                 estimatedVfFps = NativePlayerBridge.estimatedVfFps(current),
-                videoBitrateBytesPerSec = NativePlayerBridge.videoBitrate(current),
+                videoBitrateBitsPerSec = NativePlayerBridge.videoBitrate(current),
                 mistimedFrameCount = NativePlayerBridge.mistimedFrameCount(current),
                 voDelayedFrameCount = NativePlayerBridge.voDelayedFrameCount(current),
                 decoderFrameDropCount = NativePlayerBridge.decoderFrameDropCount(current),

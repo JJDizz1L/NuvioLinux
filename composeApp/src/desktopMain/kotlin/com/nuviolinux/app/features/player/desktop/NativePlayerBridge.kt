@@ -63,7 +63,7 @@ internal object NativePlayerBridge {
     // Playback-quality telemetry (mpv approximations; atomic caches on the C++
     // side, safe to poll from any thread). Consumed by the 1 Hz cadence line.
     external fun estimatedVfFps(handle: Long): Float
-    /** Estimated video bitrate in bytes/second. */
+    /** Estimated video bitrate in bits/second (raw mpv `video-bitrate`). */
     external fun videoBitrate(handle: Long): Long
     external fun mistimedFrameCount(handle: Long): Long
     external fun voDelayedFrameCount(handle: Long): Long
