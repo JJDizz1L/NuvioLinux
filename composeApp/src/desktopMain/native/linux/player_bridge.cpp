@@ -396,6 +396,7 @@ static int load_libmpv() {
 #define GL_COLOR_BUFFER_BIT           0x4000
 #define GL_VENDOR                     0x1F00
 #define GL_PIXEL_PACK_BUFFER          0x88EB
+#define GL_PACK_ROW_LENGTH            0x0D02
 #define GL_STREAM_READ                0x88E0
 #define GL_BUFFER_SIZE                0x8764
 #define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
@@ -452,6 +453,7 @@ typedef void (*gl_tex_image2d_t)(unsigned int, int, int, int, int, int, unsigned
 typedef void (*gl_tex_parameteri_t)(unsigned int, unsigned int, int);
 typedef int  (*gl_check_framebuffer_t)(unsigned int);
 typedef void (*gl_read_pixels_t)(int, int, int, int, unsigned int, unsigned int, void*);
+typedef void (*gl_pixel_storei_t)(unsigned int, int);
 typedef void (*gl_clear_color_t)(float, float, float, float);
 typedef void (*gl_clear_t)(unsigned int);
 typedef const unsigned char* (*gl_get_string_t)(unsigned int);
@@ -528,6 +530,7 @@ struct GlRenderer {
     gl_tex_parameteri_t glTexParameteri = nullptr;
     gl_check_framebuffer_t glCheckFramebufferStatus = nullptr;
     gl_read_pixels_t glReadPixels = nullptr;
+    gl_pixel_storei_t glPixelStorei = nullptr;
     gl_clear_color_t glClearColor = nullptr;
     gl_clear_t glClear = nullptr;
     gl_get_string_t glGetString = nullptr;
@@ -1301,12 +1304,14 @@ static bool gl_init(GlRenderer *gl) {
     gl->glTexParameteri = (gl_tex_parameteri_t)gl_resolve(gl, "glTexParameteri");
     gl->glCheckFramebufferStatus = (gl_check_framebuffer_t)gl_resolve(gl, "glCheckFramebufferStatus");
     gl->glReadPixels = (gl_read_pixels_t)gl_resolve(gl, "glReadPixels");
+    gl->glPixelStorei = (gl_pixel_storei_t)gl_resolve(gl, "glPixelStorei");
     gl->glClearColor = (gl_clear_color_t)gl_resolve(gl, "glClearColor");
     gl->glClear = (gl_clear_t)gl_resolve(gl, "glClear");
     gl->glGetString = (gl_get_string_t)gl_resolve(gl, "glGetString");
     if (!gl->glGenFramebuffers || !gl->glBindFramebuffer || !gl->glFramebufferTexture2D ||
         !gl->glGenTextures || !gl->glBindTexture || !gl->glTexImage2D || !gl->glTexParameteri ||
-        !gl->glCheckFramebufferStatus || !gl->glReadPixels || !gl->glClear || !gl->glClearColor) {
+        !gl->glCheckFramebufferStatus || !gl->glReadPixels || !gl->glClear || !gl->glClearColor ||
+        !gl->glPixelStorei) {
         LOG("GL renderer unavailable: missing GL entry points, falling back to SW renderer");
         gl_destroy(gl);
         return false;
@@ -1420,20 +1425,21 @@ static void gl_pbo_destroy(GlRenderer *gl) {
     gl->pboHeight = 0;
 }
 
-/* Ensures the ring is allocated for w*h*4 bytes. Returns false when async
+/* Ensures the ring is allocated for rowBytes*h bytes. Returns false when async
  * readback cannot be used (missing entry points or allocation failure), so
  * the caller falls back to a synchronous glReadPixels for this frame. */
-static bool gl_pbo_ensure(GlRenderer *gl, int w, int h) {
+static bool gl_pbo_ensure(GlRenderer *gl, int w, int h, int rowBytes) {
     if (!gl->glGenBuffers || !gl->glDeleteBuffers || !gl->glBindBuffer ||
         !gl->glBufferData || !gl->glGetBufferSubData) {
         return false;
     }
     if (gl->pboActive && gl->pboWidth == w && gl->pboHeight == h) return true;
     gl_pbo_destroy(gl);
+    const long long allocBytes = (long long)rowBytes * h;
     for (int i = 0; i < GlRenderer::kPboCount; i++) {
         gl->glGenBuffers(1, &gl->pbos[i]);
         gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[i]);
-        gl->glBufferData(GL_PIXEL_PACK_BUFFER, (long long)w * h * 4, nullptr, GL_STREAM_READ);
+        gl->glBufferData(GL_PIXEL_PACK_BUFFER, allocBytes, nullptr, GL_STREAM_READ);
     }
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     if (!gl->pbos[0]) {
@@ -1441,11 +1447,11 @@ static bool gl_pbo_ensure(GlRenderer *gl, int w, int h) {
         return false;
     }
     /* A buffer NAME can exist with no storage behind it (glBufferData OOM).
-     * Verify each slot really is w*h*4 bytes, else fall back to sync
+     * Verify each slot really is rowBytes*h bytes, else fall back to sync
      * readback rather than shipping garbage frames. Sizes above INT_MAX are
      * not representable in GLint — trust the allocation there (a 32k x 32k
      * RGBA frame would be needed to hit it). */
-    const long long expected = (long long)w * h * 4;
+    const long long expected = (long long)rowBytes * h;
     if (gl->glGetBufferParameteriv && expected <= 2147483647LL) {
         for (int i = 0; i < GlRenderer::kPboCount; i++) {
             int size = 0;
@@ -1520,8 +1526,8 @@ static bool useRing() { int m = readbackMode(); return m == 1 || (m == 0 && g_au
  * the 1-second cadence average stays locked at 24.0 fps. A skipped frame just
  * means the consumer keeps showing the previous one for one extra poll cycle.
  * Without the fence API the old blocking behavior is preserved. */
-static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
-    const long long bytes = (long long)w * h * 4;
+static bool gl_readback_async(GlRenderer *gl, int w, int h, int rowBytes, void *pixels) {
+    const long long bytes = (long long)rowBytes * h;
     bool got = false;
     if (gl->pboHasPrev) {
         int outSlot = (gl->pboIndex + GlRenderer::kPboCount - 1) % GlRenderer::kPboCount;
@@ -1571,9 +1577,15 @@ static bool gl_readback_async(GlRenderer *gl, int w, int h, void *pixels) {
         }
     }
     /* Issue this frame's transfer into the next slot — never the one just
-     * read out (ring size >= 2). */
+     * read out (ring size >= 2). PACK_ROW_LENGTH makes each landed row
+     * stride-aligned with the destination bitmap when the frame is smaller
+     * than the grow-only allocation; tightly packed when equal (rowBytes/4
+     * == w), which is also the reset default. */
+    bool strided = rowBytes > 0 && (rowBytes / 4) != w;
+    if (strided) gl->glPixelStorei(GL_PACK_ROW_LENGTH, rowBytes / 4);
     gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, gl->pbos[gl->pboIndex]);
     gl->glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, reinterpret_cast<void*>(0));
+    if (strided) gl->glPixelStorei(GL_PACK_ROW_LENGTH, 0);
     /* Fence only in explicit fence mode; auto/legacy rings copy blocking. */
     if (readbackMode() == 3 && gl->glFenceSync) {
         if (gl->pboFences[gl->pboIndex]) {
@@ -1816,6 +1828,12 @@ struct MpvPlayer {
     bool          renderResult = false;
     int           renderWidth = 0;
     int           renderHeight = 0;
+    /* Destination row stride in BYTES. Equals width*4 when the frame fills a
+     * tightly-packed buffer; larger when frames render into a grow-only Skia
+     * bitmap whose capacity exceeds the current window (rowBytes = capW*4).
+     * glReadPixels honors it via GL_PACK_ROW_LENGTH; the SW path passes it as
+     * MPV_RENDER_PARAM_SW_STRIDE. */
+    int           renderRowBytes = 0;
     void         *renderBuffer = nullptr;
     std::mutex    renderInitMutex;
     std::condition_variable renderInitCv;
@@ -2046,6 +2064,7 @@ struct MpvPlayer {
             renderRequestPending = false;
             int w = renderWidth;
             int h = renderHeight;
+            int rowBytes = renderRowBytes > 0 ? renderRowBytes : w * 4;
             void *pixels = renderBuffer;
             lock.unlock();
 
@@ -2086,25 +2105,31 @@ struct MpvPlayer {
                         gl.glBindFramebuffer(GL_FRAMEBUFFER, gl.fbo);
                         if (!useRing()) {
                             /* Synchronous read straight into the Kotlin
-                             * buffer. Deterministic per-frame cost and no
+                             * (Skia-owned) buffer. Deterministic per-frame cost and no
                              * DMA race — measured smoother than any async
                              * variant on discrete GPUs (RDNA4 verified).
                              * Auto mode escalates below if this GPU can't
                              * afford it (weak iGPU, issue #13). */
                             auto t0 = std::chrono::steady_clock::now();
+                            bool strided = (rowBytes / 4) != w;
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, rowBytes / 4);
                             gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, 0);
                             double ms = std::chrono::duration<double, std::milli>(
                                 std::chrono::steady_clock::now() - t0).count();
                             g_rbEmaMs = g_rbEmaMs * 0.9 + ms * 0.1;
                             g_rbWaitCount++; g_rbWaitSumMs += ms;
                             if (ms > g_rbWaitMaxMs) g_rbWaitMaxMs = ms;
                             result = true;
-                        } else if (gl_pbo_ensure(&gl, w, h)) {
+                        } else if (gl_pbo_ensure(&gl, w, h, rowBytes)) {
                             /* Async: issue this frame's transfer, deliver the
                              * previous request's completed one. */
-                            result = gl_readback_async(&gl, w, h, pixels);
+                            result = gl_readback_async(&gl, w, h, rowBytes, pixels);
                         } else {
+                            bool strided = (rowBytes / 4) != w;
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, rowBytes / 4);
                             gl.glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                            if (strided) gl.glPixelStorei(GL_PACK_ROW_LENGTH, 0);
                             result = true;
                         }
                         if (result) g_rbPublished++;
@@ -2151,7 +2176,7 @@ struct MpvPlayer {
                 }
             } else {
                 int size[2] = { w, h };
-                size_t stride = (size_t)w * 4;
+                size_t stride = (size_t)rowBytes;
                 mpv_render_param renderParams[] = {
                     { MPV_RENDER_PARAM_SW_SIZE,    &size },
                     { MPV_RENDER_PARAM_SW_FORMAT,  (void*)"rgb0" },
@@ -2915,6 +2940,47 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     player->renderCv.wait_for(lock, std::chrono::seconds(2), [&] { return player->renderDone; });
     if (!player->renderDone) {
         DBG("renderFrame: timed out waiting for render thread");
+        return JNI_FALSE;
+    }
+    return player->renderResult ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Direct-write variant: renders into caller-owned memory (a Skia bitmap's
+ * pixel address obtained via Bitmap.peekPixels()). Removes the intermediate
+ * ByteBuffer→byte[] copy the ByteBuffer variant required for installPixels.
+ * [address] must stay valid until this call returns — the Kotlin slot keeps
+ * a strong reference to the owning bitmap, and the render-thread handoff
+ * completes synchronously before publish. */
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_renderFrameInto(
+    JNIEnv *env, jclass clazz, jlong handle, jint width, jint height,
+    jlong address, jint rowBytes)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player || !player->renderCtx) return JNI_FALSE;
+    if (width <= 0 || height <= 0) return JNI_FALSE;
+    if (address == 0) return JNI_FALSE;
+    if (rowBytes < width * 4) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+
+    if (!player->framePending.exchange(false)) return JNI_FALSE;
+    g_rbArrivals++; /* mpv offered a frame — pressure metric for auto escalation */
+
+    {
+        std::unique_lock<std::mutex> lock(player->renderMutex);
+        player->renderWidth = width;
+        player->renderHeight = height;
+        player->renderRowBytes = rowBytes;
+        player->renderBuffer = reinterpret_cast<void*>(static_cast<uintptr_t>(address));
+        player->renderRequestPending = true;
+        player->renderDone = false;
+    }
+    player->renderCv.notify_all();
+
+    std::unique_lock<std::mutex> lock(player->renderMutex);
+    player->renderCv.wait_for(lock, std::chrono::seconds(2), [&] { return player->renderDone; });
+    if (!player->renderDone) {
+        DBG("renderFrameInto: timed out waiting for render thread");
         return JNI_FALSE;
     }
     return player->renderResult ? JNI_TRUE : JNI_FALSE;

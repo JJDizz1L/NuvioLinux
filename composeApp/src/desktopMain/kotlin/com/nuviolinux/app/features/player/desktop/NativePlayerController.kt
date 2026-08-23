@@ -289,6 +289,25 @@ internal class NativePlayerController(
         val hwdecCurrent: String,
     )
 
+    /**
+     * Renders the latest video frame directly into [address] (a Skia bitmap's
+     * pixel memory from Bitmap.peekPixels). Stride-aware: rows land
+     * [rowBytes]-aligned even when the bitmap is larger than the frame.
+     * Returns true exactly when a new frame was rendered.
+     */
+    fun renderFrameInto(width: Int, height: Int, address: Long, rowBytes: Int): Boolean {
+        if (disposed) return false
+        val current = handle
+        if (current == 0L) return false
+        return runCatching { NativePlayerBridge.renderFrameInto(current, width, height, address, rowBytes) }
+            .getOrElse { error ->
+                if (error !is NoClassDefFoundError) {
+                    log.w(error) { "renderFrameInto JNI failed handle=$current" }
+                }
+                false
+            }
+    }
+
     fun renderStats(): RenderStats {
         if (disposed) return RenderStats(0f, 0, 0, 0, 0, "")
         val current = handle

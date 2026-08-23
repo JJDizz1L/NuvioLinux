@@ -25,6 +25,14 @@ internal object NativePlayerBridge {
 
     external fun dispose(handle: Long)
     external fun renderFrame(handle: Long, width: Int, height: Int, buffer: java.nio.ByteBuffer): Boolean
+    /**
+     * Direct-write variant: renders into caller-owned memory (a Skia bitmap's
+     * pixel address from [org.jetbrains.skia.Bitmap.peekPixels]). [rowBytes]
+     * is the destination stride in bytes; rows land stride-aligned via
+     * GL_PACK_ROW_LENGTH / MPV_RENDER_PARAM_SW_STRIDE. The address must stay
+     * valid for the duration of the call (slot owns the bitmap).
+     */
+    external fun renderFrameInto(handle: Long, width: Int, height: Int, address: Long, rowBytes: Int): Boolean
     external fun setPaused(handle: Long, paused: Boolean)
     external fun seekTo(handle: Long, positionMs: Long)
     external fun seekBy(handle: Long, offsetMs: Long)
