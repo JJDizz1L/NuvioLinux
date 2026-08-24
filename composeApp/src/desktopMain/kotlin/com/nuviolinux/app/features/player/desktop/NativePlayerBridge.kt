@@ -22,6 +22,7 @@ internal object NativePlayerBridge {
         forceSoftwareRenderer: Boolean,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
+        displayFps: Double,
     ): Long
 
     external fun dispose(handle: Long)
@@ -63,6 +64,13 @@ internal object NativePlayerBridge {
     // Playback-quality telemetry (mpv approximations; atomic caches on the C++
     // side, safe to poll from any thread). Consumed by the 1 Hz cadence line.
     external fun estimatedVfFps(handle: Long): Float
+    /** mpv's estimate of the actual display refresh rate (display-sync clock). */
+    external fun estimatedDisplayFps(handle: Long): Float
+    /** Display refreshes per presented video frame (display-sync pacing). */
+    external fun vsyncRatio(handle: Long): Float
+    /** Report real frame presentation to mpv's display-sync clock
+     *  (mpv_render_context_report_swap). Call at draw/present time. */
+    external fun reportSwap(handle: Long)
     /** Estimated video bitrate in bits/second (raw mpv `video-bitrate`). */
     external fun videoBitrate(handle: Long): Long
     external fun mistimedFrameCount(handle: Long): Long

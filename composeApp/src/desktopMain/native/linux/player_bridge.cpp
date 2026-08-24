@@ -260,6 +260,8 @@ static mpv_load_config_file_t       p_mpv_load_config_file        = nullptr;
 static mpv_render_context_create_t  p_mpv_render_context_create   = nullptr;
 static mpv_render_context_free_t    p_mpv_render_context_free     = nullptr;
 static mpv_render_context_set_update_callback_t p_mpv_render_context_set_update_callback = nullptr;
+typedef void                  (*mpv_render_context_report_swap_t)(mpv_render_context*);
+static mpv_render_context_report_swap_t p_mpv_render_context_report_swap = nullptr;
 static mpv_render_context_update_t  p_mpv_render_context_update   = nullptr;
 static mpv_render_context_render_t  p_mpv_render_context_render   = nullptr;
 
@@ -311,6 +313,16 @@ static int load_libmpv() {
     LOAD_SYM(mpv_render_context_set_update_callback);
     LOAD_SYM(mpv_render_context_update);
     LOAD_SYM(mpv_render_context_render);
+    /* Optional (older libmpv): display-sync accuracy needs real presentation
+     * times; without it mpv estimates the display clock from render-call
+     * timing, which in our pipeline is 1-2 vsyncs before actual scanout. */
+    p_mpv_render_context_report_swap = (mpv_render_context_report_swap_t)
+        dlsym(RTLD_DEFAULT, "mpv_render_context_report_swap");
+    if (!p_mpv_render_context_report_swap)
+        p_mpv_render_context_report_swap = (mpv_render_context_report_swap_t)
+            dlsym(gMpvLib, "mpv_render_context_report_swap");
+    if (!p_mpv_render_context_report_swap)
+        fprintf(stderr, "[nuvio-mpv] mpv_render_context_report_swap NOT resolved\n");
 
 #undef LOAD_SYM
 
@@ -1515,6 +1527,11 @@ static std::atomic<int> g_wfTimeouts{0};   /* phase2 debug: waitFrame timeouts *
 static double g_rbEmaMs = 0;          /* EMA of sync-copy cost */
 static int    g_rbOverBudgetStreak = 0;
 static int    g_rbArrivals = 0;       /* frames mpv offered this window */
+static int    g_reportSwaps = 0;      /* report_swap calls this window */
+/* report_swap feeds mpv's display-sync clock; without display-sync it only
+ * serializes flip_page behind the consumer (measured throughput collapse to
+ * ~47Hz). Opt-in for display-sync triage: NUVIO_REPORT_SWAP=1. */
+static bool   g_displaySyncEnabled = getenv("NUVIO_REPORT_SWAP") != nullptr;
 static int    g_rbPublished = 0;      /* frames actually captured */
 static bool useRing() { int m = readbackMode(); return m == 1 || (m == 0 && g_autoEscalated); }
 
@@ -1879,6 +1896,8 @@ struct MpvPlayer {
      * 'presentation jitter' (mistimed/delayed frames) from 'source too slow'
      * (bitrate vs cache growth) without shipping extra tooling. */
     std::atomic<double>  cachedEstimatedVfFps;
+    std::atomic<double>  cachedEstimatedDisplayFps;
+    std::atomic<double>  cachedVsyncRatio;
     std::atomic<double>  cachedVideoBitrate;
     std::atomic<int64_t> cachedMistimedFrameCount;
     std::atomic<int64_t> cachedVoDelayedFrameCount;
@@ -1933,7 +1952,8 @@ struct MpvPlayer {
                   cachedDuration(0), cachedPosition(0), cachedBufferedPosition(0),
                   cachedPaused(1), cachedEnded(0), cachedFileLoaded(0), cachedPausedForCache(0),
                   cachedSpeed(1.0), cachedVolume(100.0),
-                  cachedEstimatedVfFps(0), cachedVideoBitrate(0),
+                  cachedEstimatedVfFps(0), cachedEstimatedDisplayFps(0), cachedVsyncRatio(0),
+                  cachedVideoBitrate(0),
                   cachedMistimedFrameCount(0), cachedVoDelayedFrameCount(0),
                   cachedDecoderFrameDropCount(0),
                   pendingInitialPositionMs(0) {}
@@ -2286,7 +2306,8 @@ struct MpvPlayer {
                    int playWhenReady, int64_t initialPositionMs,
                    int decoderPriority, bool forceSwRenderer,
                    int64_t streamCacheBytes,
-                   bool streamCacheOnDisk)
+                   bool streamCacheOnDisk,
+                   double displayFps)
     {
         /* Compatibility-rendering escape hatch (phase 4): env override wins so
          * testers can flip it without touching settings storage. */
@@ -2337,8 +2358,9 @@ struct MpvPlayer {
                 p_mpv_set_option_string(mpv, "input-vo-keyboard", "no");
                 p_mpv_set_option_string(mpv, "terminal", "no");
                 p_mpv_set_option_string(mpv, "msg-level", "all=error:vd=info");
-                p_mpv_set_option_string(mpv, "video-sync", "display-resample");
-                p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+                /* video-sync: mpv default (audio). See the pacing note in
+                 * applyCommonOptions — display-resample is a no-op/harmful
+                 * under the render-API path. */
                 /* Frame queue: smooth out decode bursts (Flatpak GPU clock issue) */
                 p_mpv_set_option_string(mpv, "vd-queue-enable", "yes");
                 p_mpv_set_option_string(mpv, "vd-queue-max-bytes", "50000000");
@@ -2357,27 +2379,36 @@ struct MpvPlayer {
             p_mpv_set_option_string(mpv, "force-window", "no");
             p_mpv_set_option_string(mpv, "idle", "yes");
 
-            /* Frame pacing (2026-08-23, Harbor study): lock mpv's cadence to
-             * the display clock. With the default video-sync=audio, mpv
-             * produces frames on the audio clock while our consumer presents
-             * on the compositor's vsync grid — the two clocks drift, and at
-             * 24fps@120Hz the frame→refresh mapping occasionally slips
-             * (4-then-6 repeat pattern = micro-judder, the "smooth but
-             * hitching" report). display-resample makes the display the
-             * master clock (mpv micro-adjusts audio speed, inaudible) — the
-             * same mode standalone mpv runs when playback looks smooth.
-             * Applied AFTER user config so it always wins;
-             * NUVIO_VIDEO_SYNC overrides for triage. NOTE: we deliberately
-             * do NOT copy Harbor's video-timing-offset=0 — they need it
-             * because their render runs on the UI thread (blocking in render
-             * would stall the webview). Ours runs on the producer thread,
-             * where mpv's default early-wake + block-until-target gives
-             * target-time-accurate publishes for free. */
+            /* Frame pacing (2026-08-24): video-sync stays mpv's default
+             * (audio). display-resample was investigated end-to-end (Harbor
+             * study) and is ARCHITECTURALLY INCOMPATIBLE with the render-API
+             * + readback path: display-sync measures the vsync grid from
+             * vo_libmpv flip_page return times, which here are consumer DRAW
+             * times, not scanout times — the feedback loop locks onto a
+             * phantom ~56Hz grid and mpv drops content frames (mistimed
+             * storm, verified). It also never engaged before (vsr=0.00:
+             * vo_libmpv reports no display FPS, vsync_interval=1ns), so
+             * audio-sync is what every clean measurement actually ran.
+             * NUVIO_VIDEO_SYNC=display-resample re-enables for triage, with
+             * display-fps-override from the window's DisplayMode (vo_libmpv
+             * provides none; without it vsync_interval=1ns and display-sync
+             * silently degrades to audio sync). We deliberately do NOT copy
+             * Harbor's video-timing-offset=0 — their render runs on the UI
+             * thread; ours runs on the producer thread where mpv's default
+             * early-wake + block-until-target gives target-time-accurate
+             * publishes for free. */
             {
                 const char *vsyncEnv = getenv("NUVIO_VIDEO_SYNC");
-                p_mpv_set_option_string(mpv, "video-sync",
-                        (vsyncEnv && *vsyncEnv) ? vsyncEnv : "display-resample");
-                p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+                if (vsyncEnv && *vsyncEnv) {
+                    p_mpv_set_option_string(mpv, "video-sync", vsyncEnv);
+                    p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+                    if (displayFps > 20.0 && displayFps < 500.0) {
+                        char fpsStr[32];
+                        snprintf(fpsStr, sizeof(fpsStr), "%.3f", displayFps);
+                        int fpsRet = p_mpv_set_option_string(mpv, "display-fps-override", fpsStr);
+                        DBG("display-fps-override = %s (ret=%d)", fpsStr, fpsRet);
+                    }
+                }
             }
 
             /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
@@ -2547,6 +2578,8 @@ after_hwdec:
         p_mpv_observe_property(mpv, 0, "drop-frame-count", MPV_FORMAT_INT64);
         p_mpv_observe_property(mpv, 0, "vo-drop-frame-count", MPV_FORMAT_INT64);
         p_mpv_observe_property(mpv, 0, "estimated-vf-fps", MPV_FORMAT_DOUBLE);
+        p_mpv_observe_property(mpv, 0, "estimated-display-fps", MPV_FORMAT_DOUBLE);
+        p_mpv_observe_property(mpv, 0, "vsync-ratio", MPV_FORMAT_DOUBLE);
         p_mpv_observe_property(mpv, 0, "video-bitrate", MPV_FORMAT_DOUBLE);
         p_mpv_observe_property(mpv, 0, "mistimed-frame-count", MPV_FORMAT_INT64);
         p_mpv_observe_property(mpv, 0, "vo-delayed-frame-count", MPV_FORMAT_INT64);
@@ -2819,6 +2852,10 @@ after_hwdec:
                 }
                 else if (strcmp(pname, "estimated-vf-fps") == 0 && prop->format == MPV_FORMAT_DOUBLE)
                     cachedEstimatedVfFps = *(double*)pdata;
+                else if (strcmp(pname, "estimated-display-fps") == 0 && prop->format == MPV_FORMAT_DOUBLE)
+                    cachedEstimatedDisplayFps = *(double*)pdata;
+                else if (strcmp(pname, "vsync-ratio") == 0 && prop->format == MPV_FORMAT_DOUBLE)
+                    cachedVsyncRatio = *(double*)pdata;
                 else if (strcmp(pname, "video-bitrate") == 0 && prop->format == MPV_FORMAT_DOUBLE)
                     cachedVideoBitrate = *(double*)pdata;
                 else if (strcmp(pname, "mistimed-frame-count") == 0 && prop->format == MPV_FORMAT_INT64)
@@ -2891,7 +2928,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     jint decoderPriority,
     jboolean forceSoftwareRenderer,
     jlong streamCacheBytes,
-    jboolean streamCacheOnDisk)
+    jboolean streamCacheOnDisk,
+    jdouble displayFps)
 {
     LOG("create: hostViewPtr=0x%llx", (unsigned long long)hostViewPtr);
 
@@ -2952,7 +2990,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
                                   decoderPriority,
                                   forceSoftwareRenderer ? true : false,
                                   static_cast<int64_t>(streamCacheBytes),
-                                  streamCacheOnDisk ? true : false);
+                                  streamCacheOnDisk ? true : false,
+                                  (double)displayFps);
     LOG("create: player->initialize returned %d", ret);
 
     env->ReleaseStringUTFChars(sourceUrl, urlChars);
@@ -3089,6 +3128,25 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
         return JNI_FALSE;
     }
     return player->renderResult ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Report frame presentation to mpv's display-sync clock (consumer draw
+ * time). OPT-IN via NUVIO_REPORT_SWAP=1 — only meaningful with
+ * NUVIO_VIDEO_SYNC=display-resample, and it serializes mpv's flip_page
+ * behind the consumer (measured throughput collapse), so off by default. */
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_reportSwap(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    if (!g_displaySyncEnabled) return; /* A/B: env-disabled */
+    MpvPlayer *player = get_player(handle);
+    if (!player || !player->renderCtx) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
+    if (player->forceSoftwareRenderer) return; /* SW path: no display-sync swap timing */
+    if (!p_mpv_render_context_report_swap) return;
+    p_mpv_render_context_report_swap(player->renderCtx);
+    if (g_reportSwaps == 0) DBG("report_swap: first call OK");
+    g_reportSwaps++;
 }
 
 /* Block until the render update callback fires again (seq > [lastSeq]) or
@@ -3344,6 +3402,26 @@ JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativeP
     PlayerUse use(player);
     if (!use.ok) return 0.0f;
     return (jfloat)player->cachedEstimatedVfFps.load();
+}
+
+JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_estimatedDisplayFps(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0.0f;
+    PlayerUse use(player);
+    if (!use.ok) return 0.0f;
+    return (jfloat)player->cachedEstimatedDisplayFps.load();
+}
+
+JNIEXPORT jfloat JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_vsyncRatio(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return 0.0f;
+    PlayerUse use(player);
+    if (!use.ok) return 0.0f;
+    return (jfloat)player->cachedVsyncRatio.load();
 }
 
 JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_videoBitrate(

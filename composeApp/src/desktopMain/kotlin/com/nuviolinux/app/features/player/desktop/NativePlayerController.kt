@@ -65,6 +65,7 @@ internal class NativePlayerController(
         forceSoftwareRenderer: Boolean,
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
+        displayFps: Double,
         onError: (String?) -> Unit,
     ) {
         val pending = PendingSource(
@@ -77,6 +78,7 @@ internal class NativePlayerController(
             forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheBytes = streamCacheBytes,
             streamCacheOnDisk = streamCacheOnDisk,
+            displayFps = displayFps,
             onError = onError,
         )
         pendingSource = pending
@@ -140,6 +142,7 @@ internal class NativePlayerController(
                     forceSoftwareRenderer = pending.forceSoftwareRenderer,
                     streamCacheBytes = pending.streamCacheBytes,
                     streamCacheOnDisk = pending.streamCacheOnDisk,
+                    displayFps = pending.displayFps,
                 ).also { handle ->
                     log.d { "createPlayer — NativePlayerBridge.create returned handle=0x${handle.toString(16)}" }
                     if (handle == 0L) error("Native player did not return a handle.")
@@ -294,6 +297,8 @@ internal class NativePlayerController(
      *  All zeros/blank before media is loaded — callers must tolerate that. */
     data class RenderStats(
         val estimatedVfFps: Float,
+        val estimatedDisplayFps: Float,
+        val vsyncRatio: Float,
         val videoBitrateBitsPerSec: Long,
         val mistimedFrameCount: Long,
         val voDelayedFrameCount: Long,
@@ -321,12 +326,14 @@ internal class NativePlayerController(
     }
 
     fun renderStats(): RenderStats {
-        if (disposed) return RenderStats(0f, 0, 0, 0, 0, "")
+        if (disposed) return RenderStats(0f, 0f, 0f, 0, 0, 0, 0, "")
         val current = handle
-        if (current == 0L) return RenderStats(0f, 0, 0, 0, 0, "")
+        if (current == 0L) return RenderStats(0f, 0f, 0f, 0, 0, 0, 0, "")
         return runCatching {
             RenderStats(
                 estimatedVfFps = NativePlayerBridge.estimatedVfFps(current),
+                estimatedDisplayFps = NativePlayerBridge.estimatedDisplayFps(current),
+                vsyncRatio = NativePlayerBridge.vsyncRatio(current),
                 videoBitrateBitsPerSec = NativePlayerBridge.videoBitrate(current),
                 mistimedFrameCount = NativePlayerBridge.mistimedFrameCount(current),
                 voDelayedFrameCount = NativePlayerBridge.voDelayedFrameCount(current),
@@ -337,8 +344,24 @@ internal class NativePlayerController(
             if (error !is NoClassDefFoundError) {
                 log.w(error) { "renderStats JNI failed handle=$current" }
             }
-            RenderStats(0f, 0, 0, 0, 0, "")
+            RenderStats(0f, 0f, 0f, 0, 0, 0, 0, "")
         }
+    }
+
+    /**
+     * Reports real frame presentation to mpv's display-sync clock. Called by
+     * the frame-pump consumer right after drawing a NEW video frame — the
+     * closest we can get to present time from the Compose side. Without it
+     * mpv estimates the display clock from producer-side render calls, which
+     * lead actual scanout by the publish→draw→swap latency; display-resample
+     * then straddles vsync boundaries (alternating 1/2-vsync frame lateness
+     * reads as micro-judder that draw-side telemetry cannot see).
+     */
+    fun reportSwap() {
+        if (disposed) return
+        val current = handle
+        if (current == 0L) return
+        runCatching { NativePlayerBridge.reportSwap(current) }
     }
 
     /**
@@ -417,6 +440,7 @@ internal class NativePlayerController(
             forceSoftwareRenderer = pending.forceSoftwareRenderer,
             streamCacheBytes = pending.streamCacheBytes,
             streamCacheOnDisk = pending.streamCacheOnDisk,
+            displayFps = pending.displayFps,
             onError = pending.onError,
         )
     }
@@ -623,6 +647,7 @@ private data class PendingSource(
     val forceSoftwareRenderer: Boolean,
     val streamCacheBytes: Long,
     val streamCacheOnDisk: Boolean,
+    val displayFps: Double,
     val onError: (String?) -> Unit,
 )
 

@@ -169,6 +169,17 @@ private fun NativePlayerSurface(
         onDispose { controller.dispose() }
     }
 
+    /* Real display refresh rate for mpv display-sync (video-sync=
+     * display-resample): vo_libmpv reports no display FPS itself, so without
+     * this mpv silently plays audio-sync (vsync-ratio stays 0). AWT reads it
+     * from the X11 RandR mode (XWayland). */
+    val displayFps = remember {
+        runCatching {
+            java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .defaultScreenDevice.displayMode.refreshRate.toDouble()
+        }.getOrDefault(0.0)
+    }
+
     LaunchedEffect(
         controller,
         sourceUrl,
@@ -192,6 +203,7 @@ private fun NativePlayerSurface(
             forceSoftwareRenderer = forceSoftwareRenderer,
             streamCacheBytes = streamCacheSize.bytes,
             streamCacheOnDisk = streamCacheOnDisk,
+            displayFps = displayFps,
             onError = { message -> latestOnError.value(message) },
         )
         // Always report the initial position as unhandled so the runtime's
@@ -466,7 +478,9 @@ private fun ComposeVideoSurface(
                                 " decDrops=${stats.decoderFrameDropCount}" +
                                 " mistimed=${stats.mistimedFrameCount}" +
                                 " delayed=${stats.voDelayedFrameCount}" +
-                                " skipped=$prodSkips]"
+                                " skipped=$prodSkips" +
+                                " disp=${"%.1f".format(stats.estimatedDisplayFps)}Hz" +
+                                " vsr=${"%.2f".format(stats.vsyncRatio)}]"
                         }
                         cadenceStartNs = nowNs
                         cadenceFrames = 0
@@ -563,6 +577,11 @@ private fun ComposeVideoSurface(
                 ageSumMs += ageMs
                 ageCount++
                 if (ageMs > ageMaxMs) ageMaxMs = ageMs
+                /* Report the presentation to mpv's display-sync clock. Without
+                 * this vo_libmpv cannot measure the display rate: vsync-ratio
+                 * stays 0 and video-sync=display-resample silently degrades to
+                 * audio sync (verified: disp=0.0Hz vsr=0.00 in telemetry). */
+                controller.reportSwap()
 
                 val windowMs = (frameNs - consumerStatsWindowNs) / 1_000_000.0
                 if (windowMs >= 1000.0) {
