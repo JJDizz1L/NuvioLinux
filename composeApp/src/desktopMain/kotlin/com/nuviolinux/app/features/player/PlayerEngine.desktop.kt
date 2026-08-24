@@ -530,6 +530,9 @@ private fun ComposeVideoSurface(
             }
         }
         } /* startProducer */
+        /* Readback mode (default): the producer IS the frame source. Direct
+         * mode starts it lazily via readbackFallbackRequested on failure. */
+        if (!directVideo) startProducer()
 
         /* Consumer: on every Compose frame, draw the newest completed frame.
          * Telemetry (NUVIO_MPV_DEBUG): per-second tick interval stats +
