@@ -11,4 +11,7 @@ actual fun getPlatform(): Platform = DesktopPlatform()
 
 internal actual val isDesktop: Boolean = true
 
+internal actual val verboseLoggingEnabled: Boolean =
+    System.getenv("NUVIO_LOGS") == "1"
+
 internal actual fun platformSessionManager(): SessionManager = DesktopSupabaseSessionManager()

@@ -2,10 +2,12 @@ package com.nuviolinux.app.core.network
 
 import com.nuviolinux.app.core.build.AppVersionConfig
 import com.nuviolinux.app.platformSessionManager
+import com.nuviolinux.app.verboseLoggingEnabled
 import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
+import io.github.jan.supabase.logging.LogLevel
 import io.github.jan.supabase.postgrest.Postgrest
 import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.defaultRequest
@@ -20,6 +22,15 @@ object SupabaseProvider {
             supabaseUrl = SupabaseConfig.URL,
             supabaseKey = SupabaseConfig.ANON_KEY,
         ) {
+            /* Console discipline: supabase-kt logs through its own Kermit
+             * instance, which the app-wide Logger.setMinSeverity gate does
+             * not cover. Silence its Info chatter unless verbose logging is
+             * requested (NUVIO_LOGS=1 on desktop). */
+            defaultLogLevel = if (verboseLoggingEnabled) {
+                LogLevel.DEBUG
+            } else {
+                LogLevel.ERROR
+            }
             httpConfig {
                 if (SupabaseEndpointConfig.hasFallback) {
                     install(HttpRequestRetry) {

@@ -54,6 +54,7 @@ REVIEW-NOTES.md
 Debrify-pipeline.md
 cove-pipeline.md
 render-pipeline-upgrade.md
+harbor-pipeline.md
 
 # Local release staging
 dist/release/
