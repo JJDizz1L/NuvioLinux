@@ -759,6 +759,12 @@ private fun ComposeVideoSurface(
             }
             val newFrame = controller.directRenderFrame((directFboPacked shr 32).toInt(), w, h)
             if (newFrame || directSnapshot == null) {
+                /* mpv rendered via RAW GL — skia's surface modification counter
+                 * didn't move, so makeImageSnapshot would return its CACHED
+                 * image forever (the freeze-frame that only updated on resize).
+                 * notifyContentWillChange discards the cache → fresh copy. */
+                directSurface?.notifyContentWillChange(
+                    org.jetbrains.skia.ContentChangeMode.DISCARD)
                 directSnapshot?.close()
                 directSnapshot = directSurface?.makeImageSnapshot()
                 val nowMs = System.currentTimeMillis()
