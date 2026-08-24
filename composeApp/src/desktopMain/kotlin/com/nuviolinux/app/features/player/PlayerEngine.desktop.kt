@@ -793,6 +793,13 @@ private fun ComposeVideoSurface(
             val skiaCanvas = com.nuviolinux.app.features.player.desktop.SkikoInteropProbe
                 .skiaCanvasOf(drawContext.canvas) ?: return false
             skiaCanvas.drawImage(snap, 0f, 0f)
+            /* mpv's render mutated GL state behind skia's back (programs,
+             * VAOs, texture units, bindings — restoring just the FBO binding
+             * is not enough). Tell skia to re-query ALL GL state before its
+             * next use; without this the end-of-draw flush executes commands
+             * against stale cached state and SIGSEGVs in DirectContext
+             * flush (observed). */
+            ctx.resetGL(org.jetbrains.skia.GLBackendState.RENDER_TARGET, org.jetbrains.skia.GLBackendState.TEXTURE_BINDING, org.jetbrains.skia.GLBackendState.VIEW, org.jetbrains.skia.GLBackendState.BLEND, org.jetbrains.skia.GLBackendState.VERTEX, org.jetbrains.skia.GLBackendState.PIXEL_STORE, org.jetbrains.skia.GLBackendState.PROGRAM, org.jetbrains.skia.GLBackendState.FIXED_FUNCTION, org.jetbrains.skia.GLBackendState.MISC)
             return true
         }
 
