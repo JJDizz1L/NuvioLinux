@@ -3341,9 +3341,9 @@ static bool skiko_gl_resolve_all(void **targets, const char *const *names, int c
     }
     bool ok = true;
     for (int i = 0; i < count; i++) {
-        if (!*targets[i]) {
-            *targets[i] = dlsym(RTLD_DEFAULT, names[i]);
-            if (!*targets[i]) {
+        if (!*(void **)targets[i]) {
+            *(void **)targets[i] = dlsym(RTLD_DEFAULT, names[i]);
+            if (!*(void **)targets[i]) {
                 ok = false;
                 if (!diagLogged) {
                     diagLogged = true;
