@@ -80,8 +80,9 @@ internal object NativePlayerBridge {
     /** SPIKE: read 5 pixels straight from the FBO via GL (bypasses skia). */
     external fun skikoReadFboPixels(fboId: Int, w: Int, h: Int): IntArray?
     /** Direct mode: attach mpv's render context to the CURRENT GL context
-     *  (skiko's — call during a Compose draw). One render context per handle. */
-    external fun directAttachRenderContext(handle: Long): Boolean
+     *  (skiko's — call during a Compose draw). Returns 1=attached, 0=not
+     *  ready yet (player still creating), -1=failed. */
+    external fun directAttachRenderContext(handle: Long): Int
     /** Direct mode: render the current mpv frame into [fboId] in the CURRENT
      *  GL context. True when mpv signaled a new frame (re-snapshot). */
     external fun directRenderFrame(handle: Long, fboId: Int, w: Int, h: Int): Boolean

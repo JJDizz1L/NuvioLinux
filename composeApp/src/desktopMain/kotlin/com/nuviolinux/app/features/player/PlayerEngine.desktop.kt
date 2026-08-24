@@ -302,6 +302,10 @@ private fun ComposeVideoSurface(
     var directSnapshot by remember { mutableStateOf<org.jetbrains.skia.Image?>(null) }
     /* Non-state counters: written every frame; must NOT trigger recomposition. */
     val directStats = remember { LongArray(4) } /* ticks, newFrames, windowNs, pad */
+    /* Set by the draw path when direct mode fails permanently; the consumer
+     * loop (LaunchedEffect scope) observes it and lazily starts the readback
+     * producer — no restart needed. */
+    var readbackFallbackRequested by remember { mutableStateOf(false) }
     var directProbedPixel by remember { mutableStateOf(false) }
     /* Draw-phase invalidation: the consumer writes this each frame tick; the
      * Canvas lambda reads it, so each write re-executes the DRAW (not the
@@ -392,9 +396,12 @@ private fun ComposeVideoSurface(
          * thread for several ms — a visible hitch every second. Enable with
          * NUVIO_TELEMETRY=1 for diagnostics. */
         val telemetryOn = System.getenv("NUVIO_TELEMETRY") == "1"
+        var readbackFallbackStarted = false
         /* Direct mode: no producer — the Canvas draw renders mpv directly
-         * (the consumer loop below still runs: it drives the draw + stats). */
-        if (!directVideo) launch(Dispatchers.Default) {
+         * (the consumer loop below still runs: it drives the draw + stats).
+         * startProducer() is also the lazy fallback if direct mode fails. */
+        fun startProducer() {
+            launch(Dispatchers.Default) {
             /* NUVIO_PUMP_POLL=1 restores the pre-phase-2 pump verbatim (1ms
              * polling, no callback gating) for A/B judder comparison. */
             val pollPump = System.getenv("NUVIO_PUMP_POLL") == "1"
@@ -521,6 +528,7 @@ private fun ComposeVideoSurface(
                 }
             }
         }
+        } /* startProducer */
 
         /* Consumer: on every Compose frame, draw the newest completed frame.
          * Telemetry (NUVIO_MPV_DEBUG): per-second tick interval stats +
@@ -557,9 +565,17 @@ private fun ComposeVideoSurface(
         var consumerStatsWindowNs = 0L
         val consumerLog = Logger.withTag("ComposeVideoSurface")
         if (directVideo) println("[direct-video] consumer loop entered")
+        var fallbackStarted = false
         while (coroutineContext.isActive) {
             val frameNs = withFrameNanos { it }
-            if (directVideo) directFrameTick.value = frameNs
+            if (directVideo) {
+                directFrameTick.value = frameNs
+                if (readbackFallbackRequested && !fallbackStarted) {
+                    fallbackStarted = true
+                    println("[direct-video] starting readback producer (fallback)")
+                    startProducer()
+                }
+            }
             if (consumerStatsWindowNs == 0L) consumerStatsWindowNs = frameNs
             if (lastTickNs != 0L) {
                 val deltaMs = (frameNs - lastTickNs) / 1_000_000.0
@@ -677,6 +693,11 @@ private fun ComposeVideoSurface(
                 directLoggedFirst = true
                 println("[direct-video] first draw attempt: ctx=${com.nuviolinux.app.features.player.desktop.SkikoInteropProbe.probedContext != null} attached=$directAttached failed=$directFailed fbo=$directFboPacked")
             }
+            fun failPermanent(reason: String) {
+                directFailed = true
+                println("[direct-video] $reason — falling back to readback")
+                readbackFallbackRequested = true
+            }
             // Probe + interop self-test INSIDE the draw phase — skiko's GL
             // context is current here and skia ops on its DirectContext are
             // legal (doing this from the frame-clock tick froze the clock).
@@ -689,17 +710,18 @@ private fun ComposeVideoSurface(
             val h = size.height.toInt()
             if (w <= 0 || h <= 0) return false
             if (!directAttached) {
-                directAttached = controller.directAttachRenderContext()
-                if (!directAttached) {
-                    directFailed = true
-                    println("[direct-video] render-context attach FAILED — falling back to readback (no producer: restart needed)")
-                    return false
+                when (controller.directAttachRenderContext()) {
+                    0 -> return false          /* player still creating — retry next draw */
+                    -1 -> {
+                        failPermanent("render-context attach FAILED")
+                        return false
+                    }
                 }
+                directAttached = true
                 println("[direct-video] render context attached (skiko context), starting deferred playback")
                 // Render context is live — mpv's vo can now initialize.
                 if (!controller.directStartPlayback()) {
-                    directFailed = true
-                    println("[direct-video] deferred playback start FAILED")
+                    failPermanent("deferred playback start FAILED")
                     return false
                 }
             }
@@ -713,12 +735,13 @@ private fun ComposeVideoSurface(
                     directFboPacked = 0L
                 }
                 directFboPacked = NativePlayerBridge.skikoCreateFbo(w, h)
-                directFboW = w
-                directFboH = h
                 if (directFboPacked <= 0L) {
-                    directFailed = true
+                    /* GL symbols may not be resolvable until skiko loads
+                     * libGL — retry on a later draw, don't fail permanently. */
                     return false
                 }
+                directFboW = w
+                directFboH = h
                 val rt = org.jetbrains.skia.BackendRenderTarget.makeGL(
                     w, h, 0, 0, (directFboPacked shr 32).toInt(), 0x8058 /* GL_RGBA8 */)
                 directSurface = org.jetbrains.skia.Surface.makeFromBackendRenderTarget(

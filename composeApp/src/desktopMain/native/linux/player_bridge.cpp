@@ -2040,9 +2040,10 @@ struct MpvPlayer {
     /* UI thread, skiko's GL context current: create the mpv render context
      * bound to THAT context. One render context per handle — in direct mode
      * the render thread never created one. */
-    bool directAttachRenderContext() {
-        if (renderCtx) return true;
-        if (!mpv) return false;
+    /* 1 = attached, 0 = not ready yet (mpv handle not created), -1 = failed */
+    int directAttachRenderContext() {
+        if (renderCtx) return 1;
+        if (!mpv) return 0;
         mpv_opengl_init_params initParams;
         initParams.get_proc_address = [](void *ctx, const char *name) {
             return direct_get_proc_address(ctx, name);
@@ -2057,10 +2058,10 @@ struct MpvPlayer {
         DBG("direct attach render ctx: %d", ret);
         if (ret < 0 || !renderCtx) {
             renderCtx = nullptr;
-            return false;
+            return -1;
         }
         p_mpv_render_context_set_update_callback(renderCtx, MpvPlayer::render_update_cb, this);
-        return true;
+        return 1;
     }
 
     /* UI thread, skiko's GL context current: render the current mpv frame into
@@ -3314,6 +3315,29 @@ typedef unsigned int GLuint;
 typedef unsigned int GLenum;
 typedef int GLsizei;
 typedef float GLfloat;
+/* GL entry points for the skiko-interop path: skiko loads libGL with
+ * RTLD_LOCAL, so dlsym(RTLD_DEFAULT) can't see GL symbols until something
+ * loads it globally. dlopen(libGL, RTLD_GLOBAL) on first use fixes that. */
+static bool skiko_gl_resolve_all(void **syms, const char *const *names, int count) {
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        if (!dlsym(RTLD_DEFAULT, "glGenFramebuffers")) {
+            void *lib = dlopen("libGL.so.1", RTLD_LAZY | RTLD_GLOBAL);
+            if (!lib) lib = dlopen("libGL.so", RTLD_LAZY | RTLD_GLOBAL);
+            (void)lib;
+        }
+    }
+    bool ok = true;
+    for (int i = 0; i < count; i++) {
+        if (!syms[i]) {
+            syms[i] = dlsym(RTLD_DEFAULT, names[i]);
+            if (!syms[i]) ok = false;
+        }
+    }
+    return ok;
+}
+
 static void skiko_gl_save(GLint *fbo, GLint *viewport) {
     typedef void (*GetIntFn)(GLuint, GLint*);
     auto gi = (GetIntFn)dlsym(RTLD_DEFAULT, "glGetIntegerv");
@@ -3358,20 +3382,16 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     static bool resolved = false;
     if (!resolved) {
         resolved = true;
-        #define RS(var, name) var = (decltype(var))dlsym(RTLD_DEFAULT, name)
-        RS(p_glGenTextures, "glGenTextures");
-        RS(p_glBindTexture, "glBindTexture");
-        RS(p_glTexImage2D, "glTexImage2D");
-        RS(p_glTexParameteri, "glTexParameteri");
-        RS(p_glGenFramebuffers, "glGenFramebuffers");
-        RS(p_glBindFramebuffer, "glBindFramebuffer");
-        RS(p_glFramebufferTexture2D, "glFramebufferTexture2D");
-        RS(p_glClearColor, "glClearColor");
-        RS(p_glClear, "glClear");
-        RS(p_glViewport, "glViewport");
-        #undef RS
-        if (!p_glGenFramebuffers || !p_glTexImage2D) {
-            LOG("skikoCreateTestFbo: GL entry points not resolvable");
+        void *syms[] = { (void*&)p_glGenTextures, (void*&)p_glBindTexture,
+            (void*&)p_glTexImage2D, (void*&)p_glTexParameteri,
+            (void*&)p_glGenFramebuffers, (void*&)p_glBindFramebuffer,
+            (void*&)p_glFramebufferTexture2D, (void*&)p_glClearColor,
+            (void*&)p_glClear, (void*&)p_glViewport };
+        const char *names[] = { "glGenTextures", "glBindTexture", "glTexImage2D",
+            "glTexParameteri", "glGenFramebuffers", "glBindFramebuffer",
+            "glFramebufferTexture2D", "glClearColor", "glClear", "glViewport" };
+        if (!skiko_gl_resolve_all(syms, names, 10) || !p_glGenFramebuffers || !p_glTexImage2D) {
+            LOG("skikoCreateTestFbo: GL entry points not resolvable (yet)");
             return -1;
         }
     }
@@ -3423,20 +3443,16 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     static bool resolved = false;
     if (!resolved) {
         resolved = true;
-        #define RS2(var, name) var = (decltype(var))dlsym(RTLD_DEFAULT, name)
-        RS2(p_glGenTextures, "glGenTextures");
-        RS2(p_glBindTexture, "glBindTexture");
-        RS2(p_glTexImage2D, "glTexImage2D");
-        RS2(p_glTexParameteri, "glTexParameteri");
-        RS2(p_glGenFramebuffers, "glGenFramebuffers");
-        RS2(p_glBindFramebuffer, "glBindFramebuffer");
-        RS2(p_glFramebufferTexture2D, "glFramebufferTexture2D");
-        RS2(p_glClearColor, "glClearColor");
-        RS2(p_glClear, "glClear");
-        RS2(p_glViewport, "glViewport");
-        #undef RS2
-        if (!p_glGenFramebuffers || !p_glTexImage2D) {
-            LOG("skikoCreateFbo: GL entry points not resolvable");
+        void *syms[] = { (void*&)p_glGenTextures, (void*&)p_glBindTexture,
+            (void*&)p_glTexImage2D, (void*&)p_glTexParameteri,
+            (void*&)p_glGenFramebuffers, (void*&)p_glBindFramebuffer,
+            (void*&)p_glFramebufferTexture2D, (void*&)p_glClearColor,
+            (void*&)p_glClear, (void*&)p_glViewport };
+        const char *names[] = { "glGenTextures", "glBindTexture", "glTexImage2D",
+            "glTexParameteri", "glGenFramebuffers", "glBindFramebuffer",
+            "glFramebufferTexture2D", "glClearColor", "glClear", "glViewport" };
+        if (!skiko_gl_resolve_all(syms, names, 10) || !p_glGenFramebuffers || !p_glTexImage2D) {
+            LOG("skikoCreateFbo: GL entry points not resolvable (yet)");
             return -1;
         }
     }
@@ -3515,14 +3531,14 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
 
 /* UI thread, skiko's GL context current: attach mpv's render context to the
  * current context (direct mode). */
-JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directAttachRenderContext(
+JNIEXPORT jint JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directAttachRenderContext(
     JNIEnv *env, jclass clazz, jlong handle)
 {
     MpvPlayer *player = get_player(handle);
-    if (!player) return JNI_FALSE;
+    if (!player) return 0; /* not ready */
     PlayerUse use(player);
-    if (!use.ok) return JNI_FALSE;
-    return player->directAttachRenderContext() ? JNI_TRUE : JNI_FALSE;
+    if (!use.ok) return 0;
+    return player->directAttachRenderContext();
 }
 
 /* Direct mode: issue the deferred loadfile (call after attach succeeded). */

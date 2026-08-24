@@ -351,16 +351,15 @@ internal class NativePlayerController(
         }
     }
 
-    /** Direct mode: attach mpv's render context to skiko's current GL
-     *  context. Call during a Compose draw (UI thread). */
-    fun directAttachRenderContext(): Boolean {
-        if (disposed) return false
+    /** Direct mode attach result: 1=attached, 0=player not ready yet, -1=failed. */
+    fun directAttachRenderContext(): Int {
+        if (disposed) return -1
         val current = handle
-        if (current == 0L) return false
+        if (current == 0L) return 0
         return runCatching { NativePlayerBridge.directAttachRenderContext(current) }
             .getOrElse {
                 if (it !is NoClassDefFoundError) log.w(it) { "directAttach failed" }
-                false
+                -1
             }
     }
 
