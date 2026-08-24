@@ -363,6 +363,16 @@ internal class NativePlayerController(
             }
     }
 
+    /** Direct mode: true when mpv has a new frame queued (cheap update check;
+     *  no rendering). Drives the flow-paced draw invalidation. */
+    fun directHasUpdate(): Boolean {
+        if (disposed) return false
+        val current = handle
+        if (current == 0L) return false
+        return runCatching { NativePlayerBridge.directHasUpdate(current) }
+            .getOrElse { false }
+    }
+
     /** Direct mode: issue the deferred loadfile (after attach succeeded). */
     fun directStartPlayback(): Boolean {
         if (disposed) return false

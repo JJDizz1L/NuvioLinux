@@ -83,6 +83,8 @@ internal object NativePlayerBridge {
      *  (skiko's — call during a Compose draw). Returns 1=attached, 0=not
      *  ready yet (player still creating), -1=failed. */
     external fun directAttachRenderContext(handle: Long): Int
+    /** Direct mode: true when mpv has a new frame queued (cheap update check). */
+    external fun directHasUpdate(handle: Long): Boolean
     /** Direct mode: render the current mpv frame into [fboId] in the CURRENT
      *  GL context. True when mpv signaled a new frame (re-snapshot). */
     external fun directRenderFrame(handle: Long, fboId: Int, w: Int, h: Int): Boolean

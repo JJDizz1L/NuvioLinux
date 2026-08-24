@@ -3654,6 +3654,19 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
     if (tex) p_glDeleteTextures(1, &tex);
 }
 
+/* Direct mode: cheap mpv_render_context_update() — returns true when mpv has
+ * a NEW frame queued (MPV_RENDER_UPDATE_FRAME). No rendering, no blocking. */
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directHasUpdate(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player || !player->renderCtx) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+    uint64_t flags = p_mpv_render_context_update(player->renderCtx);
+    return (flags & MPV_RENDER_UPDATE_FRAME) ? JNI_TRUE : JNI_FALSE;
+}
+
 /* UI thread, skiko's GL context current: attach mpv's render context to the
  * current context (direct mode). */
 JNIEXPORT jint JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directAttachRenderContext(

@@ -572,8 +572,16 @@ private fun ComposeVideoSurface(
         var fallbackStarted = false
         while (coroutineContext.isActive) {
             val frameNs = withFrameNanos { it }
+            /* Flow-paced invalidation ('let the stream flow'): invalidate ONLY
+             * when mpv signals a new frame — presentation is paced by mpv's
+             * frame timing (the update flag sets at the frame's target time),
+             * not by a 120Hz poll. The withFrameNanos loop stays as the
+             * vsync-aligned scheduler; without a new frame it writes no state
+             * and the scene simply isn't redrawn. */
             if (directVideo) {
-                directFrameTick.value = frameNs
+                if (controller.directHasUpdate()) {
+                    directFrameTick.value = frameNs
+                }
                 if (readbackFallbackRequested && !fallbackStarted) {
                     fallbackStarted = true
                     println("[direct-video] starting readback producer (fallback)")
