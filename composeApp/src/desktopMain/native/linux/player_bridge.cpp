@@ -31,7 +31,7 @@ static void skiko_debug_cb(unsigned int source, unsigned int type, unsigned int 
     static int logged = 0;
     if (logged < 40) {
         logged++;
-        LOG("[gldebug] src=0x%x type=0x%x id=%u sev=0x%x: %.*s",
+        LOG("[gldebug] src=0x%x type=0x%x id=%u sev=0x%x: %s",
             source, type, id, severity, msg ? msg : "");
     }
 }
