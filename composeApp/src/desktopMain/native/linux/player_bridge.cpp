@@ -3439,7 +3439,7 @@ void skiko_gl_reset_to_defaults(void) {
         dis(0x0B90 /*STENCIL_TEST*/);
         dis(0x0BC0 /*DITHER*/);
         dis(0x8037 /*POLYGON_OFFSET_FILL*/);
-        dis(0x8893 /*PRIMITIVE_RESTART*/);
+        dis(0x840D /*PRIMITIVE_RESTART*/);
         dis(0x809E /*SAMPLE_COVERAGE*/);
         dis(0x80A0 /*SAMPLE_ALPHA_TO_COVERAGE*/);
     }
