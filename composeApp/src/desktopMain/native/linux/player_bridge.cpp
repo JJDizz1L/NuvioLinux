@@ -18,6 +18,12 @@ static int g_debug = -1; /* -1 = uninitialized */
 
 #include <jni.h>
 #include <dlfcn.h>
+
+/* skiko-interop GL state helpers (defined in this file's extern "C") */
+extern "C" {
+void skiko_gl_save(int *fbo, int *viewport);
+void skiko_gl_restore(int fbo, const int *viewport);
+}
 #include <pthread.h>
 #include <string>
 #include <vector>
@@ -3335,9 +3341,6 @@ typedef float GLfloat;
 /* GL entry points for the skiko-interop path: skiko loads libGL with
  * RTLD_LOCAL, so dlsym(RTLD_DEFAULT) can't see GL symbols until something
  * loads it globally. dlopen(libGL, RTLD_GLOBAL) on first use fixes that. */
-static void skiko_gl_save(int *fbo, int *viewport);
-static void skiko_gl_restore(int fbo, const int *viewport);
-
 /* [targets] are ADDRESSES of the function-pointer variables — writes go
  * through to them. (Passing pointer VALUES copies NULLs and the real
  * variables never get assigned — the bug that made direct mode fail.) */
@@ -3375,7 +3378,7 @@ static bool skiko_gl_resolve_all(void **targets, const char *const *names, int c
     return ok;
 }
 
-static void skiko_gl_save(int *fbo, int *viewport) {
+void skiko_gl_save(int *fbo, int *viewport) {
     typedef void (*GetIntFn)(GLuint, GLint*);
     auto gi = (GetIntFn)dlsym(RTLD_DEFAULT, "glGetIntegerv");
     if (gi) {
@@ -3383,7 +3386,7 @@ static void skiko_gl_save(int *fbo, int *viewport) {
         gi(0x0BA2 /*GL_VIEWPORT*/, viewport);
     }
 }
-static void skiko_gl_restore(int fbo, const int *viewport) {
+void skiko_gl_restore(int fbo, const int *viewport) {
     typedef void (*BindFn)(GLuint, GLuint);
     typedef void (*ViewFn)(GLint, GLint, GLsizei, GLsizei);
     auto bf = (BindFn)dlsym(RTLD_DEFAULT, "glBindFramebuffer");
