@@ -2455,9 +2455,10 @@ struct MpvPlayer {
         if (this->directVideo) {
             LOG("direct video mode: render context attaches on the UI thread");
             pendingSourceUrl = sourceUrl;
-            /* Render no-op discriminator: red background shows up in the FBO
-             * if mpv's render runs at all (vs a complete no-op). */
-            p_mpv_set_option_string(mpv, "background-color", "#FF0000");
+            /* Direct mode renders through the GL path into the UI's context —
+             * the SW compatibility flag would make directAttachRenderContext
+             * meaningless. Direct wins. */
+            this->forceSoftwareRenderer = false;
         }
         LOG("initialize: url=%s audioUrl=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
             sourceUrl, sourceAudioUrl ? sourceAudioUrl : "(none)", numHeaders, playWhenReady,
@@ -2545,6 +2546,9 @@ struct MpvPlayer {
              * whole UI (Harbor set video-timing-offset=0 for exactly this). */
             if (this->directVideo) {
                 p_mpv_set_option_string(mpv, "video-timing-offset", "0");
+                /* Render no-op discriminator: red background shows up in the
+                 * FBO if mpv's render runs at all (vs a complete no-op). */
+                p_mpv_set_option_string(mpv, "background-color", "#FF0000");
             }
             {
                 const char *vsyncEnv = getenv("NUVIO_VIDEO_SYNC");
