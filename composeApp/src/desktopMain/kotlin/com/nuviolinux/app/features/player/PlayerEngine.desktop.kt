@@ -307,6 +307,7 @@ private fun ComposeVideoSurface(
      * producer — no restart needed. */
     var readbackFallbackRequested by remember { mutableStateOf(false) }
     var directProbedPixel by remember { mutableStateOf(false) }
+    var directLastProbeMs by remember { mutableStateOf(0L) }
     /* Draw-phase invalidation: the consumer writes this each frame tick; the
      * Canvas lambda reads it, so each write re-executes the DRAW (not the
      * composition) — the direct path has no per-frame state writes of its
@@ -760,7 +761,9 @@ private fun ComposeVideoSurface(
             if (newFrame || directSnapshot == null) {
                 directSnapshot?.close()
                 directSnapshot = directSurface?.makeImageSnapshot()
-                if (!directProbedPixel) {
+                val nowMs = System.currentTimeMillis()
+                if (!directProbedPixel || nowMs - directLastProbeMs > 5000) {
+                    directLastProbeMs = nowMs
                     directProbedPixel = true
                     // One-shot: what does the FBO actually contain?
                     val img = directSnapshot
