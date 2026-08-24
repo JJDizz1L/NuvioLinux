@@ -68,6 +68,9 @@ internal object NativePlayerBridge {
     external fun estimatedDisplayFps(handle: Long): Float
     /** Display refreshes per presented video frame (display-sync pacing). */
     external fun vsyncRatio(handle: Long): Float
+    /** SPIKE: create a magenta RGBA8 texture+FBO in the CURRENT GL context
+     *  (skiko's, during a Compose draw). Returns (fbo<<32)|tex, or -1. */
+    external fun skikoCreateTestFbo(width: Int, height: Int): Long
     /** Report real frame presentation to mpv's display-sync clock
      *  (mpv_render_context_report_swap). Call at draw/present time. */
     external fun reportSwap(handle: Long)

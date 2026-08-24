@@ -3130,6 +3130,73 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     return player->renderResult ? JNI_TRUE : JNI_FALSE;
 }
 
+/* SPIKE (skiko interop, option A): create an RGBA8 texture + FBO in the
+ * CURRENTLY-CURRENT GL context (skiko's, during a Compose draw), clear it to
+ * magenta, and return (fbo<<32)|tex. Proves the GL<->Skia bridge: the FBO is
+ * wrapped by Surface.makeFromBackendRenderTarget in Kotlin and the pixels
+ * verified via makeImageSnapshot().readPixels. GL entry points resolved with
+ * dlsym(RTLD_DEFAULT) — glvnd exposes them process-wide (skiko links libGL). */
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_skikoCreateTestFbo(
+    JNIEnv *env, jclass clazz, jint width, jint height)
+{
+    typedef unsigned int GLuint;
+    typedef int GLint;
+    typedef unsigned int GLenum;
+    typedef int GLsizei;
+    typedef float GLfloat;
+    static GLuint (*p_glGenTextures)(GLsizei, GLuint*) = nullptr;
+    static void (*p_glBindTexture)(GLuint, GLuint) = nullptr;
+    static void (*p_glTexImage2D)(GLuint, GLint, GLint, GLsizei, GLsizei, GLint, GLuint, GLuint, const void*) = nullptr;
+    static void (*p_glTexParameteri)(GLuint, GLuint, GLint) = nullptr;
+    static void (*p_glGenFramebuffers)(GLsizei, GLuint*) = nullptr;
+    static void (*p_glBindFramebuffer)(GLuint, GLuint) = nullptr;
+    static void (*p_glFramebufferTexture2D)(GLuint, GLuint, GLuint, GLuint, GLint) = nullptr;
+    static void (*p_glClearColor)(GLfloat, GLfloat, GLfloat, GLfloat) = nullptr;
+    static void (*p_glClear)(GLuint) = nullptr;
+    static void (*p_glViewport)(GLint, GLint, GLsizei, GLsizei) = nullptr;
+    static bool resolved = false;
+    if (!resolved) {
+        resolved = true;
+        #define RS(var, name) var = (decltype(var))dlsym(RTLD_DEFAULT, name)
+        RS(p_glGenTextures, "glGenTextures");
+        RS(p_glBindTexture, "glBindTexture");
+        RS(p_glTexImage2D, "glTexImage2D");
+        RS(p_glTexParameteri, "glTexParameteri");
+        RS(p_glGenFramebuffers, "glGenFramebuffers");
+        RS(p_glBindFramebuffer, "glBindFramebuffer");
+        RS(p_glFramebufferTexture2D, "glFramebufferTexture2D");
+        RS(p_glClearColor, "glClearColor");
+        RS(p_glClear, "glClear");
+        RS(p_glViewport, "glViewport");
+        #undef RS
+        if (!p_glGenFramebuffers || !p_glTexImage2D) {
+            LOG("skikoCreateTestFbo: GL entry points not resolvable");
+            return -1;
+        }
+    }
+    GLuint tex = 0, fbo = 0;
+    p_glGenTextures(1, &tex);
+    p_glBindTexture(0xDE1 /*GL_TEXTURE_2D*/, tex);
+    p_glTexImage2D(0xDE1, 0, 0x8058 /*GL_RGBA8*/, width, height, 0,
+                   0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, nullptr);
+    p_glTexParameteri(0xDE1, 0x2801 /*GL_TEXTURE_MIN_FILTER*/, 0x2600 /*GL_NEAREST*/);
+    p_glTexParameteri(0xDE1, 0x2800 /*GL_TEXTURE_MAG_FILTER*/, 0x2600);
+    p_glGenFramebuffers(1, &fbo);
+    p_glBindFramebuffer(0x8D40 /*GL_FRAMEBUFFER*/, fbo);
+    p_glFramebufferTexture2D(0x8D40, 0x8CE0 /*GL_COLOR_ATTACHMENT0*/, 0xDE1, tex, 0);
+    GLenum status = 0;
+    typedef GLenum (*CheckFn)(GLuint);
+    auto p_glCheck = (CheckFn)dlsym(RTLD_DEFAULT, "glCheckFramebufferStatus");
+    if (p_glCheck) status = p_glCheck(0x8D40);
+    p_glViewport(0, 0, width, height);
+    p_glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
+    p_glClear(0x4000 /*GL_COLOR_BUFFER_BIT*/);
+    p_glBindFramebuffer(0x8D40, 0);
+    DBG("skikoCreateTestFbo: fbo=%u tex=%u status=0x%x", fbo, tex, status);
+    if (status != 0x8CD5 /*GL_FRAMEBUFFER_COMPLETE*/) return -1;
+    return ((jlong)fbo << 32) | (jlong)tex;
+}
+
 /* Report frame presentation to mpv's display-sync clock (consumer draw
  * time). OPT-IN via NUVIO_REPORT_SWAP=1 — only meaningful with
  * NUVIO_VIDEO_SYNC=display-resample, and it serializes mpv's flip_page

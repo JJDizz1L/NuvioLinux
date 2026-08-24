@@ -529,6 +529,11 @@ private fun ComposeVideoSurface(
         val consumerLog = Logger.withTag("ComposeVideoSurface")
         while (coroutineContext.isActive) {
             val frameNs = withFrameNanos { it }
+            /* SPIKE: skiko GL-texture interop feasibility (option A).
+             * Opt-in — prints via println by design (console discipline). */
+            if (System.getenv("NUVIO_SKIKO_SPIKE") == "1") {
+                com.nuviolinux.app.features.player.desktop.SkikoInteropProbe.probeOnce()
+            }
             if (consumerStatsWindowNs == 0L) consumerStatsWindowNs = frameNs
             if (lastTickNs != 0L) {
                 val deltaMs = (frameNs - lastTickNs) / 1_000_000.0
