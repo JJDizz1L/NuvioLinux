@@ -1839,6 +1839,11 @@ struct MpvPlayer {
      * and decode with auto-copy (GPU decode, copy-back frames). Set from the
      * app's "Compatibility rendering" setting or NUVIO_SW_RENDER env. */
     bool          forceSoftwareRenderer = false;
+    /* Direct mode: render context attaches on the UI thread (skiko's GL
+     * context), renders into an app-created FBO during Compose draws. */
+    bool          directVideo = false;
+    std::string   pendingSourceUrl;      /* direct mode: loadfile deferred */
+    int           pendingPlayWhenReady = 0;
     /* DRM render node passed via MPV_RENDER_PARAM_DRM_DISPLAY_V2 so mpv's
      * vaapi interop can build a VA display for zero-copy EGL/dmabuf decode.
      * Owned here (mpv only copies the struct, not the fd). */
@@ -1998,6 +2003,121 @@ struct MpvPlayer {
         p->frameCbCv.notify_all();
     }
 
+    /* Direct mode, called AFTER directAttachRenderContext() succeeded: issue
+     * the deferred loadfile. mpv's vo initializes against the now-live render
+     * context. */
+    bool directStartPlayback() {
+        if (!mpv || !renderCtx || pendingSourceUrl.empty()) return false;
+        const char *cmd[] = {"loadfile", pendingSourceUrl.c_str(), nullptr};
+        p_mpv_command(mpv, cmd);
+        p_mpv_set_property_string(mpv, "pause",
+                                  pendingPlayWhenReady ? "no" : "yes");
+        DBG("direct mode: deferred loadfile issued");
+        pendingSourceUrl.clear();
+        return true;
+    }
+
+    /* Standalone GL proc resolver for direct mode: no gl_init state — resolve
+     * via dlsym(RTLD_DEFAULT) (glvnd exposes GL entry points process-wide),
+     * falling back to glX/egl GetProcAddress obtained the same way. */
+    static void *direct_get_proc_address(void *ctx, const char *name) {
+        (void)ctx;
+        void *p = dlsym(RTLD_DEFAULT, name);
+        if (p) return p;
+        static void *(*glXGPA)(const unsigned char*) = nullptr;
+        static void *(*eglGPA)(const char*) = nullptr;
+        if (!glXGPA) glXGPA = (decltype(glXGPA))dlsym(RTLD_DEFAULT, "glXGetProcAddressARB");
+        if (!glXGPA) glXGPA = (decltype(glXGPA))dlsym(RTLD_DEFAULT, "glXGetProcAddress");
+        if (glXGPA) {
+            p = glXGPA((const unsigned char*)name);
+            if (p) return p;
+        }
+        if (!eglGPA) eglGPA = (decltype(eglGPA))dlsym(RTLD_DEFAULT, "eglGetProcAddress");
+        if (eglGPA) p = eglGPA(name);
+        return p;
+    }
+
+    /* UI thread, skiko's GL context current: create the mpv render context
+     * bound to THAT context. One render context per handle — in direct mode
+     * the render thread never created one. */
+    bool directAttachRenderContext() {
+        if (renderCtx) return true;
+        if (!mpv) return false;
+        mpv_opengl_init_params initParams;
+        initParams.get_proc_address = [](void *ctx, const char *name) {
+            return direct_get_proc_address(ctx, name);
+        };
+        initParams.get_proc_address_ctx = nullptr;
+        mpv_render_param createParams[] = {
+            { MPV_RENDER_PARAM_API_TYPE, (void*)MPV_RENDER_API_TYPE_OPENGL },
+            { MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &initParams },
+            { MPV_RENDER_PARAM_INVALID, nullptr }
+        };
+        int ret = p_mpv_render_context_create(&renderCtx, mpv, createParams);
+        DBG("direct attach render ctx: %d", ret);
+        if (ret < 0 || !renderCtx) {
+            renderCtx = nullptr;
+            return false;
+        }
+        p_mpv_render_context_set_update_callback(renderCtx, MpvPlayer::render_update_cb, this);
+        return true;
+    }
+
+    /* UI thread, skiko's GL context current: render the current mpv frame into
+     * [fboId]. Returns true when mpv signaled a NEW frame (the caller should
+     * re-snapshot); rendering without a new frame is harmless (re-present).
+     * video-timing-offset=0 in this mode keeps the BLOCK_FOR_TARGET_TIME wait
+     * from stalling the UI. */
+    bool directRenderFrame(int fboId, int w, int h) {
+        if (!renderCtx) return false;
+        uint64_t flags = p_mpv_render_context_update(renderCtx);
+        mpv_opengl_fbo fbo = { fboId, w, h, 0 };
+        int flipY = 0;
+        mpv_render_param params[] = {
+            { MPV_RENDER_PARAM_OPENGL_FBO, &fbo },
+            { MPV_RENDER_PARAM_FLIP_Y, &flipY },
+            { MPV_RENDER_PARAM_INVALID, nullptr }
+        };
+        typedef int GLint2_;
+        typedef unsigned int GLuint2_;
+        typedef void (*BindFn)(GLuint2_, GLuint2_);
+        typedef unsigned int GLenum2_;
+        typedef GLenum2_ (*CheckFn)(GLuint2_);
+        typedef void (*GetIntFn2_)(GLuint2_, GLint2_*);
+        typedef GLenum2_ (*GetErrFn)();
+        /* Bind the FBO ourselves and verify completeness at THIS moment —
+         * mpv binds it internally, and 0x506 says it's incomplete by then. */
+        auto bf = (BindFn)dlsym(RTLD_DEFAULT, "glBindFramebuffer");
+        auto ck = (CheckFn)dlsym(RTLD_DEFAULT, "glCheckFramebufferStatus");
+        static int statusLogs = 0;
+        if (bf && ck) {
+            GLint2_ saved = 0;
+            auto gi = (GetIntFn2_)dlsym(RTLD_DEFAULT, "glGetIntegerv");
+            if (gi) gi(0x8CA6, &saved);
+            bf(0x8D40, (GLuint2_)fboId);
+            GLenum2_ st = ck(0x8D40);
+            bf(0x8D40, (GLuint2_)saved);
+            if (st != 0x8CD5 && statusLogs < 5) {
+                statusLogs++;
+                LOG("direct render: FBO %d status=0x%x (INCOMPLETE)", fboId, st);
+            }
+        }
+        /* GL errors are STICKY — drain any error skia's earlier draws left
+         * before mpv renders, so what we read after is genuinely mpv's. */
+        auto ge = (GetErrFn)dlsym(RTLD_DEFAULT, "glGetError");
+        if (ge) { GLenum2_ sticky; int n = 0; while ((sticky = ge()) != 0 && n++ < 8) {} }
+        p_mpv_render_context_render(renderCtx, params);
+        static int errLogs = 0;
+        if (ge) {
+            GLenum2_ e = ge();
+            if (e != 0 && errLogs < 5) {
+                errLogs++;
+                LOG("direct render: glGetError=0x%x (fbo=%d w=%d h=%d)", e, fboId, w, h);
+            }
+        }
+        return (flags & MPV_RENDER_UPDATE_FRAME) != 0;
+    }
+
     void destroy() {
         /* Wake a producer blocked in waitFrame() so dispose() isn't serialized
          * behind its (≤100ms) timeout. The seq predicate won't satisfy — the
@@ -2035,6 +2155,15 @@ struct MpvPlayer {
         renderCv.notify_all();
         if (renderThread.joinable()) {
             renderThread.join();
+        }
+        /* Direct mode: the render context was created on the calling (UI)
+         * thread — free it there. skiko's context may not be current here, so
+         * GL-side cleanup is best-effort; the context teardown reclaims the
+         * rest. */
+        if (directVideo && renderCtx) {
+            p_mpv_render_context_set_update_callback(renderCtx, nullptr, nullptr);
+            p_mpv_render_context_free(renderCtx);
+            renderCtx = nullptr;
         }
         if (mpv) {
             std::lock_guard<std::mutex> lock(mutex);
@@ -2307,7 +2436,8 @@ struct MpvPlayer {
                    int decoderPriority, bool forceSwRenderer,
                    int64_t streamCacheBytes,
                    bool streamCacheOnDisk,
-                   double displayFps)
+                   double displayFps,
+                   bool directVideo)
     {
         /* Compatibility-rendering escape hatch (phase 4): env override wins so
          * testers can flip it without touching settings storage. */
@@ -2315,6 +2445,19 @@ struct MpvPlayer {
             forceSwRenderer || getenv("NUVIO_SW_RENDER") != nullptr;
         if (this->forceSoftwareRenderer) {
             LOG("software renderer FORCED (compatibility mode) — decode via auto-copy");
+        }
+        /* Direct mode (skiko interop): mpv renders into an FBO owned by the
+         * UI's GL context during Compose draws — no render thread, no
+         * readback. The render context is attached later, on the UI thread
+         * (directAttachRenderContext), because mpv_render_context_create
+         * requires THAT context to be current. */
+        this->directVideo = directVideo;
+        if (this->directVideo) {
+            LOG("direct video mode: render context attaches on the UI thread");
+            pendingSourceUrl = sourceUrl;
+            /* Render no-op discriminator: red background shows up in the FBO
+             * if mpv's render runs at all (vs a complete no-op). */
+            p_mpv_set_option_string(mpv, "background-color", "#FF0000");
         }
         LOG("initialize: url=%s audioUrl=%s headers=%d playWhenReady=%d initialPos=%lld decoderPrio=%d",
             sourceUrl, sourceAudioUrl ? sourceAudioUrl : "(none)", numHeaders, playWhenReady,
@@ -2397,6 +2540,12 @@ struct MpvPlayer {
              * thread; ours runs on the producer thread where mpv's default
              * early-wake + block-until-target gives target-time-accurate
              * publishes for free. */
+            /* Direct mode renders on the UI thread during Compose draws —
+             * mpv's default early-wake + block-until-target would stall the
+             * whole UI (Harbor set video-timing-offset=0 for exactly this). */
+            if (this->directVideo) {
+                p_mpv_set_option_string(mpv, "video-timing-offset", "0");
+            }
             {
                 const char *vsyncEnv = getenv("NUVIO_VIDEO_SYNC");
                 if (vsyncEnv && *vsyncEnv) {
@@ -2516,6 +2665,15 @@ struct MpvPlayer {
         }
         p_mpv_set_option_string(mpv, "hwdec", hwdecOpt);
         DBG("hwdec option = %s", hwdecOpt);
+        /* Direct mode: no DRM display param is passed at render-context
+         * creation (it attaches in skiko's GLX context, not ours), so
+         * zero-copy vaapi interop cannot initialize — skip the per-frame
+         * failure noise and go straight to copy mode (GPU decode, frames
+         * copied into the render pipeline). */
+        if (this->directVideo && decoderPriority < 2) {
+            p_mpv_set_option_string(mpv, "hwdec", "auto-copy");
+            DBG("direct mode: hwdec forced to auto-copy (no DRM interop param)");
+        }
         /* Flatpak + NVIDIA: the nvidia-vaapi-driver shim is not auto-detected
          * by libva, so point --vaapi-device at the DRM render node explicitly.
          * The fd itself is opened later on the render thread for
@@ -2552,7 +2710,9 @@ after_hwdec:
          * the SW renderer) and owns all mpv_render_* calls from then on.
          * running must be set first or the render loop exits immediately. */
         running = true;
-        if (!startRenderThread()) {
+        if (this->directVideo) {
+            DBG("direct mode: render thread not started (UI-thread attach)");
+        } else if (!startRenderThread()) {
             LOG("render thread init failed");
             p_mpv_terminate_destroy(mpv);
             mpv = nullptr;
@@ -2599,13 +2759,22 @@ after_hwdec:
             p_mpv_set_option_string(mpv, "audio-file", "");
         }
         pendingInitialPositionMs = initialPositionMs;
-        const char *cmd[] = {"loadfile", sourceUrl, nullptr};
-        p_mpv_command(mpv, cmd);
-
-        if (playWhenReady) {
-            p_mpv_set_property_string(mpv, "pause", "no");
+        pendingPlayWhenReady = playWhenReady;
+        if (this->directVideo) {
+            /* mpv initializes its vo at loadfile — with the render context
+             * attaching lazily on the UI thread, loading here fails with
+             * "Error opening/initializing the selected video_out". The load
+             * is issued by directStartPlayback() once the render context is
+             * attached (first Compose draw). */
+            DBG("direct mode: loadfile deferred until render-context attach");
         } else {
-            p_mpv_set_property_string(mpv, "pause", "yes");
+            const char *cmd[] = {"loadfile", sourceUrl, nullptr};
+            p_mpv_command(mpv, cmd);
+            if (playWhenReady) {
+                p_mpv_set_property_string(mpv, "pause", "no");
+            } else {
+                p_mpv_set_property_string(mpv, "pause", "yes");
+            }
         }
 
         /* Start event thread */
@@ -2929,7 +3098,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     jboolean forceSoftwareRenderer,
     jlong streamCacheBytes,
     jboolean streamCacheOnDisk,
-    jdouble displayFps)
+    jdouble displayFps,
+    jboolean directVideo)
 {
     LOG("create: hostViewPtr=0x%llx", (unsigned long long)hostViewPtr);
 
@@ -2991,7 +3161,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
                                   forceSoftwareRenderer ? true : false,
                                   static_cast<int64_t>(streamCacheBytes),
                                   streamCacheOnDisk ? true : false,
-                                  (double)displayFps);
+                                  (double)displayFps,
+                                  directVideo ? true : false);
     LOG("create: player->initialize returned %d", ret);
 
     env->ReleaseStringUTFChars(sourceUrl, urlChars);
@@ -3130,6 +3301,32 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     return player->renderResult ? JNI_TRUE : JNI_FALSE;
 }
 
+/* Save/restore the CURRENT framebuffer binding + viewport around spike GL
+ * calls. skiko/GDK render into a compositor-provided FBO discovered via
+ * glGetFramebufferBinding at draw start — restoring literal 0 corrupts the
+ * pipeline (observed: entire window frozen on the clear color). */
+typedef int GLint;
+typedef unsigned int GLuint;
+typedef unsigned int GLenum;
+typedef int GLsizei;
+typedef float GLfloat;
+static void skiko_gl_save(GLint *fbo, GLint *viewport) {
+    typedef void (*GetIntFn)(GLuint, GLint*);
+    auto gi = (GetIntFn)dlsym(RTLD_DEFAULT, "glGetIntegerv");
+    if (gi) {
+        gi(0x8CA6 /*GL_FRAMEBUFFER_BINDING*/, fbo);
+        gi(0x0BA2 /*GL_VIEWPORT*/, viewport);
+    }
+}
+static void skiko_gl_restore(GLint fbo, const GLint *viewport) {
+    typedef void (*BindFn)(GLuint, GLuint);
+    typedef void (*ViewFn)(GLint, GLint, GLsizei, GLsizei);
+    auto bf = (BindFn)dlsym(RTLD_DEFAULT, "glBindFramebuffer");
+    if (bf) bf(0x8D40, (GLuint)fbo);
+    auto vf = (ViewFn)dlsym(RTLD_DEFAULT, "glViewport");
+    if (vf) vf(viewport[0], viewport[1], viewport[2], viewport[3]);
+}
+
 /* SPIKE (skiko interop, option A): create an RGBA8 texture + FBO in the
  * CURRENTLY-CURRENT GL context (skiko's, during a Compose draw), clear it to
  * magenta, and return (fbo<<32)|tex. Proves the GL<->Skia bridge: the FBO is
@@ -3174,6 +3371,8 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
             return -1;
         }
     }
+    GLint savedFbo = 0, savedViewport[4] = {0, 0, 0, 0};
+    skiko_gl_save(&savedFbo, savedViewport);
     GLuint tex = 0, fbo = 0;
     p_glGenTextures(1, &tex);
     p_glBindTexture(0xDE1 /*GL_TEXTURE_2D*/, tex);
@@ -3191,10 +3390,159 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     p_glViewport(0, 0, width, height);
     p_glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
     p_glClear(0x4000 /*GL_COLOR_BUFFER_BIT*/);
-    p_glBindFramebuffer(0x8D40, 0);
-    DBG("skikoCreateTestFbo: fbo=%u tex=%u status=0x%x", fbo, tex, status);
+    skiko_gl_restore(savedFbo, savedViewport);
+    DBG("skikoCreateTestFbo: fbo=%u tex=%u status=0x%x savedFbo=%d", fbo, tex, status, savedFbo);
     if (status != 0x8CD5 /*GL_FRAMEBUFFER_COMPLETE*/) return -1;
     return ((jlong)fbo << 32) | (jlong)tex;
+}
+
+/* Direct mode: create a BLACK-cleared RGBA8 texture+FBO in the CURRENT GL
+ * context (skiko's, during a Compose draw). Returns (fbo<<32)|tex, or -1. */
+JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_skikoCreateFbo(
+    JNIEnv *env, jclass clazz, jint width, jint height)
+{
+    typedef unsigned int GLuint;
+    typedef int GLint;
+    typedef unsigned int GLenum;
+    typedef int GLsizei;
+    typedef float GLfloat;
+    static GLuint (*p_glGenTextures)(GLsizei, GLuint*) = nullptr;
+    static void (*p_glBindTexture)(GLuint, GLuint) = nullptr;
+    static void (*p_glTexImage2D)(GLuint, GLint, GLint, GLsizei, GLsizei, GLint, GLuint, GLuint, const void*) = nullptr;
+    static void (*p_glTexParameteri)(GLuint, GLuint, GLint) = nullptr;
+    static void (*p_glGenFramebuffers)(GLsizei, GLuint*) = nullptr;
+    static void (*p_glBindFramebuffer)(GLuint, GLuint) = nullptr;
+    static void (*p_glFramebufferTexture2D)(GLuint, GLuint, GLuint, GLuint, GLint) = nullptr;
+    static void (*p_glClearColor)(GLfloat, GLfloat, GLfloat, GLfloat) = nullptr;
+    static void (*p_glClear)(GLuint) = nullptr;
+    static void (*p_glViewport)(GLint, GLint, GLsizei, GLsizei) = nullptr;
+    static bool resolved = false;
+    if (!resolved) {
+        resolved = true;
+        #define RS2(var, name) var = (decltype(var))dlsym(RTLD_DEFAULT, name)
+        RS2(p_glGenTextures, "glGenTextures");
+        RS2(p_glBindTexture, "glBindTexture");
+        RS2(p_glTexImage2D, "glTexImage2D");
+        RS2(p_glTexParameteri, "glTexParameteri");
+        RS2(p_glGenFramebuffers, "glGenFramebuffers");
+        RS2(p_glBindFramebuffer, "glBindFramebuffer");
+        RS2(p_glFramebufferTexture2D, "glFramebufferTexture2D");
+        RS2(p_glClearColor, "glClearColor");
+        RS2(p_glClear, "glClear");
+        RS2(p_glViewport, "glViewport");
+        #undef RS2
+        if (!p_glGenFramebuffers || !p_glTexImage2D) {
+            LOG("skikoCreateFbo: GL entry points not resolvable");
+            return -1;
+        }
+    }
+    GLint savedFbo = 0, savedViewport[4] = {0, 0, 0, 0};
+    skiko_gl_save(&savedFbo, savedViewport);
+    GLuint tex = 0, fbo = 0;
+    p_glGenTextures(1, &tex);
+    p_glBindTexture(0xDE1, tex);
+    p_glTexImage2D(0xDE1, 0, 0x8058, width, height, 0, 0x1908, 0x1401, nullptr);
+    p_glTexParameteri(0xDE1, 0x2801, 0x2600);
+    p_glTexParameteri(0xDE1, 0x2800, 0x2600);
+    p_glGenFramebuffers(1, &fbo);
+    p_glBindFramebuffer(0x8D40, fbo);
+    p_glFramebufferTexture2D(0x8D40, 0x8CE0, 0xDE1, tex, 0);
+    typedef GLenum (*CheckFn)(GLuint);
+    auto p_glCheck = (CheckFn)dlsym(RTLD_DEFAULT, "glCheckFramebufferStatus");
+    GLenum status = p_glCheck ? p_glCheck(0x8D40) : 0;
+    p_glViewport(0, 0, width, height);
+    p_glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    p_glClear(0x4000);
+    skiko_gl_restore(savedFbo, savedViewport);
+    DBG("skikoCreateFbo: fbo=%u tex=%u status=0x%x savedFbo=%d", fbo, tex, status, savedFbo);
+    if (status != 0x8CD5) return -1;
+    return ((jlong)fbo << 32) | (jlong)tex;
+}
+
+/* SPIKE diagnostics: bind [fboId] and glReadPixels 5 probe points. Returns a
+ * Java long[] of packed RGB (no alpha) values, or null. Pure GL — bypasses
+ * skia to distinguish 'mpv rendered nothing' from 'skia serves stale cache'. */
+JNIEXPORT jintArray JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_skikoReadFboPixels(
+    JNIEnv *env, jclass clazz, jint fboId, jint w, jint h)
+{
+    typedef void (*BindFn)(GLuint, GLuint);
+    typedef void (*ReadFn)(GLint, GLint, GLsizei, GLsizei, GLuint, GLuint, void*);
+    typedef int GLint2;
+    auto bf = (BindFn)dlsym(RTLD_DEFAULT, "glBindFramebuffer");
+    auto rf = (ReadFn)dlsym(RTLD_DEFAULT, "glReadPixels");
+    if (!bf || !rf) return nullptr;
+    GLint savedFbo = 0;
+    typedef void (*GetIntFn)(GLuint, GLint*);
+    auto gi = (GetIntFn)dlsym(RTLD_DEFAULT, "glGetIntegerv");
+    if (gi) gi(0x8CA6, &savedFbo);
+    bf(0x8D40, (GLuint)fboId);
+    jint pts[5][2] = {{w/2,h/2},{8,8},{w-8,h-8},{w/2,8},{8,h/2}};
+    jint out[5];
+    unsigned char px[4];
+    for (int i = 0; i < 5; i++) {
+        px[0]=px[1]=px[2]=0;
+        rf(pts[i][0], pts[i][1], 1, 1, 0x1908 /*GL_RGBA*/, 0x1401 /*GL_UNSIGNED_BYTE*/, px);
+        out[i] = (px[0]<<16) | (px[1]<<8) | px[2];
+    }
+    bf(0x8D40, (GLuint)savedFbo);
+    jintArray arr = env->NewIntArray(5);
+    if (arr) env->SetIntArrayRegion(arr, 0, 5, out);
+    return arr;
+}
+
+/* Direct mode: delete a previously created FBO+texture. Current context. */
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_skikoDeleteFbo(
+    JNIEnv *env, jclass clazz, jlong packed)
+{
+    typedef unsigned int GLuint;
+    typedef int GLsizei;
+    static void (*p_glDeleteTextures)(GLsizei, const GLuint*) = nullptr;
+    static void (*p_glDeleteFramebuffers)(GLsizei, const GLuint*) = nullptr;
+    if (!p_glDeleteTextures) {
+        p_glDeleteTextures = (decltype(p_glDeleteTextures))dlsym(RTLD_DEFAULT, "glDeleteTextures");
+        p_glDeleteFramebuffers = (decltype(p_glDeleteFramebuffers))dlsym(RTLD_DEFAULT, "glDeleteFramebuffers");
+    }
+    if (!p_glDeleteTextures || !p_glDeleteFramebuffers) return;
+    GLuint fbo = (GLuint)(packed >> 32);
+    GLuint tex = (GLuint)(packed & 0xFFFFFFFFLL);
+    if (fbo) p_glDeleteFramebuffers(1, &fbo);
+    if (tex) p_glDeleteTextures(1, &tex);
+}
+
+/* UI thread, skiko's GL context current: attach mpv's render context to the
+ * current context (direct mode). */
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directAttachRenderContext(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+    return player->directAttachRenderContext() ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Direct mode: issue the deferred loadfile (call after attach succeeded). */
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directStartPlayback(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+    return player->directStartPlayback() ? JNI_TRUE : JNI_FALSE;
+}
+
+/* UI thread, skiko's GL context current: render into [fboId]. True when a new
+ * frame was signaled (caller should re-snapshot). */
+JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directRenderFrame(
+    JNIEnv *env, jclass clazz, jlong handle, jint fboId, jint w, jint h)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return JNI_FALSE;
+    PlayerUse use(player);
+    if (!use.ok) return JNI_FALSE;
+    if (w <= 0 || h <= 0 || fboId <= 0) return JNI_FALSE;
+    return player->directRenderFrame(fboId, w, h) ? JNI_TRUE : JNI_FALSE;
 }
 
 /* Report frame presentation to mpv's display-sync clock (consumer draw

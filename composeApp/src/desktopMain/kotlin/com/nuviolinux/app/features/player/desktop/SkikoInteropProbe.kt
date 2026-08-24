@@ -30,10 +30,15 @@ object SkikoInteropProbe {
 
     fun probeOnce() {
         if (probed) return
+        // Focus-independent: the player window may be unfocused/occluded when
+        // the first draws happen (direct mode attaches lazily during draws).
         val win = runCatching {
-            java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
+            java.awt.Window.getOwnerlessWindows()
+                .firstOrNull { it.isVisible && it.isDisplayable && it.isShowing }
+                ?: java.awt.Window.getWindows()
+                    .firstOrNull { it.isVisible && it.isDisplayable && it.isShowing }
         }.getOrNull()
-        if (win == null) return // not on EDT / no window yet — retry next tick
+        if (win == null) return // no window yet — retry next draw
         probed = true
         try {
             val layer = findSkiaLayer(win)
@@ -131,6 +136,20 @@ object SkikoInteropProbe {
         } catch (t: Throwable) {
             println("[SkikoInterop] verifyGlInterop failed: $t")
         }
+    }
+
+    /**
+     * androidx.compose.ui.graphics.getSkiaCanvas is internal to the compose
+     * module — access it reflectively (static method, stable signature).
+     * Returns null when unavailable (non-skia canvas / API change).
+     */
+    fun skiaCanvasOf(canvas: androidx.compose.ui.graphics.Canvas): org.jetbrains.skia.Canvas? = try {
+        val m = Class.forName("androidx.compose.ui.graphics.SkiaBackedCanvas_skikoKt")
+            .getDeclaredMethod("getSkiaCanvas", androidx.compose.ui.graphics.Canvas::class.java)
+        m.isAccessible = true
+        m.invoke(null, canvas) as? org.jetbrains.skia.Canvas
+    } catch (t: Throwable) {
+        null
     }
 
     private fun fieldUpTheHierarchy(obj: Any, name: String): java.lang.reflect.Field? {

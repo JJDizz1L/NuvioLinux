@@ -23,6 +23,7 @@ internal object NativePlayerBridge {
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
         displayFps: Double,
+        directVideo: Boolean,
     ): Long
 
     external fun dispose(handle: Long)
@@ -71,6 +72,21 @@ internal object NativePlayerBridge {
     /** SPIKE: create a magenta RGBA8 texture+FBO in the CURRENT GL context
      *  (skiko's, during a Compose draw). Returns (fbo<<32)|tex, or -1. */
     external fun skikoCreateTestFbo(width: Int, height: Int): Long
+    /** Direct mode: create a black RGBA8 texture+FBO in the CURRENT GL
+     *  context. Returns (fbo<<32)|tex, or -1. */
+    external fun skikoCreateFbo(width: Int, height: Int): Long
+    /** Direct mode: delete a previously created FBO+texture (current context). */
+    external fun skikoDeleteFbo(packed: Long)
+    /** SPIKE: read 5 pixels straight from the FBO via GL (bypasses skia). */
+    external fun skikoReadFboPixels(fboId: Int, w: Int, h: Int): IntArray?
+    /** Direct mode: attach mpv's render context to the CURRENT GL context
+     *  (skiko's — call during a Compose draw). One render context per handle. */
+    external fun directAttachRenderContext(handle: Long): Boolean
+    /** Direct mode: render the current mpv frame into [fboId] in the CURRENT
+     *  GL context. True when mpv signaled a new frame (re-snapshot). */
+    external fun directRenderFrame(handle: Long, fboId: Int, w: Int, h: Int): Boolean
+    /** Direct mode: issue the deferred loadfile (after attach succeeded). */
+    external fun directStartPlayback(handle: Long): Boolean
     /** Report real frame presentation to mpv's display-sync clock
      *  (mpv_render_context_report_swap). Call at draw/present time. */
     external fun reportSwap(handle: Long)

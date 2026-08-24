@@ -66,6 +66,7 @@ internal class NativePlayerController(
         streamCacheBytes: Long,
         streamCacheOnDisk: Boolean,
         displayFps: Double,
+        directVideo: Boolean,
         onError: (String?) -> Unit,
     ) {
         val pending = PendingSource(
@@ -79,6 +80,7 @@ internal class NativePlayerController(
             streamCacheBytes = streamCacheBytes,
             streamCacheOnDisk = streamCacheOnDisk,
             displayFps = displayFps,
+            directVideo = directVideo,
             onError = onError,
         )
         pendingSource = pending
@@ -143,6 +145,7 @@ internal class NativePlayerController(
                     streamCacheBytes = pending.streamCacheBytes,
                     streamCacheOnDisk = pending.streamCacheOnDisk,
                     displayFps = pending.displayFps,
+                    directVideo = pending.directVideo,
                 ).also { handle ->
                     log.d { "createPlayer — NativePlayerBridge.create returned handle=0x${handle.toString(16)}" }
                     if (handle == 0L) error("Native player did not return a handle.")
@@ -348,6 +351,44 @@ internal class NativePlayerController(
         }
     }
 
+    /** Direct mode: attach mpv's render context to skiko's current GL
+     *  context. Call during a Compose draw (UI thread). */
+    fun directAttachRenderContext(): Boolean {
+        if (disposed) return false
+        val current = handle
+        if (current == 0L) return false
+        return runCatching { NativePlayerBridge.directAttachRenderContext(current) }
+            .getOrElse {
+                if (it !is NoClassDefFoundError) log.w(it) { "directAttach failed" }
+                false
+            }
+    }
+
+    /** Direct mode: issue the deferred loadfile (after attach succeeded). */
+    fun directStartPlayback(): Boolean {
+        if (disposed) return false
+        val current = handle
+        if (current == 0L) return false
+        return runCatching { NativePlayerBridge.directStartPlayback(current) }
+            .getOrElse {
+                if (it !is NoClassDefFoundError) log.w(it) { "directStartPlayback failed" }
+                false
+            }
+    }
+
+    /** Direct mode: render into [fboId] in skiko's current GL context. True
+     *  when mpv signaled a new frame (caller should re-snapshot). */
+    fun directRenderFrame(fboId: Int, w: Int, h: Int): Boolean {
+        if (disposed) return false
+        val current = handle
+        if (current == 0L) return false
+        return runCatching { NativePlayerBridge.directRenderFrame(current, fboId, w, h) }
+            .getOrElse {
+                if (it !is NoClassDefFoundError) log.w(it) { "directRenderFrame failed" }
+                false
+            }
+    }
+
     /**
      * Reports real frame presentation to mpv's display-sync clock. Called by
      * the frame-pump consumer right after drawing a NEW video frame — the
@@ -441,6 +482,7 @@ internal class NativePlayerController(
             streamCacheBytes = pending.streamCacheBytes,
             streamCacheOnDisk = pending.streamCacheOnDisk,
             displayFps = pending.displayFps,
+            directVideo = pending.directVideo,
             onError = pending.onError,
         )
     }
@@ -648,6 +690,7 @@ private data class PendingSource(
     val streamCacheBytes: Long,
     val streamCacheOnDisk: Boolean,
     val displayFps: Double,
+    val directVideo: Boolean,
     val onError: (String?) -> Unit,
 )
 

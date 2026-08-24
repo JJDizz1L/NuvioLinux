@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.IntSize
 import co.touchlab.kermit.Logger
 import com.nuviolinux.app.core.power.ScreensaverInhibit
 import com.nuviolinux.app.features.player.desktop.ComposeRenderSurfaceHost
+import com.nuviolinux.app.features.player.desktop.NativePlayerBridge
 import com.nuviolinux.app.features.player.desktop.NativePlayerController
 import com.nuviolinux.app.features.player.desktop.desktopFullscreenChanges
 import java.awt.event.ComponentAdapter
@@ -169,6 +170,12 @@ private fun NativePlayerSurface(
         onDispose { controller.dispose() }
     }
 
+    /* Direct video mode (NUVIO_VIDEO_PATH=direct): mpv renders into an FBO
+     * owned by skiko's GL context during Compose draws — no producer thread,
+     * no readback. ComposeVideoSurface owns the direct state; falls back to
+     * the readback pipeline if the attach fails. */
+    val directVideo = remember { System.getenv("NUVIO_VIDEO_PATH") == "direct" }
+
     /* Real display refresh rate for mpv display-sync (video-sync=
      * display-resample): vo_libmpv reports no display FPS itself, so without
      * this mpv silently plays audio-sync (vsync-ratio stays 0). AWT reads it
@@ -204,6 +211,7 @@ private fun NativePlayerSurface(
             streamCacheBytes = streamCacheSize.bytes,
             streamCacheOnDisk = streamCacheOnDisk,
             displayFps = displayFps,
+            directVideo = directVideo,
             onError = { message -> latestOnError.value(message) },
         )
         // Always report the initial position as unhandled so the runtime's
@@ -263,6 +271,7 @@ private fun NativePlayerSurface(
         ComposeVideoSurface(
             controller = controller,
             awtWindowSize = windowPixelSize,
+            directVideo = directVideo,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -277,10 +286,28 @@ private fun NativePlayerSurface(
 private fun ComposeVideoSurface(
     controller: NativePlayerController,
     awtWindowSize: IntSize?,
+    directVideo: Boolean,
     modifier: Modifier,
 ) {
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
     var frameImage by remember { mutableStateOf<ImageBitmap?>(null) }
+
+    /* Direct video mode state (NUVIO_VIDEO_PATH=direct). */
+    var directAttached by remember { mutableStateOf(false) }
+    var directFailed by remember { mutableStateOf(false) }
+    var directFboPacked by remember { mutableStateOf(0L) }
+    var directFboW by remember { mutableStateOf(0) }
+    var directFboH by remember { mutableStateOf(0) }
+    var directSurface by remember { mutableStateOf<org.jetbrains.skia.Surface?>(null) }
+    var directSnapshot by remember { mutableStateOf<org.jetbrains.skia.Image?>(null) }
+    /* Non-state counters: written every frame; must NOT trigger recomposition. */
+    val directStats = remember { LongArray(4) } /* ticks, newFrames, windowNs, pad */
+    var directProbedPixel by remember { mutableStateOf(false) }
+    /* Draw-phase invalidation: the consumer writes this each frame tick; the
+     * Canvas lambda reads it, so each write re-executes the DRAW (not the
+     * composition) — the direct path has no per-frame state writes of its
+     * own, and without this the scene renders exactly once. */
+    val directFrameTick = remember { mutableStateOf(0L) }
     var frameSrcWidth by remember { mutableStateOf(0) }
     var frameSrcHeight by remember { mutableStateOf(0) }
 
@@ -365,7 +392,9 @@ private fun ComposeVideoSurface(
          * thread for several ms — a visible hitch every second. Enable with
          * NUVIO_TELEMETRY=1 for diagnostics. */
         val telemetryOn = System.getenv("NUVIO_TELEMETRY") == "1"
-        launch(Dispatchers.Default) {
+        /* Direct mode: no producer — the Canvas draw renders mpv directly
+         * (the consumer loop below still runs: it drives the draw + stats). */
+        if (!directVideo) launch(Dispatchers.Default) {
             /* NUVIO_PUMP_POLL=1 restores the pre-phase-2 pump verbatim (1ms
              * polling, no callback gating) for A/B judder comparison. */
             val pollPump = System.getenv("NUVIO_PUMP_POLL") == "1"
@@ -527,13 +556,10 @@ private fun ComposeVideoSurface(
         var ageCount = 0
         var consumerStatsWindowNs = 0L
         val consumerLog = Logger.withTag("ComposeVideoSurface")
+        if (directVideo) println("[direct-video] consumer loop entered")
         while (coroutineContext.isActive) {
             val frameNs = withFrameNanos { it }
-            /* SPIKE: skiko GL-texture interop feasibility (option A).
-             * Opt-in — prints via println by design (console discipline). */
-            if (System.getenv("NUVIO_SKIKO_SPIKE") == "1") {
-                com.nuviolinux.app.features.player.desktop.SkikoInteropProbe.probeOnce()
-            }
+            if (directVideo) directFrameTick.value = frameNs
             if (consumerStatsWindowNs == 0L) consumerStatsWindowNs = frameNs
             if (lastTickNs != 0L) {
                 val deltaMs = (frameNs - lastTickNs) / 1_000_000.0
@@ -637,6 +663,139 @@ private fun ComposeVideoSurface(
                 }
             },
     ) {
+        /* Draw-phase read: subscribes THIS draw to directFrameTick writes so
+         * each consumer tick re-executes the draw (composition untouched). */
+        if (directVideo) directFrameTick.value
+        /* Direct-mode frame draw. Runs inside the Compose draw phase —
+         * skiko's GL context is current here, so the JNI FBO/render calls
+         * land in it. Returns true when the frame was drawn (caller skips
+         * the readback path). Any failure flips directFailed → permanent
+         * readback fallback. */
+        var directLoggedFirst = false
+        fun drawDirectFrame(): Boolean {
+            if (!directLoggedFirst) {
+                directLoggedFirst = true
+                println("[direct-video] first draw attempt: ctx=${com.nuviolinux.app.features.player.desktop.SkikoInteropProbe.probedContext != null} attached=$directAttached failed=$directFailed fbo=$directFboPacked")
+            }
+            // Probe + interop self-test INSIDE the draw phase — skiko's GL
+            // context is current here and skia ops on its DirectContext are
+            // legal (doing this from the frame-clock tick froze the clock).
+            if (!directFailed && com.nuviolinux.app.features.player.desktop.SkikoInteropProbe.probedContext == null) {
+                com.nuviolinux.app.features.player.desktop.SkikoInteropProbe.probeOnce()
+            }
+            val ctx = com.nuviolinux.app.features.player.desktop.SkikoInteropProbe.probedContext
+                ?: return false
+            val w = size.width.toInt()
+            val h = size.height.toInt()
+            if (w <= 0 || h <= 0) return false
+            if (!directAttached) {
+                directAttached = controller.directAttachRenderContext()
+                if (!directAttached) {
+                    directFailed = true
+                    println("[direct-video] render-context attach FAILED — falling back to readback (no producer: restart needed)")
+                    return false
+                }
+                println("[direct-video] render context attached (skiko context), starting deferred playback")
+                // Render context is live — mpv's vo can now initialize.
+                if (!controller.directStartPlayback()) {
+                    directFailed = true
+                    println("[direct-video] deferred playback start FAILED")
+                    return false
+                }
+            }
+            if (directFboPacked == 0L || directFboW != w || directFboH != h) {
+                directSnapshot?.close()
+                directSnapshot = null
+                directSurface?.close()
+                directSurface = null
+                if (directFboPacked != 0L) {
+                    NativePlayerBridge.skikoDeleteFbo(directFboPacked)
+                    directFboPacked = 0L
+                }
+                directFboPacked = NativePlayerBridge.skikoCreateFbo(w, h)
+                directFboW = w
+                directFboH = h
+                if (directFboPacked <= 0L) {
+                    directFailed = true
+                    return false
+                }
+                val rt = org.jetbrains.skia.BackendRenderTarget.makeGL(
+                    w, h, 0, 0, (directFboPacked shr 32).toInt(), 0x8058 /* GL_RGBA8 */)
+                directSurface = org.jetbrains.skia.Surface.makeFromBackendRenderTarget(
+                    ctx, rt,
+                    org.jetbrains.skia.SurfaceOrigin.TOP_LEFT,
+                    org.jetbrains.skia.SurfaceColorFormat.RGBA_8888,
+                    org.jetbrains.skia.ColorSpace.sRGB,
+                    null,
+                )
+                if (directSurface == null) {
+                    directFailed = true
+                    return false
+                }
+            }
+            val newFrame = controller.directRenderFrame((directFboPacked shr 32).toInt(), w, h)
+            if (newFrame || directSnapshot == null) {
+                directSnapshot?.close()
+                directSnapshot = directSurface?.makeImageSnapshot()
+                if (!directProbedPixel) {
+                    directProbedPixel = true
+                    // One-shot: what does the FBO actually contain?
+                    val img = directSnapshot
+                    if (img != null) {
+                        val info = org.jetbrains.skia.ImageInfo.makeN32(w, h, org.jetbrains.skia.ColorAlphaType.OPAQUE)
+                        val data = org.jetbrains.skia.Data.Companion.makeUninitialized(w * h * 4)
+                        val pm = org.jetbrains.skia.Pixmap()
+                        pm.reset(info, data, w * 4)
+                        val ok = img.readPixels(pm, 0, 0, false)
+                        if (ok) {
+                            val b = data.getBytes(0, w * h * 4)
+                            fun px(x: Int, y: Int): String {
+                                val o = (y * w + x) * 4
+                                return "%02x%02x%02x".format(b[o], b[o+1], b[o+2])
+                            }
+                            println("[direct-video] snapshot pixels: c=${px(w/2,h/2)} tl=${px(8,8)} br=${px(w-8,h-8)}")
+                        } else println("[direct-video] snapshot readPixels failed")
+                        pm.close(); data.close()
+                        // Pure-GL view of the same FBO right now:
+                        val gl = NativePlayerBridge.skikoReadFboPixels(
+                            (directFboPacked shr 32).toInt(), w, h)
+                        if (gl != null) {
+                            println("[direct-video] GL pixels: c=%06x tl=%06x br=%06x mid=%06x left=%06x"
+                                .format(gl[0], gl[1], gl[2], gl[3], gl[4]))
+                        }
+                    }
+                }
+            }
+            val snap = directSnapshot ?: return false
+            val skiaCanvas = com.nuviolinux.app.features.player.desktop.SkikoInteropProbe
+                .skiaCanvasOf(drawContext.canvas) ?: return false
+            skiaCanvas.drawImage(snap, 0f, 0f)
+            return true
+        }
+
+        if (directVideo && !directFailed) {
+            val drew = drawDirectFrame()
+            directStats[0]++
+            if (drew) directStats[1]++
+            val now = System.nanoTime()
+            if (directStats[2] == 0L) directStats[2] = now
+            val wms = (now - directStats[2]) / 1_000_000.0
+            if (wms >= 1000.0) {
+                val ticks = directStats[0]
+                val frames = directStats[1]
+                if (System.getenv("NUVIO_TELEMETRY") == "1") {
+                    Logger.withTag("ComposeVideoSurface").d {
+                        "direct stats: $ticks draws, $frames new frames in ${wms}ms" +
+                            " pos=${controller.positionMs()}" +
+                            " eof=${controller.snapshot().isEnded}"
+                    }
+                }
+                directStats[2] = now
+                directStats[0] = 0
+                directStats[1] = 0
+            }
+            if (drew) return@Canvas
+        }
         frameImage?.let { image ->
             if (frameSrcWidth > 0 && frameSrcHeight > 0) {
                 drawImage(
