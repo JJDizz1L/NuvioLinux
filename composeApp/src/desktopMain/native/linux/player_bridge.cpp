@@ -2593,9 +2593,6 @@ struct MpvPlayer {
              * whole UI (Harbor set video-timing-offset=0 for exactly this). */
             if (this->directVideo) {
                 p_mpv_set_option_string(mpv, "video-timing-offset", "0");
-                /* Render no-op discriminator: red background shows up in the
-                 * FBO if mpv's render runs at all (vs a complete no-op). */
-                p_mpv_set_option_string(mpv, "background-color", "#FF0000");
             }
             {
                 const char *vsyncEnv = getenv("NUVIO_VIDEO_SYNC");
