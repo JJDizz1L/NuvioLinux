@@ -347,6 +347,12 @@ private fun ComposeVideoSurface(
          * the video FPS — no 1ms polling between frames. A window resize must
          * not wait (paused video re-renders at the new geometry on the next
          * render call), so size changes bypass the block. */
+        /* Telemetry (renderStats JNI burst + 1 Hz log writes on BOTH the
+         * producer and the UI-thread consumer) is OFF by default: the log
+         * write goes through the console pipe and can stall the writing
+         * thread for several ms — a visible hitch every second. Enable with
+         * NUVIO_TELEMETRY=1 for diagnostics. */
+        val telemetryOn = System.getenv("NUVIO_TELEMETRY") == "1"
         launch(Dispatchers.Default) {
             /* NUVIO_PUMP_POLL=1 restores the pre-phase-2 pump verbatim (1ms
              * polling, no callback gating) for A/B judder comparison. */
@@ -442,7 +448,13 @@ private fun ComposeVideoSurface(
                          * 'decode too slow' (decoder drops) from 'presentation
                          * jitter' (mistimed/delayed frames) from 'source too
                          * slow' (bitrate vs cache growth). Zeros before media
-                         * loads — harmless in the log. */
+                         * loads. GATED: the JNI burst + log write cost several
+                         * ms on this thread every second — a visible hitch. */
+                        if (!telemetryOn) {
+                            cadenceStartNs = nowNs
+                            cadenceFrames = 0
+                            prodSkips = 0
+                        } else {
                         val stats = controller.renderStats()
                         val mbps = stats.videoBitrateBitsPerSec / 1_000_000.0
                         log.d {
@@ -459,6 +471,7 @@ private fun ComposeVideoSurface(
                         cadenceStartNs = nowNs
                         cadenceFrames = 0
                         prodSkips = 0
+                        }
                     }
                 } else {
                     synchronized(slotLock) { free.addLast(index) }
@@ -553,7 +566,10 @@ private fun ComposeVideoSurface(
 
                 val windowMs = (frameNs - consumerStatsWindowNs) / 1_000_000.0
                 if (windowMs >= 1000.0) {
-                    consumerLog.d {
+                    /* GATED (see telemetryOn): this write runs on the UI
+                     * thread — a blocking console write here misses the next
+                     * vsync deadline, i.e. a visible hitch every second. */
+                    if (telemetryOn) consumerLog.d {
                         val tickLine = if (tickCount > 1)
                             "%.2f/%.2f/%.2f".format(
                                 tickSumMs / (tickCount - 1), tickMinMs, tickMaxMs)
