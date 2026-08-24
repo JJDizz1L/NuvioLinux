@@ -2357,6 +2357,29 @@ struct MpvPlayer {
             p_mpv_set_option_string(mpv, "force-window", "no");
             p_mpv_set_option_string(mpv, "idle", "yes");
 
+            /* Frame pacing (2026-08-23, Harbor study): lock mpv's cadence to
+             * the display clock. With the default video-sync=audio, mpv
+             * produces frames on the audio clock while our consumer presents
+             * on the compositor's vsync grid — the two clocks drift, and at
+             * 24fps@120Hz the frame→refresh mapping occasionally slips
+             * (4-then-6 repeat pattern = micro-judder, the "smooth but
+             * hitching" report). display-resample makes the display the
+             * master clock (mpv micro-adjusts audio speed, inaudible) — the
+             * same mode standalone mpv runs when playback looks smooth.
+             * Applied AFTER user config so it always wins;
+             * NUVIO_VIDEO_SYNC overrides for triage. NOTE: we deliberately
+             * do NOT copy Harbor's video-timing-offset=0 — they need it
+             * because their render runs on the UI thread (blocking in render
+             * would stall the webview). Ours runs on the producer thread,
+             * where mpv's default early-wake + block-until-target gives
+             * target-time-accurate publishes for free. */
+            {
+                const char *vsyncEnv = getenv("NUVIO_VIDEO_SYNC");
+                p_mpv_set_option_string(mpv, "video-sync",
+                        (vsyncEnv && *vsyncEnv) ? vsyncEnv : "display-resample");
+                p_mpv_set_option_string(mpv, "video-sync-max-video-change", "5");
+            }
+
             /* Stream cache: app-controlled size (demuxer-max-bytes caps both the
              * read-ahead and the network cache) and optional on-disk cache. The
              * back-buffer gets a small fixed slice — mpv's back buffer is
@@ -2679,6 +2702,14 @@ after_hwdec:
                     p_mpv_command(mpv, seekCmd);
                     LOG("applied initial position %lld ms on file-loaded",
                         (long long)pending);
+                }
+                /* Pacing verification: the ACTIVE video-sync mode after user
+                 * config + overrides, plus the vsync ratio once mpv settles
+                 * (logged on the first cadence window that follows). */
+                {
+                    char *vs = p_mpv_get_property_string(mpv, "video-sync");
+                    LOG("video-sync = %s", vs ? vs : "(null)");
+                    if (vs) p_mpv_free(vs);
                 }
             }
 
