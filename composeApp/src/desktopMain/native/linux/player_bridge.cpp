@@ -23,6 +23,7 @@ static int g_debug = -1; /* -1 = uninitialized */
 extern "C" {
 void skiko_gl_save(int *fbo, int *viewport);
 void skiko_gl_restore(int fbo, const int *viewport);
+void skiko_gl_reset_to_defaults(void);
 }
 #include <pthread.h>
 #include <string>
@@ -2126,6 +2127,13 @@ struct MpvPlayer {
         auto ge = (GetErrFnD_)dlsym(RTLD_DEFAULT, "glGetError");
         if (ge) { GLenumD_ sticky; int n = 0; while ((sticky = ge()) != 0 && n++ < 8) {} }
 
+        /* Reset the state skia dirties to desktop defaults — mpv's render
+         * contract expects near-default state on entry. Skia's leftovers
+         * (blend/scissor/pixel-store/program) made the video quad draw
+         * nothing while the state-independent background clear still
+         * painted: the solid-red-rectangle symptom. */
+        skiko_gl_reset_to_defaults();
+
         p_mpv_render_context_render(renderCtx, params);
 
         /* Restore the scene's binding + viewport so skia's flush and any
@@ -3386,6 +3394,49 @@ void skiko_gl_save(int *fbo, int *viewport) {
         gi(0x0BA2 /*GL_VIEWPORT*/, viewport);
     }
 }
+/* Reset the GL state skia dirties back to desktop defaults before mpv's
+ * render. mpv's render contract expects near-default state on entry; skia
+ * leaves blend/scissor/pixel-store/program state that makes the video quad
+ * draw nothing while the background clear (state-independent) still paints
+ * — the 'solid red rectangle' symptom. */
+void skiko_gl_reset_to_defaults(void) {
+    typedef void (*VoidFn)(GLuint);
+    typedef void (*BlendFn)(GLuint, GLuint);
+    typedef void (*ProgramFn)(GLuint);
+    typedef void (*ActiveTexFn)(GLuint);
+    typedef void (*BindTexFn)(GLuint, GLuint);
+    typedef void (*PixStoreFn)(GLuint, GLint);
+    typedef void (*ColorMaskFn)(unsigned char, unsigned char, unsigned char, unsigned char);
+    typedef void (*DepthMaskFn)(unsigned char);
+    auto dis = (VoidFn)dlsym(RTLD_DEFAULT, "glDisable");
+    auto bf = (BlendFn)dlsym(RTLD_DEFAULT, "glBlendFunc");
+    auto up = (ProgramFn)dlsym(RTLD_DEFAULT, "glUseProgram");
+    auto at = (ActiveTexFn)dlsym(RTLD_DEFAULT, "glActiveTexture");
+    auto bt = (BindTexFn)dlsym(RTLD_DEFAULT, "glBindTexture");
+    auto ps = (PixStoreFn)dlsym(RTLD_DEFAULT, "glPixelStorei");
+    auto cm = (ColorMaskFn)dlsym(RTLD_DEFAULT, "glColorMask");
+    auto dm = (DepthMaskFn)dlsym(RTLD_DEFAULT, "glDepthMask");
+    if (dis) {
+        dis(0x0C11 /*SCISSOR_TEST*/);
+        dis(0x0BE2 /*BLEND*/);
+        dis(0x0B71 /*DEPTH_TEST*/);
+        dis(0x0B44 /*CULL_FACE*/);
+        dis(0x0B90 /*STENCIL_TEST*/);
+        dis(0x0BC0 /*DITHER*/);
+        dis(0x8037 /*POLYGON_OFFSET_FILL*/);
+        dis(0x8893 /*PRIMITIVE_RESTART*/);
+        dis(0x809E /*SAMPLE_COVERAGE*/);
+        dis(0x80A0 /*SAMPLE_ALPHA_TO_COVERAGE*/);
+    }
+    if (bf) bf(0x0001 /*ONE*/, 0x0000 /*ZERO*/);
+    if (up) up(0);
+    if (at) at(0x84C0 /*TEXTURE0*/);
+    if (bt) bt(0x0DE1 /*TEXTURE_2D*/, 0);
+    if (ps) ps(0x0D05 /*UNPACK_ALIGNMENT*/, 4);
+    if (cm) cm(1, 1, 1, 1);
+    if (dm) dm(1);
+}
+
 void skiko_gl_restore(int fbo, const int *viewport) {
     typedef void (*BindFn)(GLuint, GLuint);
     typedef void (*ViewFn)(GLint, GLint, GLsizei, GLsizei);
