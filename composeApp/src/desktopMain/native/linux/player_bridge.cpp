@@ -21,6 +21,21 @@ static int g_debug = -1; /* -1 = uninitialized */
 
 /* skiko-interop GL state helpers (defined in this file's extern "C") */
 extern "C" {
+/* KHR_debug callback: the driver reports the exact failing call + reason. */
+typedef void (*GLDEBUGPROC_)(unsigned int, unsigned int, unsigned int, unsigned int,
+                             int, const char *, const void *);
+static void skiko_debug_cb(unsigned int source, unsigned int type, unsigned int id,
+                           unsigned int severity, int length, const char *msg,
+                           const void *user) {
+    (void)user;
+    static int logged = 0;
+    if (logged < 40) {
+        logged++;
+        LOG("[gldebug] src=0x%x type=0x%x id=%u sev=0x%x: %.*s",
+            source, type, id, severity, msg ? msg : "");
+    }
+}
+
 void skiko_gl_save(int *fbo, int *viewport);
 void skiko_gl_restore(int fbo, const int *viewport);
 void skiko_gl_reset_to_defaults(void);
@@ -3549,6 +3564,19 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
             return -1;
         }
         resolved = true;
+        /* Enable the KHR_debug callback once: driver messages name the exact
+         * failing call for GL_INVALID_ENUM etc. */
+        {
+            typedef void (*DbgFn)(GLDEBUGPROC_, const void *);
+            typedef void (*EnableFn)(unsigned int);
+            auto dbg = (DbgFn)dlsym(RTLD_DEFAULT, "glDebugMessageCallback");
+            auto en = (EnableFn)dlsym(RTLD_DEFAULT, "glEnable");
+            if (dbg) {
+                dbg(skiko_debug_cb, nullptr);
+                if (en) en(0x92E0 /*GL_DEBUG_OUTPUT*/);
+                LOG("KHR_debug callback enabled");
+            }
+        }
     }
     GLint savedFbo = 0, savedViewport[4] = {0, 0, 0, 0};
     skiko_gl_save(&savedFbo, savedViewport);
