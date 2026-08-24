@@ -2086,6 +2086,19 @@ struct MpvPlayer {
         typedef GLenum2_ (*CheckFn)(GLuint2_);
         typedef void (*GetIntFn2_)(GLuint2_, GLint2_*);
         typedef GLenum2_ (*GetErrFn)();
+        /* Save the SCENE's framebuffer binding + viewport: skiko/GDK render
+         * the scene into a compositor-provided FBO, and mpv does NOT restore
+         * GL state after render (render_gl.h contract) — without this, skia's
+         * end-of-draw flush targets OUR FBO (crash in DirectContext flush /
+         * black window; Harbor restores GDK's state for the same reason). */
+        GLint sceneFbo = 0, sceneViewport[4] = {0, 0, 0, 0};
+        skiko_gl_save(&sceneFbo, sceneViewport);
+        bf(0x8D40, (GLuint2_)fboId);
+        GLenum2_ st = ck(0x8D40);
+        if (st != 0x8CD5 && statusLogs < 5) {
+            statusLogs++;
+            LOG("direct render: FBO %d status=0x%x (INCOMPLETE)", fboId, st);
+        }
         /* Bind the FBO ourselves and verify completeness at THIS moment —
          * mpv binds it internally, and 0x506 says it's incomplete by then. */
         auto bf = (BindFn)dlsym(RTLD_DEFAULT, "glBindFramebuffer");
@@ -2108,6 +2121,9 @@ struct MpvPlayer {
         auto ge = (GetErrFn)dlsym(RTLD_DEFAULT, "glGetError");
         if (ge) { GLenum2_ sticky; int n = 0; while ((sticky = ge()) != 0 && n++ < 8) {} }
         p_mpv_render_context_render(renderCtx, params);
+        /* Restore the scene's binding + viewport so skia's flush and any
+         * subsequent draws target the compositor's FBO, not ours. */
+        skiko_gl_restore(sceneFbo, sceneViewport);
         static int errLogs = 0;
         if (ge) {
             GLenum2_ e = ge();
