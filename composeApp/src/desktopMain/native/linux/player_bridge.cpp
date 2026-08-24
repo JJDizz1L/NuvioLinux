@@ -3320,19 +3320,33 @@ typedef float GLfloat;
  * loads it globally. dlopen(libGL, RTLD_GLOBAL) on first use fixes that. */
 static bool skiko_gl_resolve_all(void **syms, const char *const *names, int count) {
     static bool loaded = false;
+    static bool diagLogged = false;
     if (!loaded) {
         loaded = true;
         if (!dlsym(RTLD_DEFAULT, "glGenFramebuffers")) {
             void *lib = dlopen("libGL.so.1", RTLD_LAZY | RTLD_GLOBAL);
-            if (!lib) lib = dlopen("libGL.so", RTLD_LAZY | RTLD_GLOBAL);
-            (void)lib;
+            if (!lib) {
+                const char *err1 = dlerror();
+                LOG("skiko gl resolve: dlopen(libGL.so.1) failed: %s", err1 ? err1 : "?");
+                lib = dlopen("libGL.so", RTLD_LAZY | RTLD_GLOBAL);
+                if (!lib) {
+                    const char *err2 = dlerror();
+                    LOG("skiko gl resolve: dlopen(libGL.so) failed: %s", err2 ? err2 : "?");
+                }
+            }
         }
     }
     bool ok = true;
     for (int i = 0; i < count; i++) {
         if (!syms[i]) {
             syms[i] = dlsym(RTLD_DEFAULT, names[i]);
-            if (!syms[i]) ok = false;
+            if (!syms[i]) {
+                ok = false;
+                if (!diagLogged) {
+                    diagLogged = true;
+                    LOG("skiko gl resolve: FIRST UNRESOLVED symbol = %s", names[i]);
+                }
+            }
         }
     }
     return ok;
