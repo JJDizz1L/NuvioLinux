@@ -2074,59 +2074,60 @@ struct MpvPlayer {
         uint64_t flags = p_mpv_render_context_update(renderCtx);
         mpv_opengl_fbo fbo = { fboId, w, h, 0 };
         int flipY = 0;
+        /* Present-time hint — same as the readback path (without it mpv
+         * renders whatever is current at call time). */
+        mpv_render_frame_info frameInfo = {};
+        frameInfo.target_time = p_mpv_get_time_us(mpv);
         mpv_render_param params[] = {
             { MPV_RENDER_PARAM_OPENGL_FBO, &fbo },
             { MPV_RENDER_PARAM_FLIP_Y, &flipY },
+            { MPV_RENDER_PARAM_NEXT_FRAME_INFO, &frameInfo },
             { MPV_RENDER_PARAM_INVALID, nullptr }
         };
-        typedef int GLint2_;
-        typedef unsigned int GLuint2_;
-        typedef void (*BindFn)(GLuint2_, GLuint2_);
-        typedef unsigned int GLenum2_;
-        typedef GLenum2_ (*CheckFn)(GLuint2_);
-        typedef void (*GetIntFn2_)(GLuint2_, GLint2_*);
-        typedef GLenum2_ (*GetErrFn)();
+
+        typedef int GLintD_;
+        typedef unsigned int GLuintD_;
+        typedef void (*BindFn)(GLuintD_, GLuintD_);
+        typedef unsigned int GLenumD_;
+        typedef GLenumD_ (*CheckFn)(GLuintD_);
+        typedef void (*GetIntFnD_)(GLuintD_, GLintD_*);
+        typedef GLenumD_ (*GetErrFnD_)();
+
         /* Save the SCENE's framebuffer binding + viewport: skiko/GDK render
          * the scene into a compositor-provided FBO, and mpv does NOT restore
          * GL state after render (render_gl.h contract) — without this, skia's
-         * end-of-draw flush targets OUR FBO (crash in DirectContext flush /
+         * end-of-draw flush targets OUR FBO (SIGSEGV in DirectContext flush /
          * black window; Harbor restores GDK's state for the same reason). */
-        GLint sceneFbo = 0, sceneViewport[4] = {0, 0, 0, 0};
+        GLintD_ sceneFbo = 0, sceneViewport[4] = {0, 0, 0, 0};
         skiko_gl_save(&sceneFbo, sceneViewport);
-        bf(0x8D40, (GLuint2_)fboId);
-        GLenum2_ st = ck(0x8D40);
-        if (st != 0x8CD5 && statusLogs < 5) {
-            statusLogs++;
-            LOG("direct render: FBO %d status=0x%x (INCOMPLETE)", fboId, st);
-        }
-        /* Bind the FBO ourselves and verify completeness at THIS moment —
-         * mpv binds it internally, and 0x506 says it's incomplete by then. */
+
         auto bf = (BindFn)dlsym(RTLD_DEFAULT, "glBindFramebuffer");
         auto ck = (CheckFn)dlsym(RTLD_DEFAULT, "glCheckFramebufferStatus");
         static int statusLogs = 0;
-        if (bf && ck) {
-            GLint2_ saved = 0;
-            auto gi = (GetIntFn2_)dlsym(RTLD_DEFAULT, "glGetIntegerv");
-            if (gi) gi(0x8CA6, &saved);
-            bf(0x8D40, (GLuint2_)fboId);
-            GLenum2_ st = ck(0x8D40);
-            bf(0x8D40, (GLuint2_)saved);
-            if (st != 0x8CD5 && statusLogs < 5) {
-                statusLogs++;
-                LOG("direct render: FBO %d status=0x%x (INCOMPLETE)", fboId, st);
+        if (bf) {
+            bf(0x8D40, (GLuintD_)fboId);
+            if (ck) {
+                GLenumD_ st = ck(0x8D40);
+                if (st != 0x8CD5 && statusLogs < 5) {
+                    statusLogs++;
+                    LOG("direct render: FBO %d status=0x%x (INCOMPLETE)", fboId, st);
+                }
             }
         }
+
         /* GL errors are STICKY — drain any error skia's earlier draws left
          * before mpv renders, so what we read after is genuinely mpv's. */
-        auto ge = (GetErrFn)dlsym(RTLD_DEFAULT, "glGetError");
-        if (ge) { GLenum2_ sticky; int n = 0; while ((sticky = ge()) != 0 && n++ < 8) {} }
+        auto ge = (GetErrFnD_)dlsym(RTLD_DEFAULT, "glGetError");
+        if (ge) { GLenumD_ sticky; int n = 0; while ((sticky = ge()) != 0 && n++ < 8) {} }
+
         p_mpv_render_context_render(renderCtx, params);
+
         /* Restore the scene's binding + viewport so skia's flush and any
          * subsequent draws target the compositor's FBO, not ours. */
         skiko_gl_restore(sceneFbo, sceneViewport);
         static int errLogs = 0;
         if (ge) {
-            GLenum2_ e = ge();
+            GLenumD_ e = ge();
             if (e != 0 && errLogs < 5) {
                 errLogs++;
                 LOG("direct render: glGetError=0x%x (fbo=%d w=%d h=%d)", e, fboId, w, h);
@@ -3334,6 +3335,9 @@ typedef float GLfloat;
 /* GL entry points for the skiko-interop path: skiko loads libGL with
  * RTLD_LOCAL, so dlsym(RTLD_DEFAULT) can't see GL symbols until something
  * loads it globally. dlopen(libGL, RTLD_GLOBAL) on first use fixes that. */
+static void skiko_gl_save(int *fbo, int *viewport);
+static void skiko_gl_restore(int fbo, const int *viewport);
+
 /* [targets] are ADDRESSES of the function-pointer variables — writes go
  * through to them. (Passing pointer VALUES copies NULLs and the real
  * variables never get assigned — the bug that made direct mode fail.) */
@@ -3371,7 +3375,7 @@ static bool skiko_gl_resolve_all(void **targets, const char *const *names, int c
     return ok;
 }
 
-static void skiko_gl_save(GLint *fbo, GLint *viewport) {
+static void skiko_gl_save(int *fbo, int *viewport) {
     typedef void (*GetIntFn)(GLuint, GLint*);
     auto gi = (GetIntFn)dlsym(RTLD_DEFAULT, "glGetIntegerv");
     if (gi) {
@@ -3379,7 +3383,7 @@ static void skiko_gl_save(GLint *fbo, GLint *viewport) {
         gi(0x0BA2 /*GL_VIEWPORT*/, viewport);
     }
 }
-static void skiko_gl_restore(GLint fbo, const GLint *viewport) {
+static void skiko_gl_restore(int fbo, const int *viewport) {
     typedef void (*BindFn)(GLuint, GLuint);
     typedef void (*ViewFn)(GLint, GLint, GLsizei, GLsizei);
     auto bf = (BindFn)dlsym(RTLD_DEFAULT, "glBindFramebuffer");
