@@ -3491,7 +3491,12 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     p_glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     p_glClear(0x4000);
     skiko_gl_restore(savedFbo, savedViewport);
-    DBG("skikoCreateFbo: fbo=%u tex=%u status=0x%x savedFbo=%d", fbo, tex, status, savedFbo);
+    static bool statusLogged = false;
+    if (!statusLogged) {
+        statusLogged = true;
+        LOG("skikoCreateFbo: fbo=%u tex=%u status=0x%x savedFbo=%d (w=%d h=%d)",
+            fbo, tex, status, savedFbo, width, height);
+    }
     if (status != 0x8CD5) return -1;
     return ((jlong)fbo << 32) | (jlong)tex;
 }
