@@ -16,7 +16,9 @@ import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import com.nuviolinux.app.core.build.AppIdentity
+import com.nuviolinux.app.core.build.AppVersionPolicy
 import com.nuviolinux.app.core.display.AwtNonReparentingSupport
 import com.nuviolinux.app.core.display.DisplayServerDetector
 import com.nuviolinux.app.core.display.WindowDiagnostics
@@ -48,6 +50,22 @@ fun main(args: Array<String>) {
     // applied here, first.
     AwtNonReparentingSupport.applyIfNeeded()
     configureDesktopQuickJsLibrary()
+    /* Console discipline (playback-performance measure): console writes go
+     * through blocking pipes and can stall hot threads for milliseconds —
+     * a slow write on the UI/producer thread misses a vsync deadline, which
+     * reads as a playback hitch. Default output is therefore ONLY the
+     * banner below plus the native bridge's playback-essential lines
+     * ([nuvio-mpv] create/decoder/fallback + mpv warn/error). Everything
+     * else — all Kermit logging app-wide and the bridge's init chatter —
+     * requires explicit opt-in: NUVIO_LOGS=1 (Kotlin) and/or
+     * NUVIO_MPV_DEBUG=1 (bridge). Errors always print. */
+    val verboseLogs = System.getenv("NUVIO_LOGS") == "1"
+    Logger.setMinSeverity(if (verboseLogs) Severity.Debug else Severity.Error)
+    println(
+        "Nuvio Linux ${AppVersionPolicy.displayVersionName} " +
+            "(${AppIdentity.installFormatLabel})" +
+            if (verboseLogs) " — verbose logging (NUVIO_LOGS=1)" else ""
+    )
     Logger.withTag("WindowEnvironment").i { "display server: ${DisplayServerDetector.detect()}" }
     installDesktopOpenUriHandler()
     handleDesktopLaunchArgs(args)
