@@ -3318,7 +3318,10 @@ typedef float GLfloat;
 /* GL entry points for the skiko-interop path: skiko loads libGL with
  * RTLD_LOCAL, so dlsym(RTLD_DEFAULT) can't see GL symbols until something
  * loads it globally. dlopen(libGL, RTLD_GLOBAL) on first use fixes that. */
-static bool skiko_gl_resolve_all(void **syms, const char *const *names, int count) {
+/* [targets] are ADDRESSES of the function-pointer variables — writes go
+ * through to them. (Passing pointer VALUES copies NULLs and the real
+ * variables never get assigned — the bug that made direct mode fail.) */
+static bool skiko_gl_resolve_all(void **targets, const char *const *names, int count) {
     static bool loaded = false;
     static bool diagLogged = false;
     if (!loaded) {
@@ -3338,9 +3341,9 @@ static bool skiko_gl_resolve_all(void **syms, const char *const *names, int coun
     }
     bool ok = true;
     for (int i = 0; i < count; i++) {
-        if (!syms[i]) {
-            syms[i] = dlsym(RTLD_DEFAULT, names[i]);
-            if (!syms[i]) {
+        if (!*targets[i]) {
+            *targets[i] = dlsym(RTLD_DEFAULT, names[i]);
+            if (!*targets[i]) {
                 ok = false;
                 if (!diagLogged) {
                     diagLogged = true;
@@ -3398,15 +3401,15 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
         /* Resolution may fail before libGL lands in the global namespace —
          * RETRY on later draws (only mark resolved on success; a premature
          * flag made the retry call NULL pointers — SIGSEGV, caught live). */
-        void *syms[] = { (void*&)p_glGenTextures, (void*&)p_glBindTexture,
-            (void*&)p_glTexImage2D, (void*&)p_glTexParameteri,
-            (void*&)p_glGenFramebuffers, (void*&)p_glBindFramebuffer,
-            (void*&)p_glFramebufferTexture2D, (void*&)p_glClearColor,
-            (void*&)p_glClear, (void*&)p_glViewport };
+        void *targets[] = { &p_glGenTextures, &p_glBindTexture,
+            &p_glTexImage2D, &p_glTexParameteri,
+            &p_glGenFramebuffers, &p_glBindFramebuffer,
+            &p_glFramebufferTexture2D, &p_glClearColor,
+            &p_glClear, &p_glViewport };
         const char *names[] = { "glGenTextures", "glBindTexture", "glTexImage2D",
             "glTexParameteri", "glGenFramebuffers", "glBindFramebuffer",
             "glFramebufferTexture2D", "glClearColor", "glClear", "glViewport" };
-        if (!skiko_gl_resolve_all(syms, names, 10) || !p_glGenFramebuffers || !p_glTexImage2D) {
+        if (!skiko_gl_resolve_all(targets, names, 10) || !p_glGenFramebuffers || !p_glTexImage2D) {
             LOG("skikoCreateTestFbo: GL entry points not resolvable (yet) — will retry");
             return -1;
         }
@@ -3459,15 +3462,15 @@ JNIEXPORT jlong JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePl
     static void (*p_glViewport)(GLint, GLint, GLsizei, GLsizei) = nullptr;
     static bool resolved = false;
     if (!resolved) {
-        void *syms[] = { (void*&)p_glGenTextures, (void*&)p_glBindTexture,
-            (void*&)p_glTexImage2D, (void*&)p_glTexParameteri,
-            (void*&)p_glGenFramebuffers, (void*&)p_glBindFramebuffer,
-            (void*&)p_glFramebufferTexture2D, (void*&)p_glClearColor,
-            (void*&)p_glClear, (void*&)p_glViewport };
+        void *targets[] = { &p_glGenTextures, &p_glBindTexture,
+            &p_glTexImage2D, &p_glTexParameteri,
+            &p_glGenFramebuffers, &p_glBindFramebuffer,
+            &p_glFramebufferTexture2D, &p_glClearColor,
+            &p_glClear, &p_glViewport };
         const char *names[] = { "glGenTextures", "glBindTexture", "glTexImage2D",
             "glTexParameteri", "glGenFramebuffers", "glBindFramebuffer",
             "glFramebufferTexture2D", "glClearColor", "glClear", "glViewport" };
-        if (!skiko_gl_resolve_all(syms, names, 10) || !p_glGenFramebuffers || !p_glTexImage2D) {
+        if (!skiko_gl_resolve_all(targets, names, 10) || !p_glGenFramebuffers || !p_glTexImage2D) {
             LOG("skikoCreateFbo: GL entry points not resolvable (yet) — will retry");
             return -1;
         }
@@ -3541,9 +3544,9 @@ JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePla
     static void (*p_glDeleteTextures)(GLsizei, const GLuint*) = nullptr;
     static void (*p_glDeleteFramebuffers)(GLsizei, const GLuint*) = nullptr;
     if (!p_glDeleteTextures) {
-        void *syms[] = { (void*&)p_glDeleteTextures, (void*&)p_glDeleteFramebuffers };
+        void *targets[] = { &p_glDeleteTextures, &p_glDeleteFramebuffers };
         const char *names[] = { "glDeleteTextures", "glDeleteFramebuffers" };
-        skiko_gl_resolve_all(syms, names, 2);
+        skiko_gl_resolve_all(targets, names, 2);
     }
     if (!p_glDeleteTextures || !p_glDeleteFramebuffers) return;
     GLuint fbo = (GLuint)(packed >> 32);
