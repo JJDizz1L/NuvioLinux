@@ -47,18 +47,30 @@ class DirectGlPanel : GLJPanel(openGlCapabilities()) {
 
     private val renderQueued = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
+    /* Set once initialize() succeeds; display() retries until then (the
+     * player may still be creating when the panel first realizes). */
+    private val initializedOk = AtomicBoolean(false)
 
     init {
+        println("[direct-video] GLJPanel created")
         isOpaque = true
         setSkipGLOrientationVerticalFlip(true)
 
         addGLEventListener(object : GLEventListener {
             override fun init(drawable: GLAutoDrawable) {
+                println("[direct-video] JOGL init: attaching renderer")
                 renderer?.initialize()
             }
 
             override fun display(drawable: GLAutoDrawable) {
                 val r = renderer ?: return
+                /* Late-attach retry: the player may not exist yet at the
+                 * first display() (create runs on a background thread).
+                 * Retry each display until initialize succeeds. */
+                if (!initializedOk.get()) {
+                    initializedOk.set(r.initialize())
+                    if (!initializedOk.get()) return
+                }
                 val fbo = IntArray(1)
                 drawable.gl.glGetIntegerv(GL.GL_FRAMEBUFFER_BINDING, fbo, 0)
                 r.render(

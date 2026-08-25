@@ -667,14 +667,24 @@ private fun ComposeVideoSurface(
              * attaches mpv's render context and starts deferred playback. */
             directGlPanel.attach(object : DirectGlPanel.Renderer {
                 override fun initialize(): Boolean {
-                    val st = controller.directAttachRenderContext()
-                    if (st == 1) {
-                        directAttached = true
-                        println("[direct-video] render context attached (JOGL), starting deferred playback")
-                        return controller.directStartPlayback()
+                    when (val st = controller.directAttachRenderContext()) {
+                        0 -> return false   /* player still creating — retry next display */
+                        -1 -> {
+                            directFailed = true
+                            readbackFallbackRequested = true
+                            println("[direct-video] JOGL attach FAILED — falling back to readback")
+                            return false
+                        }
                     }
-                    println("[direct-video] JOGL attach failed (st=$st) — falling back to readback")
-                    return false
+                    directAttached = true
+                    println("[direct-video] render context attached (JOGL), starting deferred playback")
+                    if (!controller.directStartPlayback()) {
+                        directFailed = true
+                        readbackFallbackRequested = true
+                        println("[direct-video] deferred playback start FAILED — falling back to readback")
+                        return false
+                    }
+                    return true
                 }
                 override fun render(framebuffer: Int, width: Int, height: Int) {
                     controller.directRenderFrame(framebuffer, width, height)
@@ -692,8 +702,11 @@ private fun ComposeVideoSurface(
                         startReadbackPipeline()
                         break
                     }
-                    val newSeq = controller.waitFrame(seq, 500)
-                    if (newSeq != seq) directGlPanel.requestRender()
+                    val newSeq = controller.waitFrame(seq, 200)
+                    /* Request renders until the panel initializes (retry the
+                     * late attach), then flow-paced: only on mpv signals. */
+                    if (newSeq != seq || !directAttached) directGlPanel.requestRender()
+                    if (newSeq != seq) seq = newSeq
                 }
             }
         } else {

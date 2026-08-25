@@ -591,11 +591,14 @@ kotlin {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 /* JOGL GLJPanel: direct-mode video surface (mpv renders into
-                 * the panel's offscreen FBO; JOGL composites via Swing). */
-                implementation("org.jogamp.jogl:jogl-all-main:2.6.0")
-                implementation("org.jogamp.jogl:jogl-all:2.6.0:natives-linux-amd64")
-                implementation("org.jogamp.gluegen:gluegen-rt-main:2.6.0")
-                implementation("org.jogamp.gluegen:gluegen-rt:2.6.0:natives-linux-amd64")
+                 * the panel's offscreen FBO; JOGL composites via Swing).
+                 * Real 2.6.0 jars (Maven Central's org.jogamp artifacts are
+                 * empty stubs) — copied from a working install; JOGL is
+                 * BSD-2-Clause + Apache-2.0. */
+                implementation(files("libs/jogl-all-2.6.0.jar"))
+                implementation(files("libs/jogl-all-2.6.0-natives-linux-amd64.jar"))
+                implementation(files("libs/gluegen-rt-2.6.0.jar"))
+                implementation(files("libs/gluegen-rt-2.6.0-natives-linux-amd64.jar"))
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.cio)
                 implementation("com.squareup.okhttp3:okhttp:4.12.0")

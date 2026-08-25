@@ -118,6 +118,7 @@ fun main(args: Array<String>) {
 
         Window(
             onCloseRequest = {
+                println("[lifecycle] window close requested")
                 P2pStreamingEngine.shutdown()
                 exitApplication()
             },
