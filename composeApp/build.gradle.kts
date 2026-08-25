@@ -590,6 +590,12 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                /* JOGL GLJPanel: direct-mode video surface (mpv renders into
+                 * the panel's offscreen FBO; JOGL composites via Swing). */
+                implementation("org.jogamp.jogl:jogl-all-main:2.6.0")
+                implementation("org.jogamp.jogl:jogl-all:2.6.0:natives-linux-amd64")
+                implementation("org.jogamp.gluegen:gluegen-rt-main:2.6.0")
+                implementation("org.jogamp.gluegen:gluegen-rt:2.6.0:natives-linux-amd64")
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.cio)
                 implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -90,6 +90,9 @@ internal object NativePlayerBridge {
     external fun directRenderFrame(handle: Long, fboId: Int, w: Int, h: Int): Boolean
     /** Direct mode: issue the deferred loadfile (after attach succeeded). */
     external fun directStartPlayback(handle: Long): Boolean
+    /** Direct mode: detach (free) mpv's render context — call with the panel's
+     *  GL context current (panel dispose path). Idempotent. */
+    external fun directDetachRenderContext(handle: Long)
     /** Report real frame presentation to mpv's display-sync clock
      *  (mpv_render_context_report_swap). Call at draw/present time. */
     external fun reportSwap(handle: Long)

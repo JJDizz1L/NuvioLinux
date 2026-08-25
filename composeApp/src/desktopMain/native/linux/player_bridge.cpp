@@ -3690,6 +3690,22 @@ JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_Nativ
     return player->directStartPlayback() ? JNI_TRUE : JNI_FALSE;
 }
 
+/* Direct mode: detach (free) the render context. Call with the creating GL
+ * context current (the panel's dispose path) — idempotent. */
+JNIEXPORT void JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directDetachRenderContext(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    MpvPlayer *player = get_player(handle);
+    if (!player) return;
+    PlayerUse use(player);
+    if (!use.ok) return;
+    if (player->renderCtx) {
+        p_mpv_render_context_set_update_callback(player->renderCtx, nullptr, nullptr);
+        p_mpv_render_context_free(player->renderCtx);
+        player->renderCtx = nullptr;
+    }
+}
+
 /* UI thread, skiko's GL context current: render into [fboId]. True when a new
  * frame was signaled (caller should re-snapshot). */
 JNIEXPORT jboolean JNICALL Java_com_nuviolinux_app_features_player_desktop_NativePlayerBridge_directRenderFrame(

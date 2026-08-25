@@ -363,6 +363,15 @@ internal class NativePlayerController(
             }
     }
 
+    /** Direct mode: detach mpv's render context (panel dispose path — call
+     *  with the panel's GL context current). */
+    fun directDetachRenderContext() {
+        if (disposed) return
+        val current = handle
+        if (current == 0L) return
+        runCatching { NativePlayerBridge.directDetachRenderContext(current) }
+    }
+
     /** Direct mode: true when mpv has a new frame queued (cheap update check;
      *  no rendering). Drives the flow-paced draw invalidation. */
     fun directHasUpdate(): Boolean {
