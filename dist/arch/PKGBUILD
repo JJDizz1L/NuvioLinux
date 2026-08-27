@@ -1,0 +1,84 @@
+# Maintainer: JJDizz1L <jjdizz1l@proton.me>
+# Upstream: NuvioMedia/NuvioDesktop — this package builds the upstream
+# release byte-by-byte; only pkgrel belongs to this repo (Arch stub).
+#
+# Build from local source: run `makepkg -si` from this directory.
+# Release builds (signed): `GPGKEY=6702DBAB3E41EDE1 makepkg -f --sign`.
+# The public key lives in nuvio-linux-gpg-key.asc next to this file.
+
+_upstream_tag="0.1.21-alpha"
+
+pkgname=nuvio-linux
+# Upstream VERSION_NAME with the hyphen stripped (makepkg forbids '-').
+pkgver=0.1.21alpha
+pkgrel=1
+pkgdesc="Nuvio desktop media player — upstream source packaged for Arch Linux"
+arch=('x86_64')
+url="https://github.com/NuvioMedia/NuvioDesktop"
+license=('GPL3')
+# Upstream loads the SYSTEM libmpv on Linux (its native/ runtime dirs are
+# macOS/Windows-only), hence mpv. Its Linux player bridge additionally
+# links webkit2gtk-4.1/gtk3/X11, so those are runtime deps too.
+depends=('mpv' 'webkit2gtk-4.1' 'gtk3' 'glibc' 'gcc-libs' 'libstdc++' 'libx11' 'libxcomposite' 'libxext' 'libxrender' 'libxi' 'libxtst')
+makedepends=('jdk21-temurin' 'mpv' 'webkit2gtk-4.1' 'gtk3' 'libxcomposite' 'libxext' 'gcc')
+install=nuvio-linux.install
+provides=("${pkgname}")
+conflicts=("${pkgname}")
+options=('!strip')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/NuvioMedia/NuvioDesktop/archive/refs/tags/${_upstream_tag}.tar.gz")
+sha256sums=('fe1b641b605fc0a1654043c47a3ac770081e931090e17fd17f388d1b879af4bb')
+
+# Baseline x86-64 JDK (Temurin 21 LTS, AUR) — set UNCONDITIONALLY: a stale
+# or -march=v3|v4 JAVA_HOME from the environment would otherwise silently
+# produce a non-portable bundled runtime. Edit here to override.
+export JAVA_HOME="/usr/lib/jvm/java-21-temurin"
+export GRADLE_OPTS="-Dorg.gradle.parallel=false"
+
+build() {
+  cd "NuvioDesktop-${_upstream_tag}"
+
+  # Upstream's generateRuntimeConfigs task requires local.properties
+  # (gitignored upstream, so the source tarball lacks it). Ship the PUBLIC
+  # Supabase client config (anon key — identical in every shipped binary,
+  # same values the AUR nuvio-linux-git package uses); never the
+  # maintainer's private keys.
+  cat > local.properties <<EOF
+NUVIO_SUPABASE_URL=https://api.nuvio.tv
+NUVIO_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiZWFzZSIsImlhdCI6MTc4MTUyMTM0NiwiZXhwIjoxOTM5MjAxMzQ2fQ.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI
+NUVIO_SUPABASE_FALLBACK_URL=https://api-two.nuvioapp.space
+EOF
+
+  ./gradlew :composeApp:createReleaseDistributable --no-daemon
+}
+
+package() {
+  local APP_DIR="${pkgdir}/opt/Nuvio"
+
+  # Self-contained jpackage app-image from the release variant
+  # (upstream packageName="Nuvio" -> app/Nuvio, launcher bin/Nuvio).
+  install -d "${APP_DIR}"
+  cp -r "${srcdir}/NuvioDesktop-${_upstream_tag}/composeApp/build/compose/binaries/main-release/app/Nuvio/." "${APP_DIR}/"
+
+  # Launcher on PATH
+  install -d "${pkgdir}/usr/bin"
+  ln -s /opt/Nuvio/bin/Nuvio "${pkgdir}/usr/bin/nuvio"
+
+  # Desktop entry + icon (upstream ships no Linux .desktop)
+  install -d "${pkgdir}/usr/share/applications" "${pkgdir}/usr/share/pixmaps"
+  cat > "${pkgdir}/usr/share/applications/nuvio.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Nuvio
+Comment=Nuvio desktop media player
+Exec=/opt/Nuvio/bin/Nuvio
+Icon=nuvio
+Terminal=false
+Categories=AudioVideo;Video;Player;
+EOF
+  install -Dm644 "${srcdir}/NuvioDesktop-${_upstream_tag}/composeApp/src/desktopMain/resources/icons/nuvio-app-icon-transparent.png" \
+    "${pkgdir}/usr/share/pixmaps/nuvio.png"
+
+  # License text
+  install -Dm644 "${srcdir}/NuvioDesktop-${_upstream_tag}/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

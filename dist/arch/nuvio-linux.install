@@ -1,0 +1,10 @@
+post_install() {
+  cat <<EOF
+Nuvio uses the system libmpv (provided by the 'mpv' package).
+Hardware decoding follows your mpv/vaapi/vdpau setup.
+EOF
+}
+
+post_upgrade() {
+  post_install "$1"
+}
