@@ -3,8 +3,9 @@
 # release byte-by-byte; only pkgrel belongs to this repo (Arch stub).
 #
 # Build from local source: run `makepkg -si` from this directory.
-# Release builds (signed): `GPGKEY=6702DBAB3E41EDE1 makepkg -f --sign`.
-# The public key lives in nuvio-linux-gpg-key.asc next to this file.
+# Release builds (signed): `GPGKEY=9201A54A09675CBEBAD08647EDDA55C8236D6C88 makepkg -f --sign`.
+# The public key lives in nuvio-linux-gpg-key.asc next to this file
+# (pseudonymous packaging key — see AGENTS.md).
 
 _upstream_tag="0.1.21-alpha"
 
