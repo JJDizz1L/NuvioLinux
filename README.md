@@ -4,135 +4,119 @@
   <br />
   <br />
 
-  [![Contributors][contributors-shield]][contributors-url]
-  [![Forks][forks-shield]][forks-url]
-  [![Stargazers][stars-shield]][stars-url]
-  [![Issues][issues-shield]][issues-url]
-  [![License][license-shield]][license-url]
-
-  <p>
-    A desktop media app for Windows, macOS, and Linux.
-    <br />
-    Browse, organize, and play media from sources you add.
-  </p>
+  **Arch Linux packaging for [Nuvio](https://github.com/NuvioMedia/NuvioDesktop)** —
+  the Nuvio desktop media player, built from the official upstream source.
 
 </div>
 
-## ⚠️ Alpha Software - Slow Development - Testers Only
+## What this repository is
 
-Nuvio Desktop is currently in alpha and is intended only for testers. It is under development and is not suitable for daily use.
+This repository contains **no application code**. It is a packaging-only
+repository that builds [NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop)
+— the official upstream Nuvio app — into a signed Arch Linux package.
 
-Expect breaking changes with every update. Features, settings, stored data, and compatibility may change or stop working without notice. Do not rely on this build as your primary media app, and report any issues you encounter during testing.
+- The package tracks the upstream source release **byte-for-byte**; the only
+  difference from upstream is the Arch `pkgrel` counter
+- AUR packages: [`nuvio-linux-bin`](https://aur.archlinux.org/packages/nuvio-linux-bin)
+  (prebuilt, from these releases) and
+  [`nuvio-linux-git`](https://aur.archlinux.org/packages/nuvio-linux-git)
+  (built from upstream's `Dev` branch)
+- Signed releases with `SHA256SUMS.txt` and the `PKGBUILD` used to build them
 
-## About
+## Why this fork was retired
 
-Nuvio Desktop is a media client for browsing metadata, managing collections and watch progress, downloading media, and playing streams from user-installed extensions or user-provided sources.
+NuvioLinux started as a fork of NuvioDesktop carrying Linux-specific playback
+work (a custom native mpv bridge), a rebrand, and extra package formats.
+Upstream has since implemented proper **libmpv** and **GTK3** integration
+natively — smoother, hardware-accelerated playback that passed all of our
+testing — which made the fork's divergent code redundant.
+
+The fork has been retired: this repository now follows upstream exactly, and
+every release is built from unmodified upstream source. Application
+development, issues, and the other platform packages (Windows, macOS, DEB,
+RPM, AppImage, Flatpak) all live
+[upstream](https://github.com/NuvioMedia/NuvioDesktop).
 
 ## Installation
 
-Download the latest desktop build from [GitHub Releases](https://github.com/NuvioMedia/NuvioDesktop/releases/latest).
-
-Release packages are provided for supported desktop platforms:
-
-- Windows: MSI installer
-- macOS: DMG installer
-- Linux: DEB package, when available
-
-## Development
+### From the AUR (recommended)
 
 ```bash
-git clone https://github.com/NuvioMedia/NuvioDesktop.git
-cd NuvioDesktop
+paru -S nuvio-linux-bin      # prebuilt package from these releases
+# or
+paru -S nuvio-linux-git      # built from the upstream Dev branch
 ```
 
-Run from source:
+### From a release (no AUR helper)
 
 ```bash
-./gradlew :composeApp:run
+curl -LO https://github.com/JJDizz1L/NuvioLinux-unofficial/releases/download/v0.1.21-alpha-1/nuvio-linux-gpg-key.asc
+sudo pacman-key --add nuvio-linux-gpg-key.asc
+sudo pacman-key --lsign-key 9201A54A09675CBEBAD08647EDDA55C8236D6C88
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux-unofficial/releases/download/v0.1.21-alpha-1/nuvio-linux-0.1.21alpha-1-x86_64.pkg.tar.zst
 ```
 
-On Windows PowerShell:
+Verify the download first with `SHA256SUMS.txt` and
+`gpg --verify *.pkg.tar.zst.sig *.pkg.tar.zst`.
 
-```powershell
-.\gradlew.bat :composeApp:run
-```
+## Building the package
 
-Build a release package for the current host:
+The PKGBUILD fetches the pinned upstream source tarball itself, so building
+from this repository is self-contained:
 
 ```bash
-./gradlew :composeApp:packageReleaseDistributionForCurrentOS
+git clone https://github.com/JJDizz1L/NuvioLinux-unofficial.git
+cd NuvioLinux-unofficial/dist/arch
+makepkg -si
 ```
 
-Platform-specific packaging:
+Build requirements:
 
-```bash
-# Windows
-./gradlew :composeApp:packageReleaseMsi --rerun-tasks
+- `base-devel`
+- `jdk21-temurin` (AUR) — baseline x86-64 Temurin 21, used to build the
+  bundled runtime. Do **not** substitute an `-march=v3/v4` JDK build; the
+  bundled runtime would not run on older CPUs.
+- `mpv`, `webkit2gtk-4.1`, `gtk3`, `libxcomposite`, `libxext` — headers for
+  the native player bridge, which is compiled at build time and links the
+  system libmpv
 
-# macOS
-./scripts/build-macos-release-dmgs.sh --package-only
+Runtime dependencies (`mpv`, `webkit2gtk-4.1`, `gtk3`, X11 libraries) are
+resolved by pacman automatically.
 
-# Linux
-./gradlew :composeApp:packageReleaseDeb
-```
+## Package details
 
-## Project Structure
+- Self-contained app image in `/opt/Nuvio` with a bundled Temurin 21 runtime;
+  launcher at `/usr/bin/nuvio`
+- Playback via **system libmpv** — hardware acceleration follows your mpv /
+  VA-API / VDPAU setup
+- P2P streaming works out of the box (bundled TorrServer)
+- Signed with packaging key
+  `9201A54A09675CBEBAD08647EDDA55C8236D6C88`
 
-- `composeApp/` contains the app code.
-- `composeApp/src/commonMain/` contains shared UI, features, repositories, and platform-agnostic logic.
-- `composeApp/src/desktopMain/` contains desktop-specific integrations.
-- `composeApp/Configuration/DesktopVersion.properties` contains the desktop release version and build code.
+## Releases
 
-## Versioning
+Tagged `v<upstream-version>-<pkgrel>` (e.g. `v0.1.21-alpha-1`). Each release
+ships the built package, its detached GPG signature, `SHA256SUMS.txt`, the
+signing public key, and the `PKGBUILD` used to build it.
 
-Desktop versions are set in `composeApp/Configuration/DesktopVersion.properties`.
+## Upstream
 
-```properties
-VERSION_NAME=0.1.1-alpha
-VERSION_CODE=1
-```
+Nuvio is developed upstream at
+[NuvioMedia/NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop) and is
+currently **alpha software** — expect breaking changes between releases.
+All application development, issue tracking, and non-Arch packages live
+there; this repository only adds Arch Linux packaging and follows upstream
+releases.
 
-Use the version helper when changing desktop release versions:
+## Legal
 
-```bash
-./scripts/set-version.sh --desktop 0.1.2-alpha --desktop-code 2
-./scripts/set-version.sh --show
-```
+Nuvio functions solely as a client-side interface for browsing metadata and
+playing media provided by user-installed extensions and/or user-provided
+sources. It does not host, store, or distribute any media content. For the
+full disclaimer and DMCA information, see
+[Nuvio's legal page](https://nuvioapp.space/legal).
 
-## Legal & DMCA
+## License
 
-Nuvio functions solely as a client-side interface for browsing metadata and playing media provided by user-installed extensions and/or user-provided sources. It is intended for content the user owns or is otherwise authorized to access.
+GPL-3.0, as upstream. See [LICENSE](LICENSE).
 
-Nuvio is not affiliated with any third-party extensions, catalogs, sources, or content providers. It does not host, store, or distribute any media content.
-
-For comprehensive legal information, including our full disclaimer, third-party extension policy, and DMCA/Copyright information, please visit our [Legal & Disclaimer Page](https://nuvioapp.space/legal).
-
-## Built With
-
-- Kotlin Multiplatform
-- Compose Multiplatform
-- Kotlin
-- Compose Desktop packaging
-- Native desktop player integrations
-
-## Star History
-
-<a href="https://www.star-history.com/#NuvioMedia/NuvioDesktop&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=NuvioMedia/NuvioDesktop&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=NuvioMedia/NuvioDesktop&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=NuvioMedia/NuvioDesktop&type=date&legend=top-left" />
- </picture>
-</a>
-
-<!-- MARKDOWN LINKS & IMAGES -->
-[contributors-shield]: https://img.shields.io/github/contributors/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[contributors-url]: https://github.com/NuvioMedia/NuvioDesktop/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[forks-url]: https://github.com/NuvioMedia/NuvioDesktop/network/members
-[stars-shield]: https://img.shields.io/github/stars/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[stars-url]: https://github.com/NuvioMedia/NuvioDesktop/stargazers
-[issues-shield]: https://img.shields.io/github/issues/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[issues-url]: https://github.com/NuvioMedia/NuvioDesktop/issues
-[license-shield]: https://img.shields.io/github/license/NuvioMedia/NuvioDesktop.svg?style=for-the-badge
-[license-url]: https://github.com/NuvioMedia/NuvioDesktop/blob/main/LICENSE
