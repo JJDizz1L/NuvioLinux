@@ -12,7 +12,7 @@ _upstream_tag="0.1.21-alpha"
 pkgname=nuvio-linux
 # Upstream VERSION_NAME with the hyphen stripped (makepkg forbids '-').
 pkgver=0.1.21alpha
-pkgrel=1
+pkgrel=2
 pkgdesc="Nuvio desktop media player — upstream source packaged for Arch Linux"
 arch=('x86_64')
 url="https://github.com/NuvioMedia/NuvioDesktop"
@@ -20,7 +20,9 @@ license=('GPL3')
 # Upstream loads the SYSTEM libmpv on Linux (its native/ runtime dirs are
 # macOS/Windows-only), hence mpv. Its Linux player bridge additionally
 # links webkit2gtk-4.1/gtk3/X11, so those are runtime deps too.
-depends=('mpv' 'webkit2gtk-4.1' 'gtk3' 'glibc' 'gcc-libs' 'libstdc++' 'libx11' 'libxcomposite' 'libxext' 'libxrender' 'libxi' 'libxtst')
+# NOTE: no 'libstdc++' — gcc-libs provides the C++ runtime on vanilla Arch;
+# a package by that name only exists in CachyOS repos (pkgrel 2 fix).
+depends=('mpv' 'webkit2gtk-4.1' 'gtk3' 'glibc' 'gcc-libs' 'libx11' 'libxcomposite' 'libxext' 'libxrender' 'libxi' 'libxtst')
 makedepends=('jdk21-temurin' 'mpv' 'webkit2gtk-4.1' 'gtk3' 'libxcomposite' 'libxext' 'gcc')
 install=nuvio-linux.install
 provides=("${pkgname}")
