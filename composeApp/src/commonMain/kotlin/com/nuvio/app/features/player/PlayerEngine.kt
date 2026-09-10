@@ -17,6 +17,7 @@ interface PlayerEngineController {
     fun setMuted(muted: Boolean) {}
     fun getAudioTracks(): List<AudioTrack>
     fun getSubtitleTracks(): List<SubtitleTrack>
+    fun applyAudioLanguagePreferences(languages: List<String>)
     fun selectAudioTrack(index: Int)
     fun selectSubtitleTrack(index: Int)
     fun setSubtitleUri(url: String)
@@ -92,6 +93,8 @@ data class PlayerControlsState(
     val playLabel: String = "Play",
     val pauseLabel: String = "Pause",
     val closeLabel: String = "Close player",
+    val mutedLabel: String = "",
+    val volumeLevelLabelFormat: String = "",
     val lockLabel: String = "Lock player controls",
     val unlockLabel: String = "Unlock player controls",
     val submitIntroLabel: String = "Submit Intro",

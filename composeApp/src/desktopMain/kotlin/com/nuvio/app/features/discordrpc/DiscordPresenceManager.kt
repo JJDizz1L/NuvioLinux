@@ -89,15 +89,25 @@ private fun String.toDiscordEpisodeLabel(): String {
 private fun PresenceSnapshot.toDiscordActivity(): DiscordActivity = when (this) {
     is PresenceSnapshot.Tab -> DiscordActivity(details = "Browsing ${tab.name}")
     is PresenceSnapshot.Details -> DiscordActivity(details = "Viewing $title")
-    is PresenceSnapshot.Player -> DiscordActivity(
-        details = if (isPlaying) "Watching: $title" else "Paused: $title",
-        state = episodeLabel?.toDiscordEpisodeLabel() ?: if (isPlaying) "Watching" else "Paused",
-        timestamps = if (isPlaying) {
-            // Discord expects Unix timestamps in seconds, not milliseconds.
-            DiscordActivityTimestamps(start = (System.currentTimeMillis() - positionMs) / 1_000L)
-        } else {
-            null
-        },
-        assets = posterUrl?.let { DiscordActivityAssets(largeImage = it, largeText = title) },
-    )
+    is PresenceSnapshot.Player -> {
+        val episode = episodeLabel?.toDiscordEpisodeLabel()
+        // Discord expects Unix timestamps in seconds, not milliseconds.
+        val startSecs = (System.currentTimeMillis() - positionMs) / 1_000L
+        DiscordActivity(
+            type = 3, // Watching -> "Watching …" instead of the default "Playing …" (game).
+            name = title, // Show the media title under the pseudo when the client honors it.
+            details = title, // Always keep the title here as a fallback for clients that ignore `name`.
+            state = if (isPlaying) episode else episode?.let { "$it • Paused" } ?: "Paused",
+            timestamps = if (isPlaying) {
+                // start + end -> Discord renders a live progress bar with time remaining.
+                DiscordActivityTimestamps(
+                    start = startSecs,
+                    end = if (durationMs > 0L) startSecs + durationMs / 1_000L else null,
+                )
+            } else {
+                null
+            },
+            assets = posterUrl?.let { DiscordActivityAssets(largeImage = it, largeText = title) },
+        )
+    }
 }

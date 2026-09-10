@@ -302,6 +302,7 @@ private class DesktopStubPlayerController : PlayerEngineController {
     override fun setPlaybackSpeed(speed: Float) = Unit
     override fun getAudioTracks(): List<AudioTrack> = emptyList()
     override fun getSubtitleTracks(): List<SubtitleTrack> = emptyList()
+    override fun applyAudioLanguagePreferences(languages: List<String>) = Unit
     override fun selectAudioTrack(index: Int) = Unit
     override fun selectSubtitleTrack(index: Int) = Unit
     override fun setSubtitleUri(url: String) = Unit

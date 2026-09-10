@@ -32,6 +32,7 @@ import com.nuvio.app.features.player.desktop.applyNativeDesktopWindowChrome
 import com.nuvio.app.features.player.desktop.installDesktopAppFullscreenShortcuts
 import com.nuvio.app.features.player.desktop.preloadNativePlayerBridgeAsync
 import com.nuvio.app.features.player.desktop.registerDesktopAppFullscreenToggle
+import com.nuvio.app.features.player.desktop.trackMaximizedBoundsForCurrentScreen
 import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.settings.AppIconRepository
 import com.nuvio.app.features.settings.applyDesktopRendererPreference
@@ -196,9 +197,11 @@ fun main(args: Array<String>) {
                     },
                 )
                 val uninstallFullscreenShortcuts = installDesktopAppFullscreenShortcuts(window)
+                val untrackMaximizedBounds = window.trackMaximizedBoundsForCurrentScreen()
                 onDispose {
                     fullscreenController.dispose(window)
                     uninstallFullscreenShortcuts()
+                    untrackMaximizedBounds()
                     unregisterFullscreenToggle()
                 }
             }

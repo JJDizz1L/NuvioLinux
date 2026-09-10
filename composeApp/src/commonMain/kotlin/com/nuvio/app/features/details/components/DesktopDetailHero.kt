@@ -2,6 +2,7 @@ package com.nuvio.app.features.details.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -48,10 +49,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.core.ui.NuvioAsyncImage as AsyncImage
 import com.nuvio.app.core.ui.NuvioDesktopImageScaling
 import com.nuvio.app.core.ui.NuvioTokens
@@ -65,6 +69,7 @@ import com.nuvio.app.core.ui.isFullscreenActionSupported
 import com.nuvio.app.core.ui.WideDesktopViewportAspectRatio
 import com.nuvio.app.features.details.MetaDetails
 import com.nuvio.app.features.details.formatRuntimeForDisplay
+import com.nuvio.app.features.mdblist.MdbListMetadataService.PROVIDER_IMDB
 import com.nuvio.app.features.tmdb.originalTmdbImageUrl
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.detail_logo_content_description
@@ -72,6 +77,9 @@ import nuvio.composeapp.generated.resources.hero_add_to_library
 import nuvio.composeapp.generated.resources.hero_mark_unwatched
 import nuvio.composeapp.generated.resources.hero_mark_watched
 import nuvio.composeapp.generated.resources.hero_remove_from_library
+import nuvio.composeapp.generated.resources.rating_imdb
+import nuvio.composeapp.generated.resources.source_imdb
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
@@ -389,6 +397,9 @@ private fun DesktopHeroMetaRow(meta: MetaDetails) {
         desktopSeasonCountLabel(meta)?.let(::add)
         formatRuntimeForDisplay(meta.runtime)?.let(::add)
     }
+    val hasMdbImdbRating = meta.externalRatings.any { it.source == PROVIDER_IMDB }
+    val validImdbRating = meta.imdbRating
+        ?.takeIf { raw -> raw.toDoubleOrNull()?.let { it > 0.0 } == true }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(space.s16),
@@ -426,5 +437,48 @@ private fun DesktopHeroMetaRow(meta: MetaDetails) {
                 )
             }
         }
+        if (validImdbRating != null && !hasMdbImdbRating) {
+            val imdbTextStyle = MaterialTheme.typography.titleSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.sp,
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ImdbRatingSourceLabel(
+                    storeTextStyle = imdbTextStyle,
+                    storeTextColor = ImdbYellow,
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = validImdbRating,
+                    style = imdbTextStyle,
+                    color = ImdbYellow,
+                )
+            }
+        }
     }
 }
+
+@Composable
+private fun ImdbRatingSourceLabel(
+    storeTextStyle: TextStyle,
+    storeTextColor: Color,
+) {
+    if (AppFeaturePolicy.imdbRatingLogoEnabled) {
+        Image(
+            painter = painterResource(Res.drawable.rating_imdb),
+            contentDescription = stringResource(Res.string.source_imdb),
+            modifier = Modifier.size(width = 30.dp, height = 16.dp),
+        )
+    } else {
+        Text(
+            text = stringResource(Res.string.source_imdb),
+            style = storeTextStyle,
+            color = storeTextColor,
+            maxLines = 1,
+        )
+    }
+}
+
+private val ImdbYellow = Color(0xFFF5C518)

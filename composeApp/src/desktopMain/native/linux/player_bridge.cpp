@@ -635,13 +635,24 @@ void compositeOverlay(Player *player) {
             // resize so the widget allocation follows on the forced clock tick.
             // No early return: a transiently mis-sized snapshot beats a frozen
             // overlay, and returning here would skip the clock forcing.
-            gdk_window_resize(gw, hostWa.width, hostWa.height);
-            gtk_window_resize(GTK_WINDOW(player->gtkWindow), hostWa.width, hostWa.height);
+            // GDK sizes are logical: it multiplies by the window's scale factor
+            // when it talks to X, while hostWa/ovWa0 above are X device pixels.
+            // Passing device pixels here made the overlay scale-times too large
+            // on a HiDPI output (3072x1782 host -> 6144x3564 overlay at scale 2),
+            // so the mismatch could never settle: every tick resized, took the
+            // overlay down and repushed it a tick later — a continuous
+            // add/remove cycle that reads on screen as flicker.
+            int ovScale = gdk_window_get_scale_factor(gw);
+            if (ovScale < 1) ovScale = 1;
+            const int logicalW = hostWa.width / ovScale;
+            const int logicalH = hostWa.height / ovScale;
+            gdk_window_resize(gw, logicalW, logicalH);
+            gtk_window_resize(GTK_WINDOW(player->gtkWindow), logicalW, logicalH);
             // The X window now resizes, but the WebKit view renders at the GTK
             // widget *allocation* size, and allocations are applied in the same
             // stalled layout phase — the page would stay at the old size
             // indefinitely. Allocate synchronously so the viewport follows now.
-            GtkAllocation alloc = {0, 0, hostWa.width, hostWa.height};
+            GtkAllocation alloc = {0, 0, logicalW, logicalH};
             gtk_widget_size_allocate(player->gtkWindow, &alloc);
             // Take the old-size overlay down while the sizes disagree: painting
             // it 1:1 over a differently-sized window garbles the controls. The
@@ -1124,10 +1135,14 @@ gboolean createWebviewOnGtk(gpointer data) {
     Display *dpy = GDK_WINDOW_XDISPLAY(gdkWin);
     Window gtkXid = GDK_WINDOW_XID(gdkWin);
 
-    // size to the host window
+    // size to the host window (X device pixels -> GDK logical pixels, so the
+    // overlay comes up at the host's size on a HiDPI output instead of
+    // scale-times too large; see the resize in compositeOverlay)
     XWindowAttributes attrs;
     if (XGetWindowAttributes(dpy, s->hostXid, &attrs)) {
-        gtk_window_resize(GTK_WINDOW(win), attrs.width, attrs.height);
+        int initScale = gdk_window_get_scale_factor(gdkWin);
+        if (initScale < 1) initScale = 1;
+        gtk_window_resize(GTK_WINDOW(win), attrs.width / initScale, attrs.height / initScale);
     }
 
     // Reparent THROUGH GDK (not raw XReparentWindow): GDK must know the window is

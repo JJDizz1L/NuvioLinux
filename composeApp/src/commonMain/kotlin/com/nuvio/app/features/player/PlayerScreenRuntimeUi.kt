@@ -74,6 +74,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 posterUrl = runtime.poster,
                 isPlaying = playbackSnapshot.isPlaying,
                 positionMs = playbackSnapshot.positionMs,
+                durationMs = playbackSnapshot.durationMs,
             ),
         )
     }
@@ -263,6 +264,8 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         playLabel = stringResource(Res.string.detail_btn_play),
         pauseLabel = stringResource(Res.string.compose_action_pause),
         closeLabel = stringResource(Res.string.compose_player_close),
+        mutedLabel = stringResource(Res.string.compose_player_muted),
+        volumeLevelLabelFormat = stringResource(Res.string.compose_player_volume_level, "%s"),
         lockLabel = stringResource(Res.string.compose_player_lock_controls),
         unlockLabel = stringResource(Res.string.compose_player_unlock_controls),
         submitIntroLabel = stringResource(Res.string.submit_intro_action),
@@ -502,6 +505,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 },
                 onSnapshot = { snapshot ->
                     playbackSnapshot = snapshot
+                    refreshAudioTracksIfChanged()
                     if (!snapshot.isLoading) initialLoadCompleted = true
                     if (snapshot.isEnded) {
                         shouldPlay = false
@@ -1704,7 +1708,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
         },
         onAddonSubtitleSelected = { addon ->
             isUserExplicitSubtitleSelection = true
-            selectedAddonSubtitleId = addon.id
+            selectedAddonSubtitleId = addon.selectionKey
             selectedSubtitleIndex = -1
             useCustomSubtitles = true
             preferredSubtitleSelectionApplied = true

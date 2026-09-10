@@ -19,6 +19,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.io.path.createDirectories
 import kotlin.system.exitProcess
@@ -36,7 +37,18 @@ actual object AppUpdaterPlatform {
     private val store = DesktopStorage.store(desktopUpdaterPreferencesName)
     actual val isDebugBuild: Boolean = false
 
-    actual val isSupported: Boolean = currentOs != DesktopUpdaterOs.UNKNOWN
+    // Linux ships four package formats and the running app is the only place
+    // that can tell which one it was installed from, so the format is resolved
+    // once and then drives both the asset choice and the install command.
+    private val linuxInstallMethod: LinuxInstallMethod by lazy {
+        if (currentOs == DesktopUpdaterOs.LINUX) detectLinuxInstallMethod() else LinuxInstallMethod.UNKNOWN
+    }
+
+    // A Flatpak cannot install anything for itself: the sandbox has no write
+    // access to /app and the manifest grants no talk-name for the host Flatpak
+    // service, so the update belongs to the user's store, not to this dialog.
+    actual val isSupported: Boolean
+        get() = currentOs != DesktopUpdaterOs.UNKNOWN && linuxInstallMethod != LinuxInstallMethod.FLATPAK
 
     actual val releaseSource: AppUpdateReleaseSource = AppUpdateReleaseSource(
         owner = "NuvioMedia",
@@ -47,7 +59,7 @@ actual object AppUpdaterPlatform {
     )
 
     actual val assetSelector: AppUpdateAssetSelector
-        get() = currentOs.assetSelector
+        get() = currentOs.assetSelector(linuxInstallMethod)
 
     actual val currentVersionName: String = AppVersionConfig.DESKTOP_VERSION_NAME
 
@@ -139,7 +151,12 @@ actual object AppUpdaterPlatform {
         val command = when (currentOs) {
             DesktopUpdaterOs.WINDOWS -> windowsInstallerCommand(updateFile)
             DesktopUpdaterOs.MACOS -> listOf("open", updateFile.absolutePath)
-            DesktopUpdaterOs.LINUX -> listOf("xdg-open", updateFile.absolutePath)
+            DesktopUpdaterOs.LINUX -> linuxInstallerCommand(
+                method = linuxInstallMethod,
+                updateFile = updateFile,
+                appImagePath = System.getenv(appImageEnvName),
+                currentPid = ProcessHandle.current().pid(),
+            )
             DesktopUpdaterOs.UNKNOWN -> error("Desktop updates are not supported on this operating system.")
         }
         ProcessBuilder(command).start()
@@ -159,28 +176,27 @@ private enum class DesktopUpdaterOs {
     LINUX,
     UNKNOWN;
 
-    val assetSelector: AppUpdateAssetSelector
-        get() {
-            val archFragments = desktopArchitectureFragments()
-            return when (this) {
-                WINDOWS -> AppUpdateAssetSelector(
-                    fileExtensions = listOf(".msi", ".exe"),
-                    preferredNameFragments = archFragments + listOf("windows", "win"),
-                    fallbackNameFragments = listOf("universal", "all"),
-                )
-                MACOS -> AppUpdateAssetSelector(
-                    fileExtensions = listOf(".dmg", ".pkg"),
-                    preferredNameFragments = archFragments + listOf("macos", "mac", "darwin"),
-                    fallbackNameFragments = listOf("universal", "all"),
-                )
-                LINUX -> AppUpdateAssetSelector(
-                    fileExtensions = listOf(".deb", ".AppImage"),
-                    preferredNameFragments = archFragments + listOf("linux"),
-                    fallbackNameFragments = listOf("universal", "all"),
-                )
-                UNKNOWN -> AppUpdateAssetSelector(fileExtensions = emptyList())
-            }
+    fun assetSelector(linuxInstallMethod: LinuxInstallMethod): AppUpdateAssetSelector {
+        val archFragments = desktopArchitectureFragments()
+        return when (this) {
+            WINDOWS -> AppUpdateAssetSelector(
+                fileExtensions = listOf(".msi", ".exe"),
+                preferredNameFragments = archFragments + listOf("windows", "win"),
+                fallbackNameFragments = listOf("universal", "all"),
+            )
+            MACOS -> AppUpdateAssetSelector(
+                fileExtensions = listOf(".dmg", ".pkg"),
+                preferredNameFragments = archFragments + listOf("macos", "mac", "darwin"),
+                fallbackNameFragments = listOf("universal", "all"),
+            )
+            LINUX -> AppUpdateAssetSelector(
+                fileExtensions = linuxUpdateFileExtensions(linuxInstallMethod),
+                preferredNameFragments = archFragments + listOf("linux"),
+                fallbackNameFragments = listOf("universal", "all"),
+            )
+            UNKNOWN -> AppUpdateAssetSelector(fileExtensions = emptyList())
         }
+    }
 
     companion object {
         fun current(): DesktopUpdaterOs {
@@ -212,3 +228,130 @@ internal fun windowsInstallerCommand(updateFile: File): List<String> {
 
     return listOf("msiexec", "/i", updateFile.absolutePath)
 }
+
+internal enum class LinuxInstallMethod {
+    APP_IMAGE,
+    FLATPAK,
+    RPM,
+    DEB,
+    UNKNOWN,
+}
+
+internal const val appImageEnvName = "APPIMAGE"
+private const val flatpakIdEnvName = "FLATPAK_ID"
+private const val flatpakInfoPath = "/.flatpak-info"
+private const val jpackageAppPathProperty = "jpackage.app-path"
+private const val javaExecutableName = "java"
+private const val packageQueryTimeoutSeconds = 3L
+private const val appImageExitWaitTicks = 100
+
+// A release carries every Linux format at once, so the extension list has to be
+// the one the running install can actually consume. An unresolved install keeps
+// the previous list, leaving source and tarball builds no worse off than before.
+internal fun linuxUpdateFileExtensions(method: LinuxInstallMethod): List<String> = when (method) {
+    LinuxInstallMethod.APP_IMAGE -> listOf(".AppImage")
+    LinuxInstallMethod.RPM -> listOf(".rpm")
+    LinuxInstallMethod.DEB -> listOf(".deb")
+    LinuxInstallMethod.FLATPAK -> emptyList()
+    LinuxInstallMethod.UNKNOWN -> listOf(".deb", ".AppImage")
+}
+
+internal fun resolveLinuxInstallMethod(
+    appImagePath: String?,
+    appImageExists: Boolean,
+    flatpakId: String?,
+    flatpakInfoExists: Boolean,
+    launcherPath: String?,
+    isOwnedByRpm: (String) -> Boolean,
+    isOwnedByDpkg: (String) -> Boolean,
+): LinuxInstallMethod {
+    if (!appImagePath.isNullOrBlank() && appImageExists) return LinuxInstallMethod.APP_IMAGE
+    if (!flatpakId.isNullOrBlank() || flatpakInfoExists) return LinuxInstallMethod.FLATPAK
+
+    val path = launcherPath?.takeIf { it.isNotBlank() } ?: return LinuxInstallMethod.UNKNOWN
+    if (isOwnedByRpm(path)) return LinuxInstallMethod.RPM
+    if (isOwnedByDpkg(path)) return LinuxInstallMethod.DEB
+    return LinuxInstallMethod.UNKNOWN
+}
+
+private fun detectLinuxInstallMethod(): LinuxInstallMethod {
+    val appImagePath = System.getenv(appImageEnvName)
+    return resolveLinuxInstallMethod(
+        appImagePath = appImagePath,
+        appImageExists = !appImagePath.isNullOrBlank() && File(appImagePath).exists(),
+        flatpakId = System.getenv(flatpakIdEnvName),
+        flatpakInfoExists = File(flatpakInfoPath).exists(),
+        launcherPath = linuxLauncherPath(),
+        isOwnedByRpm = { path -> packageQuerySucceeds(listOf("rpm", "-qf", path)) },
+        isOwnedByDpkg = { path -> packageQuerySucceeds(listOf("dpkg", "-S", path)) },
+    )
+}
+
+private fun linuxLauncherPath(): String? = linuxLauncherPathFrom(
+    jpackageAppPath = System.getProperty(jpackageAppPathProperty),
+    processCommand = ProcessHandle.current().info().command().orElse(null),
+)
+
+// jpackage records the launcher it started, which is the only path that belongs
+// to this app's package. Without it the process command is the JVM itself, and
+// the JVM belongs to the distribution's own java package -- asking rpm or dpkg
+// who owns that would report a packaged install that is not Nuvio, so a source
+// or tarball run is left unresolved instead.
+internal fun linuxLauncherPathFrom(
+    jpackageAppPath: String?,
+    processCommand: String?,
+): String? {
+    jpackageAppPath?.takeIf { it.isNotBlank() }?.let { return it }
+
+    return processCommand?.takeIf { it.isNotBlank() && File(it).name != javaExecutableName }
+}
+
+private fun packageQuerySucceeds(command: List<String>): Boolean = runCatching {
+    val process = ProcessBuilder(command)
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+        .start()
+    if (!process.waitFor(packageQueryTimeoutSeconds, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        return@runCatching false
+    }
+    process.exitValue() == 0
+}.getOrDefault(false)
+
+internal fun linuxInstallerCommand(
+    method: LinuxInstallMethod,
+    updateFile: File,
+    appImagePath: String?,
+    currentPid: Long,
+): List<String> {
+    if (method == LinuxInstallMethod.APP_IMAGE && !appImagePath.isNullOrBlank()) {
+        return listOf("sh", "-c", appImageReplaceScript(updateFile.absolutePath, appImagePath, currentPid))
+    }
+
+    return listOf("xdg-open", updateFile.absolutePath)
+}
+
+// An AppImage has no installer: updating one means replacing the file that is
+// running. The copy waits for this process to exit first, both because the
+// running image is still mounted from that file and because a half-written one
+// would leave nothing to start. When the image sits somewhere this user cannot
+// write, the download is handed to the desktop rather than failing in silence.
+internal fun appImageReplaceScript(
+    downloadedPath: String,
+    appImagePath: String,
+    currentPid: Long,
+): String {
+    val downloaded = singleQuote(downloadedPath)
+    val target = singleQuote(appImagePath)
+    return buildString {
+        append("i=0; ")
+        append("while [ \$i -lt $appImageExitWaitTicks ] && kill -0 $currentPid 2>/dev/null; do ")
+        append("sleep 0.1; i=\$((i+1)); ")
+        append("done; ")
+        append("if cp -f -- $downloaded $target; then ")
+        append("chmod +x -- $target; rm -f -- $downloaded; exec $target; ")
+        append("else xdg-open $downloaded; fi")
+    }
+}
+
+private fun singleQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"

@@ -66,9 +66,11 @@ import com.nuvio.app.core.i18n.localizedShortMonthName
 import com.nuvio.app.core.ui.NuvioBackButton
 import com.nuvio.app.core.ui.NuvioDesktopVerticalScrollbar
 import com.nuvio.app.core.ui.desktopPageHorizontalPaddingForWidth
+import com.nuvio.app.core.ui.SkeletonPosterRow
 import com.nuvio.app.core.ui.landscapePosterHeightForWidth
 import com.nuvio.app.core.ui.landscapePosterWidth
 import com.nuvio.app.core.ui.rememberPosterCardStyleUiState
+import com.nuvio.app.core.ui.skeleton
 import com.nuvio.app.features.details.components.DetailPosterRailSection
 import com.nuvio.app.features.details.components.ExpandableDescription
 import com.nuvio.app.features.home.MetaPreview
@@ -877,7 +879,7 @@ private fun PersonDetailSkeleton(
                     skeletonPosterWidth = skeletonPosterWidth,
                     skeletonPosterHeight = skeletonPosterHeight,
                     skeletonPosterCornerRadius = posterCardStyle.cornerRadiusDp.dp,
-                    showPosterLabels = !isLandscapeShelfMode,
+                    showPosterLabels = !isLandscapeShelfMode && !posterCardStyle.hideLabelsEnabled,
                 )
             } else {
                 Column(
@@ -898,8 +900,7 @@ private fun PersonDetailSkeleton(
                             modifier = Modifier
                                 .then(avatarSharedElementModifier)
                                 .size(140.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                .skeleton(CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
                             if (!profilePhoto.isNullOrBlank()) {
@@ -969,43 +970,19 @@ private fun PersonDetailSkeleton(
                             modifier = Modifier
                                 .width(120.dp)
                                 .height(18.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                .skeleton(RoundedCornerShape(4.dp)),
                         )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        repeat(4) {
-                            Column(modifier = Modifier.width(skeletonPosterWidth)) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(skeletonPosterWidth)
-                                        .height(skeletonPosterHeight)
-                                        .clip(RoundedCornerShape(posterCardStyle.cornerRadiusDp.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                )
-                                if (!isLandscapeShelfMode) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    SkeletonLine(
-                                        widthFraction = 1f,
-                                        height = 16.dp,
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    SkeletonLine(
-                                        widthFraction = 0.56f,
-                                        height = 12.dp,
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    SkeletonPosterRow(
+                        width = skeletonPosterWidth,
+                        height = skeletonPosterHeight,
+                        cornerRadius = posterCardStyle.cornerRadiusDp.dp,
+                        horizontalPadding = 20.dp,
+                        showLabels = !isLandscapeShelfMode && !posterCardStyle.hideLabelsEnabled,
+                    )
 
                     Spacer(modifier = Modifier.height(32.dp))
                 }
@@ -1053,9 +1030,8 @@ private fun WidePersonDetailSkeleton(
                     modifier = Modifier
                         .then(avatarSharedElementModifier)
                         .size(148.dp)
-                        .clip(CircleShape)
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.40f), CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .skeleton(CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (!profilePhoto.isNullOrBlank()) {
@@ -1152,29 +1128,15 @@ private fun WideSkeletonPosterRail(
             modifier = Modifier
                 .width(120.dp)
                 .height(18.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .skeleton(RoundedCornerShape(4.dp)),
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            repeat(6) {
-                Column(modifier = Modifier.width(skeletonPosterWidth)) {
-                    Box(
-                        modifier = Modifier
-                            .width(skeletonPosterWidth)
-                            .height(skeletonPosterHeight)
-                            .clip(RoundedCornerShape(skeletonPosterCornerRadius))
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                    )
-                    if (showPosterLabels) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        SkeletonLine(widthFraction = 1f, height = 16.dp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        SkeletonLine(widthFraction = 0.56f, height = 12.dp)
-                    }
-                }
-            }
-        }
+        SkeletonPosterRow(
+            width = skeletonPosterWidth,
+            height = skeletonPosterHeight,
+            cornerRadius = skeletonPosterCornerRadius,
+            showLabels = showPosterLabels,
+        )
     }
 }
 
@@ -1187,8 +1149,7 @@ private fun SkeletonLine(
         modifier = Modifier
             .fillMaxWidth(widthFraction)
             .height(height)
-            .clip(RoundedCornerShape(4.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .skeleton(RoundedCornerShape(4.dp)),
     )
 }
 

@@ -96,10 +96,13 @@ internal fun AppEnvironment(content: @Composable () -> Unit) {
         ThemeSettingsRepository.amoledEnabled
     }.collectAsStateWithLifecycle()
 
+    val customThemeColors by ThemeSettingsRepository.customThemeColors.collectAsStateWithLifecycle()
+
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         NuvioTheme(
             appTheme = selectedTheme,
             amoled = amoledEnabled,
+            customThemeColors = customThemeColors,
             desktopUiScale = desktopUiScaleForWindow(maxWidth.value, maxHeight.value),
         ) {
             content()
