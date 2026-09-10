@@ -50,10 +50,10 @@ paru -S nuvio-linux-git      # built from the upstream Dev branch
 ### From a release (no AUR helper)
 
 ```bash
-curl -LO https://github.com/JJDizz1L/NuvioLinux-unofficial/releases/download/v0.1.21-alpha-1/nuvio-linux-gpg-key.asc
+curl -LO https://github.com/JJDizz1L/NuvioLinux-unofficial/releases/download/v0.1.23alpha-1/nuvio-linux-gpg-key.asc
 sudo pacman-key --add nuvio-linux-gpg-key.asc
 sudo pacman-key --lsign-key 9201A54A09675CBEBAD08647EDDA55C8236D6C88
-sudo pacman -U https://github.com/JJDizz1L/NuvioLinux-unofficial/releases/download/v0.1.21-alpha-1/nuvio-linux-0.1.21alpha-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/JJDizz1L/NuvioLinux-unofficial/releases/download/v0.1.23alpha-1/nuvio-linux-0.1.23alpha-1-x86_64.pkg.tar.zst
 ```
 
 Verify the download first with `SHA256SUMS.txt` and
@@ -95,7 +95,7 @@ resolved by pacman automatically.
 
 ## Releases
 
-Tagged `v<upstream-version>-<pkgrel>` (e.g. `v0.1.21-alpha-1`). Each release
+Tagged `v<upstream-version-without-hyphens>-<pkgrel>` (e.g. `v0.1.23alpha-1`). Each release
 ships the built package, its detached GPG signature, `SHA256SUMS.txt`, the
 signing public key, and the `PKGBUILD` used to build it.
 
